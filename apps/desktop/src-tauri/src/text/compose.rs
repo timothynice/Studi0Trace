@@ -22,10 +22,19 @@ fn num(v: f32) -> String {
     }
 }
 
+/// The group, and the ids of the lines it carries.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Composed {
+    pub group: String,
+    pub lines: Vec<String>,
+}
+
 /// `<g id="text">…</g>` for the plan's matched, enabled lines: one path per line in the ink colour, and the hidden
-/// text when asked. A line whose font cannot be located is skipped.
-pub fn text_group(plan: &TextPlan, hidden_text: bool, catalog: &Catalog, cache_dir: &Path) -> String {
+/// text when asked. A line whose font cannot be located or loaded is skipped, and is not in `lines`: the caller
+/// paints out only what is composed.
+pub fn compose_group(plan: &TextPlan, hidden_text: bool, catalog: &Catalog, cache_dir: &Path) -> Composed {
     let mut out = String::from("<g id=\"text\">");
+    let mut lines = Vec::new();
     for line in &plan.lines {
         if line.status != Status::Matched || !line.enabled {
             continue;
@@ -37,6 +46,7 @@ pub fn text_group(plan: &TextPlan, hidden_text: bool, catalog: &Catalog, cache_d
         let d = path_data(&shaped, fit);
         let [r, g, b] = line.colour;
         out.push_str(&format!("<path d=\"{d}\" fill=\"#{r:02x}{g:02x}{b:02x}\" data-line=\"{}\"/>", line.id));
+        lines.push(line.id.clone());
         if hidden_text {
             out.push_str(&format!(
                 "<text x=\"{}\" y=\"{}\" font-family=\"{}\" font-size=\"{}\" letter-spacing=\"{}\" fill=\"none\" pointer-events=\"none\" data-line=\"{}\">{}</text>",
@@ -51,5 +61,10 @@ pub fn text_group(plan: &TextPlan, hidden_text: bool, catalog: &Catalog, cache_d
         }
     }
     out.push_str("</g>");
-    out
+    Composed { group: out, lines }
+}
+
+/// `compose_group`'s group alone.
+pub fn text_group(plan: &TextPlan, hidden_text: bool, catalog: &Catalog, cache_dir: &Path) -> String {
+    compose_group(plan, hidden_text, catalog, cache_dir).group
 }

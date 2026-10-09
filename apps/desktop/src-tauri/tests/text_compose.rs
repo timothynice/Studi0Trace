@@ -149,3 +149,270 @@ fn an_unknown_line_is_a_404_a_forced_font_is_matched_and_plans_are_kept_by_hash(
     assert!(plans.cancel("img") && !plans.cancel("img"));
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+// ---- fix round 1: the generations, the refinements and the composed lines ----
+
+mod round1 {
+    use super::{cache_with_fixture_font, catalog, plan as sample_plan, FixtureFinder};
+    use std::path::{Path, PathBuf};
+    use std::sync::{Arc, Mutex};
+    use studi0trace_desktop::redraw::Source as Img;
+    use studi0trace_desktop::text::catalog::{cache_name, Catalog};
+    use studi0trace_desktop::text::compose::compose_group;
+    use studi0trace_desktop::text::reader::{Finder, LineBox, ReadFuture, Reader, Reading};
+    use studi0trace_desktop::text::{bytes_hash, plan, set_line, Class, Deps, FontRef, LineChange, Phase, Plans, Source, Status, FIT_ACCEPT};
+
+    const FONTS: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/text/fonts");
+    const FIXTURES: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/text");
+
+    fn font(family: &str, weight: u16) -> FontRef {
+        FontRef { family: family.into(), weight, italic: false, source: Source::Google }
+    }
+
+    /// A cache folder holding `file` under the cache name of each (family, weight), and an index of every family
+    /// in `index` (order by name is the shortlist's order: every family's widths are zero), in a fresh folder.
+    fn cache(files: &[(&str, &str, u16)]) -> PathBuf {
+        static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let dir = std::env::temp_dir().join(format!("studi0trace-compose-r1-{}-{}", std::process::id(), NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)));
+        std::fs::create_dir_all(&dir).unwrap();
+        for (file, family, weight) in files {
+            std::fs::copy(Path::new(FONTS).join(file), dir.join(cache_name(&font(family, *weight)))).unwrap();
+        }
+        dir
+    }
+
+    fn index(families: &[(&str, u16)]) -> Catalog {
+        let widths = vec!["0"; 62].join(",");
+        let fams: Vec<String> = families.iter().map(|(n, w)| format!(r#"{{"name":"{n}","category":"Sans Serif","variants":[{{"weight":{w},"italic":false}}],"features":{{"cap":0.7,"x":0.5,"stem":0.1,"widths":[{widths}]}}}}"#)).collect();
+        Catalog::from_index(&format!(r#"{{"families":[{}]}}"#, fams.join(",")), fontdb::Database::new())
+    }
+
+    fn image(name: &str) -> Arc<Img> {
+        Arc::new(Img::decode(&std::fs::read(format!("{FIXTURES}/{name}")).unwrap()).unwrap())
+    }
+
+    fn line_box(img: &Img, top: f32, bottom: f32) -> LineBox {
+        LineBox { quad: [[20.0, top], [img.width as f32 - 20.0, top], [img.width as f32 - 20.0, bottom], [20.0, bottom]], string: "EST. 2026".into(), confidence: 0.9 }
+    }
+
+    fn deps(finder: Arc<dyn Finder>, reader: Option<Arc<dyn Reader>>, catalog: Catalog, dir: &Path) -> Deps {
+        Deps { finder, reader, catalog: Arc::new(catalog), fonts: None, cache_dir: dir.to_path_buf(), hidden_text: false }
+    }
+
+    fn run_plan(img: &Arc<Img>, deps: &Deps) -> studi0trace_desktop::text::Planned {
+        tauri::async_runtime::block_on(plan("img", img.clone(), deps.clone(), Arc::new(|_: Phase| {}))).unwrap()
+    }
+
+    fn edit(img: &Arc<Img>, planned: &studi0trace_desktop::text::Planned, id: &str, change: LineChange, deps: &Deps) -> studi0trace_desktop::text::Planned {
+        tauri::async_runtime::block_on(set_line(img.clone(), planned, id, change, deps.clone())).unwrap()
+    }
+
+    #[test]
+    fn generations_never_repeat_and_a_cancelled_plan_cannot_store_its_result() {
+        let (dir, f) = cache_with_fixture_font();
+        let cat = catalog();
+        let make = || {
+            let mut p = sample_plan(&f, true, Status::Matched);
+            p.image = "img".into();
+            studi0trace_desktop::text::Planned { plan: p, inks: Vec::new(), painted: None, group: "<g id=\"text\"></g>".into() }
+        };
+        let _ = (&cat, &dir);
+        let plans = Plans::default();
+        let hash = bytes_hash(b"x");
+        let g1 = plans.reserve("img");
+        assert!(plans.cancel("img"));
+        let g2 = plans.reserve("img");
+        assert_ne!(g1, g2, "a generation is never handed out twice");
+        assert!(!plans.is_current("img", g1) && plans.is_current("img", g2));
+        assert!(plans.put_if_current("img", g1, hash, make()).is_none(), "the cancelled plan's result is refused");
+        assert!(plans.get("img", &hash).is_none());
+        // a late arm of the old task aborts it at once and leaves the newer task's abort alone
+        let (old, new) = (Arc::new(Mutex::new(0)), Arc::new(Mutex::new(0)));
+        let (o, n) = (old.clone(), new.clone());
+        plans.arm("img", g2, Box::new(move || *n.lock().unwrap() += 1));
+        plans.arm("img", g1, Box::new(move || *o.lock().unwrap() += 1));
+        assert_eq!((*old.lock().unwrap(), *new.lock().unwrap()), (1, 0));
+        // the current one stores, and ends: a later cancel finds nothing to cancel
+        assert!(plans.put_if_current("img", g2, hash, make()).is_some());
+        assert!(plans.get("img", &hash).is_some());
+        assert!(!plans.cancel("img") && !plans.is_current("img", g2));
+        assert_eq!(*new.lock().unwrap(), 0, "a finished plan is not aborted");
+        // a failure ends the current one only
+        let g3 = plans.reserve("img");
+        assert!(plans.fail("img", g3) && !plans.fail("img", g3));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn an_off_line_given_a_string_and_a_font_is_matched_and_enabled() {
+        let dir = cache(&[("Montserrat-Regular.ttf", "Montserrat", 400)]);
+        let img = image("montserrat-est-30-t0-white.png");
+        let d = deps(Arc::new(FixtureFinder(vec![line_box(&img, 14.0, 58.0)])), None, index(&[("Montserrat", 400)]), &dir);
+        let planned = run_plan(&img, &d);
+        let off = edit(&img, &planned, "img-t0", LineChange { enabled: Some(false), ..Default::default() }, &d);
+        // a string alone keeps it off
+        let still = edit(&img, &off, "img-t0", LineChange { string: Some("EST. 2027".into()), ..Default::default() }, &d);
+        assert_eq!(still.plan.lines[0].status, Status::Off);
+        // a string and a font together turn it on
+        let both = edit(&img, &off, "img-t0", LineChange { string: Some("EST. 2027".into()), font: Some(font("Montserrat", 400)), ..Default::default() }, &d);
+        let line = &both.plan.lines[0];
+        assert!(line.status == Status::Matched && line.enabled && line.string == "EST. 2027", "{line:?}");
+        assert!(both.group.contains("<path "));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_string_edit_keeps_the_font_the_user_forced_even_when_it_scores_under_the_accept() {
+        let dir = cache(&[("Montserrat-Regular.ttf", "Montserrat", 400), ("JosefinSans-Light.ttf", "Josefin Sans", 300)]);
+        let img = image("montserrat-est-30-t0-white.png");
+        let d = deps(Arc::new(FixtureFinder(vec![line_box(&img, 14.0, 58.0)])), None, index(&[("Josefin Sans", 300), ("Montserrat", 400)]), &dir);
+        let planned = run_plan(&img, &d);
+        assert_eq!(planned.plan.lines[0].candidates[planned.plan.lines[0].chosen.unwrap()].font, font("Montserrat", 400));
+        let jos = font("Josefin Sans", 300);
+        let forced = edit(&img, &planned, "img-t0", LineChange { font: Some(jos.clone()), ..Default::default() }, &d);
+        let l = &forced.plan.lines[0];
+        assert!(l.fit.as_ref().unwrap().iou < FIT_ACCEPT, "Josefin must score under the accept on this line for the test to mean anything");
+        assert!(l.status == Status::Matched && l.candidates[l.chosen.unwrap()].font == jos);
+        let edited = edit(&img, &forced, "img-t0", LineChange { string: Some("EST. 2027".into()), ..Default::default() }, &d);
+        let l = &edited.plan.lines[0];
+        assert!(l.status == Status::Matched && l.enabled && l.candidates[l.chosen.unwrap()].font == jos, "{l:?}");
+        assert!(edited.group.contains("<path ") && edited.painted.is_some());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // Names sort in the shortlist's order (every width is zero). The first four positions are always fitted; then
+    // a family is fitted only while the best so far is under FIT_ACCEPT + 0.05. An unlocatable family still holds
+    // its place.
+    fn pruning_dir() -> (PathBuf, Catalog) {
+        let dir = cache(&[("Montserrat-Regular.ttf", "A Montserrat", 400), ("JosefinSans-Light.ttf", "F Josefin Sans", 300), ("PlayfairDisplay-Regular.ttf", "G Playfair Display", 400)]);
+        let cat = index(&[("A Montserrat", 400), ("B Gap", 400), ("C Gap", 400), ("D Gap", 400), ("E Gap", 400), ("F Josefin Sans", 300), ("G Playfair Display", 400)]);
+        (dir, cat)
+    }
+
+    #[test]
+    fn a_family_that_fits_well_within_the_eager_set_ends_the_search() {
+        let (dir, cat) = pruning_dir();
+        let img = image("montserrat-est-30-t0-white.png");
+        let d = deps(Arc::new(FixtureFinder(vec![line_box(&img, 14.0, 58.0)])), None, cat, &dir);
+        let planned = run_plan(&img, &d);
+        let line = &planned.plan.lines[0];
+        assert!(line.fit.as_ref().unwrap().iou >= FIT_ACCEPT + 0.05, "{line:?}");
+        let names: Vec<&str> = line.candidates.iter().map(|c| c.font.family.as_str()).collect();
+        assert_eq!(names, ["A Montserrat"], "the later families were never fitted");
+        // and when the first does not fit well, the later ones are fitted
+        let img = image("playfair-est-30-t0-white.png");
+        let d = Deps { finder: Arc::new(FixtureFinder(vec![line_box(&img, 14.0, 58.0)])), ..d };
+        let planned = run_plan(&img, &d);
+        let names: Vec<&str> = planned.plan.lines[0].candidates.iter().map(|c| c.font.family.as_str()).collect();
+        assert!(names.contains(&"G Playfair Display") && names.contains(&"A Montserrat"), "{names:?} {:?}", planned.plan.lines[0]);
+        assert_eq!(planned.plan.lines[0].candidates[0].font.family, "G Playfair Display");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The same image twice, one above the other.
+    fn stacked(name: &str) -> (Arc<Img>, f32) {
+        let one = image(name);
+        let mut rgba = one.rgba.clone();
+        rgba.extend_from_slice(&one.rgba);
+        (Arc::new(Img { rgba, width: one.width, height: one.height * 2 }), one.height as f32)
+    }
+
+    #[test]
+    fn a_family_that_won_a_line_leads_the_next_lines_list() {
+        // five Josefin copies sort before Montserrat, which wins the first line only after all of them are fitted
+        let mut files = vec![("Montserrat-Regular.ttf", "F Montserrat", 400)];
+        let gaps = ["A Josefin", "B Josefin", "C Josefin", "D Josefin", "E Josefin"];
+        files.extend(gaps.iter().map(|g| ("JosefinSans-Light.ttf", *g, 300)));
+        let dir = cache(&files);
+        let mut fams: Vec<(&str, u16)> = gaps.iter().map(|g| (*g, 300)).collect();
+        fams.push(("F Montserrat", 400));
+        let (img, h) = stacked("montserrat-est-30-t0-white.png");
+        let finder = FixtureFinder(vec![line_box(&img, 14.0, 58.0), line_box(&img, h + 14.0, h + 58.0)]);
+        let d = deps(Arc::new(finder), None, index(&fams), &dir);
+        let planned = run_plan(&img, &d);
+        let (first, second) = (&planned.plan.lines[0], &planned.plan.lines[1]);
+        assert_eq!(first.candidates[0].font.family, "F Montserrat");
+        assert_eq!(first.candidates.len(), 6, "the first line fitted every family up to the winner");
+        assert_eq!(second.candidates[0].font.family, "F Montserrat");
+        // the winner led, took one of the four eager places, and its fit ended the search at the fifth
+        assert_eq!(second.candidates.len(), 4, "{:?}", second.candidates.iter().map(|c| &c.font.family).collect::<Vec<_>>());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    struct Failing(Result<Vec<Reading>, &'static str>);
+    impl Reader for Failing {
+        fn read<'a>(&'a self, _: &'a Img, _: &'a [LineBox]) -> ReadFuture<'a> {
+            let r = self.0.clone().map_err(studi0trace_desktop::redraw::error);
+            Box::pin(async move { r })
+        }
+    }
+
+    #[test]
+    fn a_reader_that_fails_or_answers_the_wrong_count_leaves_vision_s_strings() {
+        let dir = cache(&[("Montserrat-Regular.ttf", "Montserrat", 400)]);
+        let img = image("montserrat-est-30-t0-white.png");
+        for (reader, code) in [(Failing(Err("quota")), "quota"), (Failing(Ok(Vec::new())), "bad_reply")] {
+            let d = deps(Arc::new(FixtureFinder(vec![line_box(&img, 14.0, 58.0)])), Some(Arc::new(reader)), index(&[("Montserrat", 400)]), &dir);
+            let planned = run_plan(&img, &d);
+            assert_eq!(planned.plan.ai_error.as_deref(), Some(code));
+            assert_eq!(planned.plan.reader, studi0trace_desktop::text::ReaderKind::Vision);
+            assert_eq!(planned.plan.lines[0].string, "EST. 2026");
+            assert_eq!(planned.plan.lines[0].class, Class::Type);
+            assert_eq!(planned.plan.lines[0].status, Status::Matched);
+        }
+        // and one that answers is used
+        let ok = Failing(Ok(vec![Reading { string: "EST. 2026".into(), hints: Vec::new(), class: Class::Type }]));
+        let d = deps(Arc::new(FixtureFinder(vec![line_box(&img, 14.0, 58.0)])), Some(Arc::new(ok)), index(&[("Montserrat", 400)]), &dir);
+        let planned = run_plan(&img, &d);
+        assert!(planned.plan.ai_error.is_none() && planned.plan.reader == studi0trace_desktop::text::ReaderKind::Ai);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    struct Opaque(LineBox);
+    impl Finder for Opaque {
+        fn find(&self, source: &Img) -> Result<Vec<LineBox>, studi0trace_desktop::error::CommandError> {
+            assert!(source.rgba.chunks(4).all(|p| p[3] == 255), "the finder is handed an opaque image");
+            assert_eq!(&source.rgba[..4], &[255, 255, 255, 255], "a transparent pixel is white to it");
+            Ok(vec![self.0.clone()])
+        }
+    }
+
+    #[test]
+    fn the_finder_sees_the_image_on_white_while_the_ink_and_the_paint_out_keep_its_alpha() {
+        let dir = cache(&[("Montserrat-Regular.ttf", "Montserrat", 400)]);
+        let mut img = Img::decode(&std::fs::read(format!("{FIXTURES}/montserrat-est-30-t0-white.png")).unwrap()).unwrap();
+        for y in 0..4usize {
+            for x in 0..4usize {
+                let at = (y * img.width as usize + x) * 4;
+                img.rgba[at..at + 4].copy_from_slice(&[0, 0, 0, 0]);
+            }
+        }
+        let img = Arc::new(img);
+        let d = deps(Arc::new(Opaque(line_box(&img, 14.0, 58.0))), None, index(&[("Montserrat", 400)]), &dir);
+        let planned = run_plan(&img, &d);
+        assert_eq!(planned.plan.lines[0].status, Status::Matched);
+        let painted = Img::decode(planned.painted.as_ref().unwrap()).unwrap();
+        assert_eq!(painted.rgba[3], 0, "the painted image keeps the transparent corner");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_line_whose_font_is_not_in_the_cache_is_neither_composed_nor_painted_out() {
+        let dir = cache(&[("Montserrat-Regular.ttf", "Montserrat", 400)]);
+        let img = image("montserrat-est-30-t0-white.png");
+        let d = deps(Arc::new(FixtureFinder(vec![line_box(&img, 14.0, 58.0)])), None, index(&[("Montserrat", 400)]), &dir);
+        let planned = run_plan(&img, &d);
+        assert_eq!(compose_group(&planned.plan, false, &d.catalog, &dir).lines, ["img-t0"]);
+        assert!(planned.painted.is_some());
+        // the same plan against a cache that has lost the file
+        let empty = cache(&[]);
+        let composed = compose_group(&planned.plan, false, &d.catalog, &empty);
+        assert!(composed.lines.is_empty() && composed.group == "<g id=\"text\"></g>");
+        let lost = Deps { cache_dir: empty.clone(), ..d.clone() };
+        let again = edit(&img, &planned, "img-t0", LineChange { enabled: Some(true), ..Default::default() }, &lost);
+        assert!(again.painted.is_none(), "the text is not painted out when nothing is drawn in its place");
+        assert_eq!(again.group, "<g id=\"text\"></g>");
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(&empty);
+    }
+}
