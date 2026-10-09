@@ -1,6 +1,6 @@
 """Renders the text fixture set: three OFL fonts, three strings, three cap heights, two trackings, two
-backdrops, with the truth of every rendering in truth.json. Glyphs are drawn one at a time with the
-font's own advances and no kerning, as the app shapes them (kern off)."""
+backdrops, with the truth of every rendering in truth.json. Glyphs are drawn one at a time at the font's own
+unhinted advances and no kerning, as the app shapes them (kern off), and anti-aliased by area."""
 import json
 from pathlib import Path
 
@@ -21,11 +21,16 @@ def cap_ratio(path: str) -> float:
     return (bottom - top) / 1000.0
 
 
+SUPER = 8  # the glyphs are drawn at 8x and averaged down, so a pixel's coverage is its area, as a rasteriser's is
+
+
 def render(font_path, cap_px, tracking_em, string, backdrop):
     size = cap_px / cap_ratio(font_path)
-    font = ImageFont.truetype(font_path, size)
     tracking_px = tracking_em * size
-    advances = [font.getlength(ch) for ch in string]
+    # the advances are the font's own, scaled: FreeType's hinted advances at the target size are whole pixels,
+    # which would move every glyph by up to half a pixel from where the app's unhinted shaping puts it
+    em = ImageFont.truetype(font_path, 1000)
+    advances = [em.getlength(ch) * size / 1000.0 for ch in string]
     width = int(round(sum(advances) + tracking_px * (len(string) - 1))) + 60
     height = int(round(cap_px)) + 40
     img = Image.new("RGB", (width, height), (255, 255, 255))
@@ -35,11 +40,15 @@ def render(font_path, cap_px, tracking_em, string, backdrop):
             for x in range(width):
                 t = x / max(1, width - 1)
                 px[x, y] = (int(255 - 40 * t), int(250 - 20 * t), int(245 + 10 * t))
-    draw = ImageDraw.Draw(img)
+    big = ImageFont.truetype(font_path, size * SUPER)
+    mask = Image.new("L", (width * SUPER, height * SUPER), 0)
+    draw = ImageDraw.Draw(mask)
     x, baseline = 30.0, cap_px + 20.0
     for ch, adv in zip(string, advances):
-        draw.text((x, baseline), ch, font=font, fill=INK, anchor="ls")
+        draw.text((x * SUPER, baseline * SUPER), ch, font=big, fill=255, anchor="ls")
         x += adv + tracking_px
+    mask = mask.resize((width, height), Image.BOX)
+    img = Image.composite(Image.new("RGB", (width, height), INK), img, mask)
     return img, size, baseline, tracking_px
 
 
