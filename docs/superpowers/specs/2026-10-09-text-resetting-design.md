@@ -266,3 +266,72 @@ trace: `vectorize` traces the original bytes when there is no plan.
 Live `<text>` with embedded fonts in the export; vertical or rotated text (a quad rotated more
 than 5° is declined, reason `rotated`); gradient-filled text; a local OCR for Linux or Windows;
 regularising declined lines (that is `text-as-shapes`).
+
+## Status
+
+2026-10-09, after the first full build (Tasks 1-15).
+
+**Suites.** `frontend`: 294 tests in 38 files pass, `npm run build` clean. `apps/desktop/src-tauri`:
+`cargo test --release` green (154 unit tests and every integration binary; `text_examples` is `#[ignore]`d), and
+`cargo test --workspace --release` 495 passed, 0 failed. `cargo clippy --release --all-targets` reports nothing
+from `apps/desktop` (every warning is in `backend/vexel-rs`, as on `main`).
+
+**The three example images** (`tests/text_examples.rs`, Vision and no key, Google Fonts fetched for real; the
+images are not in git). Result: **no line was matched.** The feature declined everything it was given and
+re-set nothing wrongly, but the expectation above (every tagline re-set in a plausible font) is not met on
+these images. Per image, lines found / matched, run time:
+
+- 1 (1254², 2 lines, 0 matched, 22.8 s). `LUMORA` no_fit, best Kumbh Sans 500 at IoU 0.773. `ABRIGHTER TOMORROW`
+  (Vision dropped the space after the A) no_fit, best Clarity City 400 at 0.547.
+- 2 (1536x1024, 19 lines, 0 matched, 27.8 s). no_fit, best candidate and IoU: DENVER, CO Orlean 0.732; EST. 2026
+  Preahvihear 0.724; GOOD Balthazar 0.705; EXPLORE Castoro 0.775; PEOPLE Castoro 0.757; CREATE Brygada 1918 600
+  0.734; GREAT Sree Krushnadevaraya 0.734; BELONG Lustria 0.728; PLACES Rosarivo 0.738; `LIFEIS BETTER OUTSIDE`
+  Varela 0.457; FIND WHAT MATTERS Varela 0.673; MORE EVERY DAY Red Hat Display 600 0.652; REACH HIGHER NTR 0.719;
+  MOUNTAINS / FORESTS / LAKES / NEW PERSPECTIVES Orlean 0.330. Declined for another reason: ADVENTURE `fonts` (no
+  candidate fitted), Awaits / Wander / Explore / `SUMMTT` (SUMMIT) `gradient` (the ink is not one colour).
+- 3 (1536x1024, 4 lines, 0 matched, 64.0 s). HORIZON no_fit, Tamil MN 700 0.563 (the source is a plain geometric
+  sans; the shortlist did not reach one); `reative` (Creative) `gradient`; `IDEAS FOR ABRIGHTER TOMORROW` Questrial
+  0.350 (0.666 Brooklyn with the space put back); EST. 2026 Attort 0.588.
+
+What was found (probes kept out of git: an oracle reader that returns the corrected strings, and `set_line` with
+a forced font, to look at what the fit draws):
+
+- *`FIT_ACCEPT` (0.79) is calibrated on crisp synthetic lines and these sources are not.* They are AI-generated:
+  a hairline stroke one pixel off scores far below what the eye sees. Forced into the group, EXPLORE in Castoro
+  (0.775) and LIFE IS BETTER OUTSIDE in Varela (0.57, space fixed) are visually close to the source, while CREATE in
+  Brygada 600 (0.734) is visibly too heavy and HORIZON in Tamil MN is the wrong face. The score alone does not
+  separate them; a stroke-weight ratio would.
+- *The weight is rarely tried.* `with_weight_neighbours` runs only when the top two candidates are within 0.03.
+  Trying the neighbours always flips exactly one line: LUMORA to Kumbh Sans 400 at 0.811 (a plausible match). A
+  weight sweep of Montserrat, Raleway, Kumbh Sans, Josefin Sans, Quicksand, Jost and Poppins over the sans lines found
+  EST. 2026 (image 2) at Montserrat 500 0.807, but that family is not on that line's shortlist.
+- *A string with a missing space fits worse and shortlists worse* (`ABRIGHTER`, `LIFEIS`, `IDEAS FOR ABRIGHTER`): the
+  AI reader is the intended fix and was not run (no key stored). With the spaces put back the IoUs rose by
+  0.03-0.12 and still stayed under the threshold.
+- *Wide, uneven tracking* (the taglines) is the fit's weak spot: one tracking value for the whole line, the word gaps
+  of these sources are wider than a letter gap, and the per-glyph nudges stop at 2 px.
+- *Run time is dominated by large lines:* 64 s for 4 lines on image 3 (HORIZON at 185 px), 22 s for 2 lines on image
+  1; image 2's 19 small lines take 28 s.
+
+**Painted-out and composed.** Nothing matched, so the real run wrote no painted PNG. With every line that had a
+candidate forced into the group (`set_line` with the first candidate's font), the painted images traced through
+the Rust engine (balanced preset: 3.6 s, 15.8 s, 8.6 s) show no trace of the lines (the painted crops of image 1's
+wordmark and tagline and of image 3's tagline trace to blank) and the composed result is the engine's SVG plus
+the group, so the pipeline works end to end. A faint remnant sits at the truncated last E of LIFE IS BETTER
+OUTSIDE (image 2).
+
+**Settings window.** The sheet was rendered in a browser at the window's 520x850 in light and dark: the Text group
+is whole and correct in both, the consent sheet opens from *Read text with AI* with no key. The sheet is **968 px
+tall** (955 without the new Model hint), so the fixed, non-resizable window scrolls 118 px; the Text group's heading
+is in view at the top and *Hidden text in exports* is reached by scrolling. Raising `inner_size` to about 980 would
+show it all.
+
+**Not verified.** The real app was not launched: Tim's installed Studi0Trace was running, `npm run smoke` refuses to
+run beside it, and a second `tauri dev` instance would share its settings file and Keychain. So the main window's
+Text section, the hover mark, a string edit and the switch were checked by the frontend suites only, not on screen;
+the Keychain state was not read.
+
+**Deferred.** The acceptance rule (stroke weight beside the IoU, and a threshold set on real sources), always
+trying the weight neighbours and widening the shortlist for wide-tracked lines, a word-gap parameter in the fit,
+and a speed budget for large lines each want their own task and a bench of real sources; none was changed here
+because the threshold and the shortlist are what keep a wrong face off the canvas.
