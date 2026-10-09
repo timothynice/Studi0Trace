@@ -7,6 +7,8 @@ pub mod fit;
 pub mod fonts;
 pub mod glyphs;
 pub mod ink;
+pub mod reader;
+pub mod vision;
 
 use crate::error::CommandError;
 use serde::{Deserialize, Serialize};

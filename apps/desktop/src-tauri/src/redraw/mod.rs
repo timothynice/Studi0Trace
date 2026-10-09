@@ -138,7 +138,7 @@ pub struct Redrawn {
     pub drift: drift::Drift,
 }
 
-fn encode_png(pixels: &[u8], w: u32, h: u32, colour: ExtendedColorType) -> Result<Vec<u8>, CommandError> {
+pub(crate) fn encode_png(pixels: &[u8], w: u32, h: u32, colour: ExtendedColorType) -> Result<Vec<u8>, CommandError> {
     use image::ImageEncoder;
     let mut out = Vec::new();
     image::codecs::png::PngEncoder::new(&mut out).write_image(pixels, w, h, colour).map_err(|e| CommandError::crashed(format!("the PNG could not be written: {e}")))?;
