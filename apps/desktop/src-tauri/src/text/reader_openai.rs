@@ -103,6 +103,8 @@ pub fn request_body(model: &str, source: &Source, lines: &[LineBox]) -> Result<V
     }
     Ok(json!({
         "model": model,
+        // the user's image is not kept on OpenAI's side
+        "store": false,
         "input": [{ "role": "user", "content": content }],
         "text": { "format": { "type": "json_schema", "name": "text_lines", "strict": true, "schema": schema() } }
     }))

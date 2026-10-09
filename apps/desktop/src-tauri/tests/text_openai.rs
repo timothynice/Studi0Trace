@@ -93,6 +93,7 @@ fn sends_the_image_the_crops_and_the_schema_with_the_key_only_in_the_header() {
     assert!(seen[0].head.to_lowercase().contains("authorization: bearer sk-test-key"));
     let body: Value = serde_json::from_slice(&seen[0].body).unwrap();
     assert_eq!(body["model"], "gpt-5-mini");
+    assert_eq!(body["store"], false);
     assert!(!seen[0].body.windows(11).any(|w| w == b"sk-test-key"), "the key is never in the body");
     let content = body["input"][0]["content"].as_array().unwrap();
     let images: Vec<&Value> = content.iter().filter(|c| c["type"] == "input_image").collect();

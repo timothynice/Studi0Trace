@@ -210,7 +210,7 @@ export function SettingsView({ settings, onChange, redraw, text }: SettingsViewP
               }}
             />
           </Row>
-          <Row label="Model">
+          <Row label="Model" hint="The OpenAI model that reads the text">
             <input aria-label="Model" spellCheck={false} autoComplete="off" className="h-7 w-40 min-w-0 rounded-md border bg-background/70 px-2 text-[12px]" value={settings.textModel} onChange={(e) => set("textModel", e.target.value)} />
           </Row>
           <Row label="Hidden text in exports" hint="An invisible text layer, for search and screen readers">

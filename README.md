@@ -68,7 +68,7 @@ On the bench against two well-known open-source tracers, Vexel is the most faith
     </td>
     <td width="50%" valign="top">
       <img src="docs/marketing/hero-light.png" alt="The same trace in the light appearance">
-      <p><strong>Made for the Mac.</strong> Light and dark appearances, the system accent, a draggable split and side-by-side, overlay and vector-only views, the keyboard for everything, and HEIC straight from Photos. Images never leave your Mac.</p>
+      <p><strong>Made for the Mac.</strong> Light and dark appearances, the system accent, a draggable split and side-by-side, overlay and vector-only views, the keyboard for everything, and HEIC straight from Photos. Images stay on your Mac unless you opt into AI.</p>
     </td>
   </tr>
 </table>
