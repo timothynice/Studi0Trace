@@ -84,6 +84,15 @@ pub fn parse_reply(status: u16, body: &[u8]) -> Result<Vec<u8>, CommandError> {
     })
 }
 
+/// A JSON reply on 2xx; else the failure's code, as `parse_reply` maps it.
+pub fn parse_json_reply(status: u16, body: &[u8]) -> Result<serde_json::Value, CommandError> {
+    if (200..300).contains(&status) {
+        return serde_json::from_slice(body).map_err(|_| error("bad_reply"));
+    }
+    // a non-2xx status is always an Err here; the map keeps one table of codes
+    parse_reply(status, body).map(|_| serde_json::Value::Null)
+}
+
 /// What a request that never got its answer means to the user.
 fn transport(e: &reqwest::Error) -> CommandError {
     if e.is_timeout() {
@@ -137,6 +146,24 @@ impl std::fmt::Debug for Api {
 }
 
 impl Api {
+    /// One JSON POST to `{base}{path}`; the reply's JSON on 2xx, else the code `parse_reply` would give.
+    pub async fn post_json(&self, path: &str, body: &serde_json::Value) -> Result<serde_json::Value, CommandError> {
+        let text = body.to_string();
+        if text.len() > MAX_REQUEST_BYTES {
+            return Err(error("too_large"));
+        }
+        let answer = self.client.post(format!("{}{path}", self.base)).bearer_auth(&self.key).header("content-type", "application/json").body(text).send().await.map_err(|e| transport(&e))?;
+        let status = answer.status().as_u16();
+        if answer.content_length().is_some_and(|n| n > MAX_REPLY_BYTES as u64) {
+            return Err(error("bad_reply"));
+        }
+        let bytes = answer.bytes().await.map_err(|e| transport(&e))?;
+        if bytes.len() > MAX_REPLY_BYTES {
+            return Err(error("bad_reply"));
+        }
+        parse_json_reply(status, &bytes)
+    }
+
     pub fn new(base: &str, key: &str) -> Result<Api, CommandError> {
         Api::with_timeout(base, key, TIMEOUT)
     }

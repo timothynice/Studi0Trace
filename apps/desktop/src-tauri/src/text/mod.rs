@@ -8,6 +8,7 @@ pub mod fonts;
 pub mod glyphs;
 pub mod ink;
 pub mod reader;
+pub mod reader_openai;
 pub mod vision;
 
 use crate::error::CommandError;
