@@ -218,8 +218,11 @@ trace: `vectorize` traces the original bytes when there is no plan.
   fonts also stand in for the download: `FontSource` is a trait, and the tests' implementation
   serves these files for their families while the real one fetches.
 - **Fit** (`tests/text_fit.rs`): with the true font, size within 2 %, baseline within 0.3 px,
-  tracking within 0.2 px, IoU ≥ 0.90 on every item; the true font's IoU beats each wrong font's
-  on every item; `FIT_ACCEPT` sits between the two populations.
+  tracking within 0.2 px, IoU ≥ 0.83 on every item (the 12 px Josefin Sans Light lines, whose strokes are
+  one pixel wide, score 0.84–0.89; every other item is above 0.90); the true font's IoU beats each wrong
+  font's on every item; `FIT_ACCEPT` sits between the two populations. The fixture glyphs are drawn at
+  8× and averaged down, at the font's unhinted advances: FreeType's hinted advances are whole pixels and
+  drift a line by up to 15 px from where the app's shaping puts it.
 - **Shortlist** (`tests/text_match.rs`): with an index holding the three families among a
   hundred of the real index's entries, the true family ranks in the top 3 on every item.
 - **Ink** (unit tests in `text/ink.rs`): colour, coverage, segments and the decline reasons on

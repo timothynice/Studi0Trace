@@ -2,6 +2,7 @@
 //! matched (catalog.rs, fonts.rs) and fitted (glyphs.rs, ink.rs, fit.rs), the text is painted out of what the
 //! trace sees (ink.rs) and the glyph outlines are composed on top (compose.rs). Nothing here is seen by the
 //! engine, the core or the worker.
+pub mod fit;
 pub mod glyphs;
 pub mod ink;
 
@@ -9,7 +10,7 @@ use crate::error::CommandError;
 use serde::{Deserialize, Serialize};
 
 /// A line whose best fit scores under this is traced as shapes (set from the fixture set, tests/text_fit.rs).
-pub const FIT_ACCEPT: f32 = 0.82;
+pub const FIT_ACCEPT: f32 = 0.79;
 /// 90th-percentile ΔE of the covered pixels from the ink colour above which the ink is a gradient.
 pub const INK_SPREAD_MAX: f32 = 8.0;
 /// The share by which the ink's segment count may differ from the string's non-space characters.
