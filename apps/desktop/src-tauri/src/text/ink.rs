@@ -5,8 +5,12 @@
 use super::{Class, Reason, INK_SPREAD_MAX, MISMATCH_SHARE, ROTATED_DEG};
 use crate::redraw::Source;
 
-/// How far a pixel may be from each of its eight neighbours and still be in the ink's core.
+/// How far a pixel may be from each of its eight neighbours and still be on a flat patch of ink.
 const CORE_FLAT: f32 = 6.0;
+
+/// The coverage at which a pixel joins its neighbours into a segment (the mask itself is coverage >= 0.5; the
+/// fixture lines keep their segment counts for any value from 0.25 to 0.37; at 0.40 Playfair 12 px splits).
+const SEGMENT_COVERAGE: f32 = 0.33;
 
 pub struct LineInk {
     pub left: u32,
@@ -125,12 +129,13 @@ pub fn line_ink(source: &Source, quad: [[f32; 2]; 4]) -> LineInk {
         }
     }
     let mask: Vec<bool> = coverage.iter().map(|&c| c >= 0.5).collect();
-    // the spread: 90th percentile ΔE from the ink colour over the ink's core, since an edge pixel is a blend of
-    // ink and backdrop by construction. The core is the mask pixels whose eight neighbours are all in the mask and
-    // within CORE_FLAT of the pixel itself: a blurred or anti-aliased edge is a ramp and falls out, a flat ink or a
-    // gradient ink's interior stays. (Coverage >= 0.98 would not do: it is measured against the single ink colour,
-    // so a second, lighter ink on the same line would never count as core and a gradient would read as flat.)
-    // A line with fewer than 8 such pixels (a stem two pixels wide) uses its whole mask.
+    // the spread: 90th percentile ΔE from the ink colour over the ink's flat patches, the mask pixels whose eight
+    // neighbours are all in the mask and within CORE_FLAT of the pixel itself. An edge pixel is a blend of ink and
+    // backdrop by construction, and on a stroke of a pixel or three there is nowhere a pixel and its neighbours
+    // agree: a light ink and a thin one look the same there, so with fewer than 8 flat pixels there is no evidence
+    // of a gradient and the spread is 0. (Not coverage >= some level, which is measured against the one ink colour
+    // and so can never see a second, lighter ink such as the 90 and 160 grey bars of a gradient; and not the mask's
+    // interior or its coverage ridge, which on 1-2 px strokes are still blends, 20-45 ΔE from the ink.)
     let at = |x: u32, y: u32| px(left + x, top + y);
     let mut spreads: Vec<f32> = Vec::new();
     for y in 1..height.saturating_sub(1) {
@@ -145,12 +150,16 @@ pub fn line_ink(source: &Source, quad: [[f32; 2]; 4]) -> LineInk {
             }
         }
     }
-    if spreads.len() < 8 {
-        spreads = (0..height).flat_map(|y| (0..width).map(move |x| (x, y))).filter(|&(x, y)| mask[(y * width + x) as usize]).map(|(x, y)| delta_e(at(x, y), colour)).collect();
-    }
-    spreads.sort_by(|a, b| a.partial_cmp(b).unwrap());
-    let spread = spreads.get(spreads.len() * 9 / 10).copied().unwrap_or(0.0);
-    let segments = segments_of(&mask, width, height);
+    let spread = if spreads.len() < 8 {
+        0.0
+    } else {
+        spreads.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        spreads[spreads.len() * 9 / 10]
+    };
+    // pixels join into a segment at a lower coverage than the mask: a hairline serif or a thin join under 0.5 must
+    // not cut a glyph in two (a fragment would read as an extra character); the segment's extent is still the mask's
+    let linked: Vec<bool> = coverage.iter().map(|&c| c >= SEGMENT_COVERAGE).collect();
+    let segments = segments_of(&mask, &linked, width, height);
     let ink_bounds = bounds_of(&mask, width, height);
     LineInk { left, top, width, height, coverage, mask, backdrop, colour, spread, segments, ink_bounds }
 }
@@ -170,23 +179,25 @@ fn bounds_of(mask: &[bool], width: u32, height: u32) -> Option<(u32, u32, u32, u
     (l < r).then_some((l, t, r, b))
 }
 
-/// Connected components (8-connected) of the mask as x ranges, merged where the ranges overlap.
-fn segments_of(mask: &[bool], width: u32, height: u32) -> Vec<(u32, u32)> {
-    let mut label = vec![0u32; mask.len()];
+/// Connected components (8-connected) of `linked` as the x ranges of their `mask` pixels, merged where the ranges
+/// overlap. A component with no mask pixel is not a segment.
+fn segments_of(mask: &[bool], linked: &[bool], width: u32, height: u32) -> Vec<(u32, u32)> {
+    let mut seen = vec![false; linked.len()];
     let mut ranges: Vec<(u32, u32)> = Vec::new();
     let mut stack = Vec::new();
-    for start in 0..mask.len() {
-        if !mask[start] || label[start] != 0 {
+    for start in 0..linked.len() {
+        if !linked[start] || seen[start] {
             continue;
         }
-        let id = ranges.len() as u32 + 1;
         let (mut lo, mut hi) = (u32::MAX, 0u32);
         stack.push(start);
-        label[start] = id;
+        seen[start] = true;
         while let Some(i) = stack.pop() {
             let (x, y) = ((i as u32) % width, (i as u32) / width);
-            lo = lo.min(x);
-            hi = hi.max(x + 1);
+            if mask[i] {
+                lo = lo.min(x);
+                hi = hi.max(x + 1);
+            }
             for dy in -1i64..=1 {
                 for dx in -1i64..=1 {
                     let (nx, ny) = (x as i64 + dx, y as i64 + dy);
@@ -194,14 +205,16 @@ fn segments_of(mask: &[bool], width: u32, height: u32) -> Vec<(u32, u32)> {
                         continue;
                     }
                     let j = (ny as u32 * width + nx as u32) as usize;
-                    if mask[j] && label[j] == 0 {
-                        label[j] = id;
+                    if linked[j] && !seen[j] {
+                        seen[j] = true;
                         stack.push(j);
                     }
                 }
             }
         }
-        ranges.push((lo, hi));
+        if lo < hi {
+            ranges.push((lo, hi));
+        }
     }
     ranges.sort_unstable();
     let mut merged: Vec<(u32, u32)> = Vec::new();
