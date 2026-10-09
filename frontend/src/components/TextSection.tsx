@@ -26,7 +26,7 @@ function FontPicker({ line, onPick, searchFonts }: { line: TextLine; onPick: (fo
   const [hits, setHits] = useState<FontRef[]>([]);
   useEffect(() => {
     if (!searching || query.trim().length < 2) {
-      setHits([]);
+      setHits((h) => (h.length ? [] : h));
       return;
     }
     let live = true;
@@ -126,9 +126,9 @@ function LineRow({ line, n, onChange, onHover, searchFonts }: { line: TextLine; 
           <span>{declined}</span>
         ) : line.status.kind === "off" ? (
           <span>Traced as shapes</span>
-        ) : (
-          <span className="mac-tint inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 font-medium">{line.fit ? `Fit ${fitPercent(line.fit.iou)}` : ""}</span>
-        )}
+        ) : line.fit ? (
+          <span className="mac-tint inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 font-medium">Fit {fitPercent(line.fit.iou)}</span>
+        ) : null}
       </div>
     </div>
   );

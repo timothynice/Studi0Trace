@@ -24,10 +24,12 @@ import { useLayerInspector } from "./hooks/useLayerInspector";
 import { useRedrawKey } from "./hooks/useRedrawKey";
 import { useSettings } from "./hooks/useSettings";
 import { useWindowDrop } from "./hooks/useWindowDrop";
+import { ApiError } from "./lib/api";
 import { redrawFailureText } from "./lib/redraw";
 import { loadSample } from "./lib/samples";
 import { specsFor } from "./lib/schema";
 import { commandForKey, isTyping, type Command } from "./lib/shortcuts";
+import { textErrorText } from "./lib/text";
 import { platform, type OpenOutcome, type Settings, type ViewMode } from "./platform";
 import { createLibrary, ENGINE, currentJob, errorOf, redrawOf, shownAnswer, textOf, unexportedCount, type Catalog } from "./state/library";
 import { useLibrary } from "./state/useLibrary";
@@ -43,6 +45,15 @@ const failRedraw = (err: unknown) => {
   const text = redrawFailureText(err);
   if (text) toast.error(text);
 };
+
+/** A text edit that failed, in the app's own words by code; a cancel says nothing. */
+const failText = (err: unknown) => {
+  const code = err instanceof ApiError ? err.code : "";
+  if (code !== "cancelled") toast.error(textErrorText(code));
+};
+
+/** One function for the life of the app: the font picker's search effect depends on it. */
+const searchFonts = (q: string) => platform.textSearchFonts(q);
 
 export default function App() {
   // in the app, the web's context menu (Reload, Inspect Element) never shows, in either window; text fields keep theirs
@@ -140,6 +151,8 @@ function Workspace({ catalog, settings, onSettingsChange }: { catalog: Catalog; 
   const [consentFor, setConsentFor] = useState<string | null>(null);
   const [reviewing, setReviewing] = useState<string | null>(null);
   const [textHover, setTextHover] = useState<string | null>(null);
+  // a hovered row that unmounts never says it left, and a line id is deterministic: a stale hover would come back
+  useEffect(() => setTextHover(null), [item?.image.id, textPlan]);
   const inspectorShown = useRef(inspectorPane);
   inspectorShown.current = inspectorPane;
   const startRedraw = useCallback(
@@ -406,10 +419,10 @@ function Workspace({ catalog, settings, onSettingsChange }: { catalog: Catalog; 
           <TextSection
             item={item}
             enabled={settings.recogniseText}
-            onChange={(lineId, change) => void lib.setTextLine(item.image.id, lineId, change)}
+            onChange={(lineId, change) => void lib.setTextLine(item.image.id, lineId, change).catch(failText)}
             onHover={setTextHover}
             onCancel={() => lib.cancelText(item.image.id)}
-            searchFonts={(q) => platform.textSearchFonts(q)}
+            searchFonts={searchFonts}
           />
         ) : undefined
       }

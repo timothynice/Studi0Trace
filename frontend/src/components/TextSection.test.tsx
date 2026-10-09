@@ -87,4 +87,22 @@ describe("TextSection", () => {
     expect(screen.getByText("Text was re-set — trace again to edit it")).toBeInTheDocument();
     expect(screen.queryByText("No text found")).toBeNull();
   });
+
+  it("re-rendering with the same searchFonts does not search again while the picker is open", async () => {
+    const p = props();
+    const search = vi.fn(async () => [{ family: "Josefin Sans", weight: 300, italic: false, source: "google" as const }]);
+    const { rerender } = render(<TextSection item={item(plan([line()]))} {...p} searchFonts={search} />);
+    fireEvent.change(screen.getByRole("combobox", { name: /Font/ }), { target: { value: "search" } });
+    fireEvent.change(await screen.findByRole("textbox", { name: /Search fonts/ }), { target: { value: "jos" } });
+    await screen.findByRole("button", { name: "Josefin Sans 300" });
+    expect(search).toHaveBeenCalledTimes(1);
+    rerender(<TextSection item={item(plan([line()]))} {...props()} searchFonts={search} />);
+    await new Promise((r) => setTimeout(r, 300));
+    expect(search).toHaveBeenCalledTimes(1);
+  });
+
+  it("a matched line without a fit shows no empty chip", () => {
+    const { container } = render(<TextSection item={item(plan([line({ fit: null })]))} {...props()} />);
+    expect(container.querySelector(".mac-tint")).toBeNull();
+  });
 });
