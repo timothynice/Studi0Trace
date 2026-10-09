@@ -62,13 +62,25 @@ it. The plan for an image is computed once and cached; traces reuse it.
    8 (gradient or multicolour text), or when the segment count differs from the string's
    non-space character count by more than a third (the string and the ink disagree).
 3. **Match.** Candidates, in order: the AI hints; then a keyless shortlist from the bundled
-   Google Fonts index and the installed fonts, ranked by distance between the line's measured
-   per-character bbox widths over cap height (for the characters the string names) and the
-   family's, plus the stroke-thickness-over-cap-height distance; the top 12 families. For each
-   family the weight is the variant whose stem thickness is nearest the line's, and its
-   neighbours ±100 are tried when the best fit is within 0.03 IoU of the next. A family that
-   won another line of the same image is moved to the front of every other line's list (a logo
-   uses one or two fonts).
+   Google Fonts index and the installed fonts, ranked by how the line's measured per-character
+   bbox widths match each family's. The widths are over the line's cap height, estimated from
+   the median vertical extent of its capital letters (else its digits, else its tall lowercase
+   letters over 1.07; the ink's own height carries ascenders and descenders and made every
+   lowercase width read narrow). Each family is compared at its own best width scale (least
+   squares), because weight moves every width together, and is charged `0.07 × |ln scale|` for
+   the scale it needed; the penalty was swept on the fixture set (0.05 to 0.4) and the shortlist
+   gate is sensitive to it. The distance is the mean absolute width difference plus that
+   charge. The stem is not in the ranking: the line's stem is a run of ink pixels and a
+   family's is its I's bbox width, which for a serif is the serifs' width (Playfair Display's
+   I is 0.36 of the cap, its stems about 0.15), and a family's regular face says nothing about
+   its other weights. The stem picks the weight only (`weight_for_stem`, clamped to the
+   family's variants). A line whose letters touch has fewer ink segments than characters, so
+   it has no per-character widths and is not ranked: its shortlist is empty and the reader's
+   hints carry it. The top 12 families are fitted; a family present both in the index and
+   installed is listed once, as installed (no download). For each family the weight is the
+   variant nearest the stem's weight class, and its neighbours ±100 are tried when the best fit
+   is within 0.03 IoU of the next. A family that won another line of the same image is moved to
+   the front of every other line's list (a logo uses one or two fonts).
 4. **Fit.** For each candidate: shape the string with `rustybuzz` (kerning on), outline the glyphs
    with `ttf-parser`, and solve size (px per em), baseline y, start x and tracking (px added per
    gap) by coordinate descent on the IoU between the rendered coverage (tiny-skia, anti-aliased)
@@ -223,8 +235,13 @@ trace: `vectorize` traces the original bytes when there is no plan.
   font's on every item; `FIT_ACCEPT` sits between the two populations. The fixture glyphs are drawn at
   8× and averaged down, at the font's unhinted advances: FreeType's hinted advances are whole pixels and
   drift a line by up to 15 px from where the app's shaping puts it.
-- **Shortlist** (`tests/text_match.rs`): with an index holding the three families among a
-  hundred of the real index's entries, the true family ranks in the top 3 on every item.
+- **Shortlist** (`tests/text_match.rs`): with the real index (every family, nothing installed),
+  the true family is in the top `SHORTLIST` (12) on every fixture item that has per-character
+  widths (cap height ≥ 18 px; 64 of 72 items), and the items whose letters touch (no widths, so
+  no ranking) are at most a fifth of the ranked ones. Top 3 is met on 40 of the 64: Josefin
+  Sans Light ranks worst, since the index holds regular weights only. Unit tests in
+  `text/catalog.rs`: a line with no widths gets an empty shortlist, and a family both in the
+  index and installed appears once, as installed.
 - **Ink** (unit tests in `text/ink.rs`): colour, coverage, segments and the decline reasons on
   synthetic lines; the inpaint leaves a flat backdrop flat and a gradient backdrop within 2
   levels of the gradient.

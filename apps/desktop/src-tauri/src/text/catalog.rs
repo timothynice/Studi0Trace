@@ -1,6 +1,6 @@
 //! The fonts a line can be set in: Google Fonts' families from the embedded index (assets/gfonts.json, built by
 //! tools/gfonts_index.py) and the fonts installed on this Mac (fontdb). The shortlist ranks families by how the
-//! line's measured per-character widths and stem thickness match each family's features.
+//! line's measured per-character widths match each family's (`distance`); the stem only picks the weight.
 use super::glyphs::{width_index, Features, Font};
 use super::ink::LineInk;
 use super::{FontRef, Source};
@@ -112,7 +112,8 @@ pub fn measured_stem(ink: &LineInk) -> f32 {
 
 /// How much a family's widths are charged for the scale they need to match the line's: weight moves every width
 /// together (Josefin Sans Light is about 8 % narrower than its regular, which is what the index holds), so each
-/// family is compared at its own best scale and only the scale's distance from 1 counts, lightly.
+/// family is compared at its own best scale and only the scale's distance from 1 counts, lightly. The 0.07 was
+/// swept on the fixture set (0.05 to 0.4): the shortlist gate in tests/text_match.rs is sensitive to it.
 const SCALE_PENALTY: f32 = 0.07;
 
 /// A family's distance from a line: the mean absolute difference between the line's per-character widths and
@@ -180,20 +181,27 @@ impl Catalog {
         weights.iter().copied().min_by_key(|w| (*w as i32 - want as i32).abs()).unwrap_or(400)
     }
 
-    /// Ranked families for a line: the measured per-character widths (chars of `string` with a width index) and
-    /// the stem over cap, against each family's features; installed families are measured on first use. The
-    /// nearest `n`, each at the upright weight nearest the stem's weight class.
+    /// Ranked families for a line: the nearest `n` by `distance` of the line's measured per-character widths
+    /// (chars of `string` with a width index) from each family's; installed families are measured on first use.
+    /// Each is at the upright weight nearest the stem's weight class (the stem ranks nothing). A line with no
+    /// widths gets an empty list, since every family would score alike; the reader's hints carry it. A family
+    /// that is both in the index and installed is listed once, as installed (it needs no download).
     pub fn shortlist(&self, _string: &str, widths: &[(char, f32)], stem: f32, n: usize) -> Vec<FontRef> {
+        if widths.is_empty() {
+            return Vec::new();
+        }
         let want = weight_for_stem(stem);
+        let installed = self.installed_families();
         let mut scored: Vec<(f32, FontRef)> = self
             .google
             .iter()
+            .filter(|f| !installed.contains(&f.name))
             .map(|f| {
                 let weights: Vec<u16> = f.variants.iter().filter(|v| !v.italic).map(|v| v.weight).collect();
                 (distance(&f.features, widths), FontRef { family: f.name.clone(), weight: Self::nearest_weight(&weights, want), italic: false, source: Source::Google })
             })
             .collect();
-        for family in self.installed_families() {
+        for family in installed {
             if let Some(feats) = self.installed_features(&family) {
                 let weights = self.weights_of(&family, Source::Installed);
                 scored.push((distance(&feats, widths), FontRef { family, weight: Self::nearest_weight(&weights, want), italic: false, source: Source::Installed }));
@@ -203,19 +211,21 @@ impl Catalog {
         scored.into_iter().map(|(_, f)| f).take(n).collect()
     }
 
-    /// Prefix match over Google then installed family names, at the regular weight.
+    /// Prefix match over Google then installed family names, at the regular weight; a family in both is listed
+    /// once, as installed.
     pub fn search(&self, query: &str, n: usize) -> Vec<FontRef> {
         let q = query.trim().to_lowercase();
         if q.is_empty() {
             return Vec::new();
         }
+        let installed = self.installed_families();
         let mut out: Vec<FontRef> = self
             .google
             .iter()
-            .filter(|f| f.name.to_lowercase().starts_with(&q))
+            .filter(|f| f.name.to_lowercase().starts_with(&q) && !installed.contains(&f.name))
             .map(|f| FontRef { family: f.name.clone(), weight: Self::nearest_weight(&f.variants.iter().filter(|v| !v.italic).map(|v| v.weight).collect::<Vec<_>>(), 400), italic: false, source: Source::Google })
             .collect();
-        out.extend(self.installed_families().into_iter().filter(|f| f.to_lowercase().starts_with(&q)).map(|family| {
+        out.extend(installed.into_iter().filter(|f| f.to_lowercase().starts_with(&q)).map(|family| {
             let weight = Self::nearest_weight(&self.weights_of(&family, Source::Installed), 400);
             FontRef { family, weight, italic: false, source: Source::Installed }
         }));
@@ -245,5 +255,47 @@ impl Catalog {
                 fontdb::Source::Binary(_) => None,
             }),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn index(names: &[&str]) -> String {
+        let widths = vec![60u8; 62];
+        let families: Vec<serde_json::Value> = names
+            .iter()
+            .map(|n| serde_json::json!({"name": n, "category": "sans-serif", "variants": [{"weight": 400, "italic": false}], "features": {"cap": 0.7, "x": 0.5, "stem": 0.1, "widths": widths}}))
+            .collect();
+        serde_json::json!({ "families": families }).to_string()
+    }
+
+    fn montserrat_installed() -> fontdb::Database {
+        let mut db = fontdb::Database::new();
+        db.load_font_data(std::fs::read(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/text/fonts/Montserrat-Regular.ttf")).unwrap());
+        db
+    }
+
+    #[test]
+    fn a_line_with_no_widths_gets_an_empty_shortlist() {
+        let cat = Catalog::from_index(&index(&["Alpha", "Beta"]), fontdb::Database::new());
+        assert!(cat.shortlist("EST", &[], 0.1, 12).is_empty());
+    }
+
+    #[test]
+    fn a_family_both_in_the_index_and_installed_is_listed_once_as_installed() {
+        let cat = Catalog::from_index(&index(&["Alpha", "Montserrat"]), montserrat_installed());
+        let widths = [('E', 0.7), ('S', 0.7), ('T', 0.8)];
+        let list = cat.shortlist("EST", &widths, 0.1, 12);
+        let ms: Vec<_> = list.iter().filter(|f| f.family == "Montserrat").collect();
+        assert_eq!(ms.len(), 1, "{list:?}");
+        assert_eq!(ms[0].source, Source::Installed);
+        let found = cat.search("mont", 5);
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert_eq!(found[0].source, Source::Installed);
+        // a family only in the index is still there
+        assert_eq!(cat.search("alp", 5)[0].source, Source::Google);
+        assert_eq!(list.len(), 2);
     }
 }
