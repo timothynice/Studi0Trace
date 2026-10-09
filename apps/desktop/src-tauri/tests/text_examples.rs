@@ -34,7 +34,8 @@ fn plans_the_example_images() {
         let planned = tauri::async_runtime::block_on(plan(n, source.clone(), deps, Arc::new(|p| eprintln!("  {p:?}")))).unwrap();
         eprintln!("{n}: {} lines in {:.1}s", planned.plan.lines.len(), t0.elapsed().as_secs_f32());
         for l in &planned.plan.lines {
-            eprintln!("  {:?} {:?} {:?} {:?}", l.string, l.status, l.candidates.first().map(|c| (&c.font.family, c.font.weight, c.iou)), l.fit.as_ref().map(|f| f.size));
+            let top: Vec<String> = l.candidates.iter().take(3).map(|c| format!("{} {} {:.3}", c.font.family, c.font.weight, c.iou)).collect();
+            eprintln!("  {:?} {:?} {:?} {:?}", l.string, l.status, l.fit.as_ref().map(|f| (f.size, f.iou)), top);
         }
         std::fs::write(out.join(format!("{n}-plan.json")), serde_json::to_string_pretty(&planned.plan).unwrap()).unwrap();
         if let Some(p) = &planned.painted {

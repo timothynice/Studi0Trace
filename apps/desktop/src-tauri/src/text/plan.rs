@@ -212,10 +212,12 @@ async fn run(image_id: &str, source: Arc<Image>, deps: Deps, phase: &Arc<dyn Fn(
             let mut wanted: Vec<(Vec<FontRef>, Vec<FontRef>)> = Vec::new();
             for (n, (line, reading)) in lines.iter().zip(&readings).enumerate() {
                 let ink = ink::line_ink(&src, line.quad);
-                let mut tl = TextLine { id: format!("{image}-t{n}"), quad: line.quad, string: reading.string.clone(), class: reading.class, colour: ink.colour, status: Status::Matched, candidates: Vec::new(), chosen: None, enabled: true, fit: None };
+                // the word spaces the ink shows and the reader dropped
+                let string = ink::repair_spaces(&ink, &reading.string);
+                let mut tl = TextLine { id: format!("{image}-t{n}"), quad: line.quad, string: string.clone(), class: reading.class, colour: ink.colour, status: Status::Matched, candidates: Vec::new(), chosen: None, enabled: true, fit: None };
                 let mut hints: Vec<FontRef> = Vec::new();
                 let mut shortlist: Vec<FontRef> = Vec::new();
-                match ink::decline(&ink, &reading.string, reading.class, line.quad) {
+                match ink::decline(&ink, &string, reading.class, line.quad) {
                     Some(reason) => {
                         tl.status = Status::Declined(reason);
                         tl.enabled = false;
@@ -228,9 +230,9 @@ async fn run(image_id: &str, source: Arc<Image>, deps: Deps, phase: &Arc<dyn Fn(
                                 }
                             }
                         }
-                        let widths = catalog::measured_widths(&ink, &reading.string);
+                        let widths = catalog::measured_widths(&ink, &string);
                         let stem = catalog::measured_stem(&ink);
-                        for f in catalog.shortlist(&reading.string, &widths, stem, SHORTLIST) {
+                        for f in catalog.shortlist(&string, &widths, stem, SHORTLIST) {
                             if !hints.contains(&f) {
                                 shortlist.push(f);
                             }

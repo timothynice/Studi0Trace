@@ -227,6 +227,44 @@ fn segments_of(mask: &[bool], linked: &[bool], width: u32, height: u32) -> Vec<(
     merged
 }
 
+/// A gap between two segments this many times the line's median gap is a word space.
+pub const SPACE_GAP: f32 = 1.8;
+/// ...and at least this share of the ink's height: a letter gap in untracked text is a few pixels, and 1.8 times
+/// a median of two is not a space. A real word space is a space's advance (about a third of the cap) plus the
+/// two side bearings, so the floor never refuses one.
+const SPACE_FLOOR: f32 = 0.25;
+
+/// The string with the word spaces the ink shows and the reader dropped put back. Vision drops the space in
+/// widely tracked text ("ABRIGHTER", "LIFEIS"), and a fit with no space advance where the ink has a word gap
+/// pulls every glyph after it out of place. Only when the ink's segments number the string's non-space
+/// characters (so each gap is between two known characters): a space goes wherever the gap exceeds `SPACE_GAP`
+/// times the median gap and `SPACE_FLOOR` of the ink's height, and the string has none there already. Nothing
+/// is ever removed.
+pub fn repair_spaces(ink: &LineInk, string: &str) -> String {
+    let chars: Vec<char> = string.chars().collect();
+    let solid: Vec<usize> = (0..chars.len()).filter(|&i| !chars[i].is_whitespace()).collect();
+    let Some((_, t, _, b)) = ink.ink_bounds else { return string.to_string() };
+    if solid.len() != ink.segments.len() || solid.len() < 3 {
+        return string.to_string();
+    }
+    let gaps: Vec<f32> = ink.segments.windows(2).map(|w| w[1].0 as f32 - w[0].1 as f32).collect();
+    let mut sorted = gaps.clone();
+    sorted.sort_by(f32::total_cmp);
+    let median = sorted[sorted.len() / 2];
+    let wide = (median * SPACE_GAP).max((b - t) as f32 * SPACE_FLOOR);
+    let mut out = String::with_capacity(string.len() + 4);
+    for (i, &c) in chars.iter().enumerate() {
+        out.push(c);
+        // a gap after this solid character, before the next one, with nothing between them already
+        if let Some(k) = solid.iter().position(|&s| s == i) {
+            if k + 1 < solid.len() && solid[k + 1] == i + 1 && gaps[k] > wide {
+                out.push(' ');
+            }
+        }
+    }
+    out
+}
+
 pub fn decline(ink: &LineInk, string: &str, class: Class, quad: [[f32; 2]; 4]) -> Option<Reason> {
     match class {
         Class::Script => return Some(Reason::Script),
@@ -450,6 +488,36 @@ mod tests {
         assert_eq!((l + ink.left, r + ink.left, b + ink.top), (40, 46, 40));
         let out = paint_out(&src, &[&ink]);
         assert!(out.chunks(4).all(|p| p[0] == 255));
+    }
+
+    /// Five bars, 4 px wide and 24 tall, with the gaps given, black on white.
+    fn bars(gaps: [u32; 4]) -> (Source, [[f32; 2]; 4]) {
+        let mut src = solid(200, 60, [255, 255, 255]);
+        let mut x = 20;
+        for i in 0..5 {
+            paint(&mut src, x, 20, 4, 24, [0, 0, 0]);
+            x += 4 + gaps.get(i).copied().unwrap_or(0);
+        }
+        (src, [[15.0, 18.0], [x as f32 + 5.0, 18.0], [x as f32 + 5.0, 46.0], [15.0, 46.0]])
+    }
+
+    #[test]
+    fn a_word_gap_the_reader_dropped_is_put_back_and_nothing_else_changes() {
+        // a wide word gap after the third letter, letter gaps of 8
+        let (src, quad) = bars([8, 8, 22, 8]);
+        let ink = line_ink(&src, quad);
+        assert_eq!(ink.segments.len(), 5);
+        assert_eq!(repair_spaces(&ink, "ABCDE"), "ABC DE");
+        // a space already there stays the only one
+        assert_eq!(repair_spaces(&ink, "ABC DE"), "ABC DE");
+        // the string and the ink disagree: the string is left as it is
+        assert_eq!(repair_spaces(&ink, "ABCD"), "ABCD");
+        // even gaps: no space
+        let (src, quad) = bars([8, 8, 9, 8]);
+        assert_eq!(repair_spaces(&line_ink(&src, quad), "ABCDE"), "ABCDE");
+        // tight text: a gap twice the median of two is still not a word space
+        let (src, quad) = bars([2, 2, 5, 2]);
+        assert_eq!(repair_spaces(&line_ink(&src, quad), "ABCDE"), "ABCDE");
     }
 
     #[test]
