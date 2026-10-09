@@ -3,6 +3,7 @@
 //! trace sees (ink.rs) and the glyph outlines are composed on top (compose.rs). Nothing here is seen by the
 //! engine, the core or the worker.
 pub mod glyphs;
+pub mod ink;
 
 use crate::error::CommandError;
 use serde::{Deserialize, Serialize};
