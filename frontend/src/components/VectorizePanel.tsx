@@ -23,11 +23,13 @@ export interface VectorizePanelProps {
   exportMenu: ReactNode;
   /** AI redraw's section (the Mac app). */
   redraw?: ReactNode;
+  /** Text re-setting's section (the Mac app). */
+  text?: ReactNode;
   /** The chip on a redrawn image, at the head of the pane (the Mac app). */
   redrawChip?: ReactNode;
 }
 
-export function VectorizePanel({ item, catalog, specs, invalidField, onPick, onParam, onGenerate, onCancel, exportMenu, redraw, redrawChip }: VectorizePanelProps) {
+export function VectorizePanel({ item, catalog, specs, invalidField, onPick, onParam, onGenerate, onCancel, exportMenu, redraw, redrawChip, text }: VectorizePanelProps) {
   const [advanced, setAdvanced] = useState(invalidField !== null);
   useEffect(() => {
     if (invalidField !== null) setAdvanced(true); // a field the server refused is in there
@@ -39,13 +41,14 @@ export function VectorizePanel({ item, catalog, specs, invalidField, onPick, onP
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       {/* no title: the pane is named for assistive technology, and the eye needs none */}
-      {(redrawChip || redraw) && (
+      {(redrawChip || redraw || text) && (
         <div className="space-y-2 px-3 pb-3 pt-3">
           {redrawChip}
           {redraw}
+          {text}
         </div>
       )}
-      <div className={`min-h-0 flex-1 space-y-3 overflow-y-auto px-3 pb-3 ${redrawChip || redraw ? "" : "pt-3"}`}>
+      <div className={`min-h-0 flex-1 space-y-3 overflow-y-auto px-3 pb-3 ${redrawChip || redraw || text ? "" : "pt-3"}`}>
         <PresetCards
           presets={catalog.presets}
           defaults={catalog.engine.defaults}

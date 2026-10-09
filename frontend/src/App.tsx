@@ -13,6 +13,8 @@ import { RedrawChip, RedrawSection } from "./components/RedrawSection";
 import { SettingsSheet } from "./components/SettingsSheet";
 import { SettingsView } from "./components/SettingsView";
 import { Sidebar } from "./components/Sidebar";
+import { TextOverlay } from "./components/TextOverlay";
+import { TextSection } from "./components/TextSection";
 import { TitleBar } from "./components/TitleBar";
 import { VectorizePanel } from "./components/VectorizePanel";
 import { Viewer, type ViewerHandle } from "./components/Viewer";
@@ -27,7 +29,7 @@ import { loadSample } from "./lib/samples";
 import { specsFor } from "./lib/schema";
 import { commandForKey, isTyping, type Command } from "./lib/shortcuts";
 import { platform, type OpenOutcome, type Settings, type ViewMode } from "./platform";
-import { createLibrary, ENGINE, currentJob, errorOf, redrawOf, shownAnswer, unexportedCount, type Catalog } from "./state/library";
+import { createLibrary, ENGINE, currentJob, errorOf, redrawOf, shownAnswer, textOf, unexportedCount, type Catalog } from "./state/library";
 import { useLibrary } from "./state/useLibrary";
 
 const FORMATS = platform.kind === "native" ? "PNG, JPG, HEIC, etc." : "PNG, JPG, GIF, WebP, BMP";
@@ -35,6 +37,7 @@ const FORMATS = platform.kind === "native" ? "PNG, JPG, HEIC, etc." : "PNG, JPG,
 const DROP_FORMATS = platform.kind === "native" ? "PNG, JPEG, GIF, WebP, BMP, HEIC or TIFF" : "PNG, JPEG, GIF, WebP or BMP";
 /** AI redraw runs in the Mac app only: a browser has no Keychain and no road to OpenAI. */
 const CAN_REDRAW = platform.kind === "native";
+const CAN_TEXT = platform.kind === "native";
 /** A redraw action that failed, in the app's own words by code (never the message: it can quote a key); a cancel says nothing. */
 const failRedraw = (err: unknown) => {
   const text = redrawFailureText(err);
@@ -109,6 +112,7 @@ function Workspace({ catalog, settings, onSettingsChange }: { catalog: Catalog; 
   const item = state.selected ? (state.items.find((i) => i.image.id === state.selected) ?? null) : null;
   const answer = item ? shownAnswer(item) : null;
   const visibleError = item ? errorOf(item) : null;
+  const textPlan = item ? textOf(item).plan : null;
   const [sidebar, setSidebar] = useState(true);
   const [inspectorPane, setInspectorPane] = useState(true);
   const [dragging, setDragging] = useState(false);
@@ -135,6 +139,7 @@ function Workspace({ catalog, settings, onSettingsChange }: { catalog: Catalog; 
   const redrawKey = useRedrawKey();
   const [consentFor, setConsentFor] = useState<string | null>(null);
   const [reviewing, setReviewing] = useState<string | null>(null);
+  const [textHover, setTextHover] = useState<string | null>(null);
   const inspectorShown = useRef(inspectorPane);
   inspectorShown.current = inspectorPane;
   const startRedraw = useCallback(
@@ -207,7 +212,16 @@ function Workspace({ catalog, settings, onSettingsChange }: { catalog: Catalog; 
         if (!layers.state.open) setSidebar(true);
         layers.patch({ open: !layers.state.open });
       }}
-      marks={layers.doc ? (scale) => <InspectorOverlay doc={layers.doc!} state={layers.liveState} scale={scale} /> : undefined}
+      marks={
+        layers.doc || textPlan
+          ? (scale) => (
+              <>
+                {layers.doc && <InspectorOverlay doc={layers.doc} state={layers.liveState} scale={scale} />}
+                {item && textPlan && <TextOverlay plan={textPlan} hovered={textHover} width={item.image.width} height={item.image.height} scale={scale} />}
+              </>
+            )
+          : undefined
+      }
     />
   ) : (
     <EmptyState formats={DROP_FORMATS} canDownscale={platform.kind === "native"} onOpen={() => void open(platform.pickImages())} onSample={(name) => void open(loadSample(name).then((f) => platform.openFiles([f])))} />
@@ -382,7 +396,23 @@ function Workspace({ catalog, settings, onSettingsChange }: { catalog: Catalog; 
       onPick={(p) => lib.pickPreset(item.image.id, p)}
       onParam={(name, value) => lib.setParam(item.image.id, name, value)}
       onGenerate={() => lib.generate(item.image.id)}
-      onCancel={() => lib.cancel(item.image.id)}
+      onCancel={() => {
+        // the plan may still be reading: cancelling the trace stops that too
+        lib.cancel(item.image.id);
+        lib.cancelText(item.image.id);
+      }}
+      text={
+        CAN_TEXT ? (
+          <TextSection
+            item={item}
+            enabled={settings.recogniseText}
+            onChange={(lineId, change) => void lib.setTextLine(item.image.id, lineId, change)}
+            onHover={setTextHover}
+            onCancel={() => lib.cancelText(item.image.id)}
+            searchFonts={(q) => platform.textSearchFonts(q)}
+          />
+        ) : undefined
+      }
       redraw={
         CAN_REDRAW ? (
           <RedrawSection
