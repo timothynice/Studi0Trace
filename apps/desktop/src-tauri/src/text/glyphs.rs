@@ -1,5 +1,5 @@
 //! A font as the fit sees it: shaped glyphs with outlines in em units (y up), and the features the shortlist
-//! ranks by. Shaping runs with kerning off: the fit's per-glyph nudges absorb the pairs, and the fixture set is
+//! ranks by. Shaping runs with kerning and ligatures off: the fit's per-glyph nudges absorb the pairs, and the fixture set is
 //! drawn glyph by glyph the same way.
 use crate::error::CommandError;
 use rustybuzz::ttf_parser::{self, GlyphId, OutlineBuilder};
@@ -58,7 +58,7 @@ pub struct Features {
     pub cap: f32,
     /// x-height over em.
     pub x: f32,
-    /// Stem thickness over cap height, the mean of the I's width and the H's left stem.
+    /// Stem thickness over cap height, the I's bbox width over cap height.
     pub stem: f32,
     /// Glyph bbox width over cap height, in hundredths, for A–Z a–z 0–9; 0 for a glyph the face lacks.
     #[serde(with = "widths_array")]
@@ -160,12 +160,14 @@ impl Font {
         let upem = self.units_per_em();
         let mut buf = UnicodeBuffer::new();
         buf.push_str(text);
-        let kern_off = Feature::new(rustybuzz::ttf_parser::Tag::from_bytes(b"kern"), 0, ..);
-        let out = rustybuzz::shape(&face, &[kern_off], buf);
-        let chars: Vec<char> = text.chars().collect();
+        // Kerning and ligatures off: one glyph per character, which the fit's per-glyph nudges assume.
+        let off: Vec<Feature> = [b"kern", b"liga", b"clig", b"calt"].iter().map(|t| Feature::new(rustybuzz::ttf_parser::Tag::from_bytes(t), 0, ..)).collect();
+        let out = rustybuzz::shape(&face, &off, buf);
+        // rustybuzz's cluster is the character's UTF-8 byte offset.
+        let chars: std::collections::HashMap<usize, char> = text.char_indices().collect();
         let mut glyphs = Vec::with_capacity(out.len());
         for (info, pos) in out.glyph_infos().iter().zip(out.glyph_positions()) {
-            let ch = chars.get(info.cluster as usize).copied().unwrap_or('\u{FFFD}');
+            let ch = chars.get(&(info.cluster as usize)).copied().unwrap_or('\u{FFFD}');
             let path = self.outline(&face, GlyphId(info.glyph_id as u16));
             glyphs.push(ShapedGlyph { ch, path, advance: pos.x_advance as f32 / upem, x_offset: pos.x_offset as f32 / upem });
         }
@@ -213,6 +215,31 @@ mod tests {
         // the E's outline spans the cap height: y up, from 0 to cap
         let b = shaped.glyphs[0].path.as_ref().unwrap().bounds();
         assert!(b.top().abs() < 0.02 && (b.bottom() - shaped.cap_height).abs() < 0.03 || b.bottom().abs() < 0.02 && (b.top().abs() - shaped.cap_height).abs() < 0.03, "{b:?}");
+    }
+
+    #[test]
+    fn non_ascii_characters_keep_their_glyphs_and_outlines() {
+        let font = Font::load(&fixture("Montserrat-Regular.ttf"), 0).unwrap();
+        let shaped = font.shape("Café");
+        let chars: Vec<char> = shaped.glyphs.iter().map(|g| g.ch).collect();
+        assert_eq!(chars, vec!['C', 'a', 'f', 'é']);
+        assert!(shaped.glyphs[3].path.is_some());
+    }
+
+    #[test]
+    fn kerning_is_off() {
+        let font = Font::load(&fixture("Montserrat-Regular.ttf"), 0).unwrap();
+        let together = font.shape("AV").advance();
+        let apart = font.shape("A").advance() + font.shape("V").advance();
+        assert!((together - apart).abs() < 1e-6, "{together} vs {apart}");
+    }
+
+    #[test]
+    fn ligatures_are_off() {
+        let font = Font::load(&fixture("Montserrat-Regular.ttf"), 0).unwrap();
+        let shaped = font.shape("fi");
+        let chars: Vec<char> = shaped.glyphs.iter().map(|g| g.ch).collect();
+        assert_eq!(chars, vec!['f', 'i']);
     }
 
     #[test]

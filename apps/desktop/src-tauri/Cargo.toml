@@ -47,7 +47,8 @@ rustybuzz = "0.20"
 tiny-skia = "0.12"
 fontdb = "0.23"
 # PDF export (export.rs): a vector PDF from the SVG, gradients kept; `filters` rasterises a blur through resvg.
-# No `text`: the engine writes no text, and fonts would bring fontdb.
+# No `text`: the engine writes no text, and svg2pdf's text support would bring its own font stack (the text re-setting's
+# fontdb above is ours, not svg2pdf's).
 svg2pdf = { version = "0.13", default-features = false, features = ["filters"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
