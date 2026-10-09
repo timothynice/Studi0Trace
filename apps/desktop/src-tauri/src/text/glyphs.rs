@@ -224,6 +224,9 @@ mod tests {
         let chars: Vec<char> = shaped.glyphs.iter().map(|g| g.ch).collect();
         assert_eq!(chars, vec!['C', 'a', 'f', 'é']);
         assert!(shaped.glyphs[3].path.is_some());
+        // the bug showed only after a multibyte character: byte offsets run ahead of character indices
+        let after: Vec<char> = font.shape("Zoë 5").glyphs.iter().map(|g| g.ch).collect();
+        assert_eq!(after, vec!['Z', 'o', 'ë', ' ', '5']);
     }
 
     #[test]
