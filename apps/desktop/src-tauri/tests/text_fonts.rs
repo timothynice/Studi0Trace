@@ -88,3 +88,37 @@ fn a_dead_server_is_offline_not_an_error_and_a_404_is_missing() {
     let out = tauri::async_runtime::block_on(gf.ensure(&[font()]));
     assert!(!out.offline && out.missing == vec![font()]);
 }
+
+#[test]
+fn a_body_that_is_not_a_font_is_missing_and_leaves_nothing_in_the_cache() {
+    let dir = Scratch::new("fonts-garbage");
+    let (base, _) = serve(|base| {
+        let css = format!("@font-face {{ src: url({base}/s/josefin.ttf) format('truetype'); }}");
+        vec![(200, "text/css", css.into_bytes()), (200, "font/ttf", b"<html>not a font</html>".to_vec())]
+    });
+    let gf = GoogleFonts::new(dir.0.clone(), &base).unwrap();
+    let out = tauri::async_runtime::block_on(gf.ensure(&[font()]));
+    assert!(!out.offline && out.missing == vec![font()]);
+    let left: Vec<_> = std::fs::read_dir(&dir.0).unwrap().map(|e| e.unwrap().file_name()).collect();
+    assert!(left.is_empty(), "{left:?}");
+}
+
+#[test]
+fn a_garbage_file_under_the_cache_name_is_replaced_by_the_fetched_font() {
+    let dir = Scratch::new("fonts-heal");
+    let ttf = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/text/fonts/JosefinSans-Light.ttf")).unwrap();
+    std::fs::create_dir_all(&dir.0).unwrap();
+    std::fs::write(dir.0.join(cache_name(&font())), b"half a fo").unwrap();
+    let served = ttf.clone();
+    let (base, seen) = serve(move |base| {
+        let css = format!("@font-face {{ src: url({base}/s/josefin.ttf) format('truetype'); }}");
+        vec![(200, "text/css", css.into_bytes()), (200, "font/ttf", served)]
+    });
+    let gf = GoogleFonts::new(dir.0.clone(), &base).unwrap();
+    let out = tauri::async_runtime::block_on(gf.ensure(&[font()]));
+    assert!(!out.offline && out.missing.is_empty(), "{:?}", out.missing);
+    assert_eq!(std::fs::read(dir.0.join(cache_name(&font()))).unwrap(), ttf);
+    assert_eq!(seen.lock().unwrap().len(), 2);
+    let names: Vec<_> = std::fs::read_dir(&dir.0).unwrap().map(|e| e.unwrap().file_name()).collect();
+    assert_eq!(names.len(), 1, "{names:?}");
+}

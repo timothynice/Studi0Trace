@@ -3,6 +3,7 @@
 //! data folder under the font's cache name and never fetched twice. Nothing of the user's goes with the request
 //! but the family name. A failure is never an error: the line is matched against installed fonts instead.
 use super::catalog::cache_name;
+use super::glyphs::Font;
 use super::FontRef;
 use crate::error::CommandError;
 use std::path::PathBuf;
@@ -81,7 +82,31 @@ impl GoogleFonts {
         if bytes.is_empty() || bytes.len() > MAX_FONT_BYTES {
             return Err(false);
         }
-        std::fs::write(self.dir.join(cache_name(font)), &bytes).map_err(|_| false)
+        // a 200 whose body is not a font is not cached; the file is written beside its name and renamed into place,
+        // so a failed write never leaves a partial file under the cache name
+        if Font::from_bytes(bytes.to_vec(), 0).is_err() {
+            return Err(false);
+        }
+        let name = cache_name(font);
+        let part = self.dir.join(format!("{name}.part"));
+        let written = std::fs::write(&part, &bytes).and_then(|()| std::fs::rename(&part, self.dir.join(&name)));
+        if written.is_err() {
+            let _ = std::fs::remove_file(&part);
+            return Err(false);
+        }
+        Ok(())
+    }
+
+    /// Whether the font is in `dir` and is a font. A file that does not parse (a partial write of an older run, a
+    /// stray file) is removed, so the font is fetched again instead of being skipped for good.
+    fn cached(&self, font: &FontRef) -> bool {
+        let path = self.dir.join(cache_name(font));
+        let Ok(bytes) = std::fs::read(&path) else { return false };
+        if Font::from_bytes(bytes, 0).is_ok() {
+            return true;
+        }
+        let _ = std::fs::remove_file(&path);
+        false
     }
 
     /// Every font not yet in `dir` is fetched: the css2 stylesheet (non-browser UA → TTF `src`), then the file. A
@@ -89,7 +114,7 @@ impl GoogleFonts {
     pub async fn ensure(&self, fonts: &[FontRef]) -> Ensured {
         let mut out = Ensured::default();
         for font in fonts {
-            if self.dir.join(cache_name(font)).exists() {
+            if self.cached(font) {
                 continue;
             }
             match self.fetch(font).await {
@@ -98,7 +123,7 @@ impl GoogleFonts {
                     out.offline = true;
                     out.missing = Vec::new();
                     for f in fonts {
-                        if !self.dir.join(cache_name(f)).exists() && !out.missing.contains(f) {
+                        if !self.cached(f) && !out.missing.contains(f) {
                             out.missing.push(f.clone());
                         }
                     }
