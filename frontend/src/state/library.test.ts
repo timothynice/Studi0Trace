@@ -2,9 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError, type EngineDescription, type Preset, type VectorizeResponse } from "@/lib/api";
 import { paramsKey } from "@/lib/schema";
-import type { Drift, OpenOutcome, Phase, Platform, RedrawPhase, RedrawResult, TraceRequest } from "@/platform/types";
+import type { Drift, OpenOutcome, Phase, Platform, RedrawPhase, RedrawResult, TextLine, TextLineChange, TextPlan, TraceRequest } from "@/platform/types";
 import { DEFAULT_SETTINGS } from "@/platform/types";
-import { createLibrary, DEBOUNCE_MS, errorOf, needsUpdate, NO_REDRAW, traceKey, unexportedCount, type Catalog } from "./library";
+import { createLibrary, DEBOUNCE_MS, errorOf, needsUpdate, NO_REDRAW, shownAnswer, textOf, traceKey, unexportedCount, type Catalog, type LibraryPlatform } from "./library";
 
 const ENGINE: EngineDescription = {
   id: "vexel",
@@ -773,5 +773,122 @@ describe("library: AI redraw", () => {
     jobs[1].resolve(RESULT);
     await second;
     expect(lib.getState().items[0].redraw?.pending).toEqual(RESULT);
+  });
+});
+
+const PLAN = (lines: TextLine[]): TextPlan => ({ image: "a", reader: "vision", lines, aiError: null, fontsOffline: false });
+const LINE: TextLine = { id: "a-t0", quad: [[0, 0], [10, 0], [10, 5], [0, 5]], string: "EST", class: "type", colour: [0, 0, 0], status: { kind: "matched" }, candidates: [{ font: { family: "Montserrat", weight: 400, italic: false, source: "google" }, iou: 0.9 }], chosen: 0, enabled: true, fit: { size: 10, baseline: 5, x: 0, tracking: 0, nudges: [], iou: 0.9 } };
+const GROUP = '<g id="text"><path d="M0 0h1" fill="#000" data-line="a-t0"/></g>';
+
+/** A platform whose traces answer at once, with the text calls and the redraw calls left to each test. */
+function textPlatform() {
+  const order: string[] = [];
+  const platform = {
+    vectorize: vi.fn(async () => {
+      order.push("trace");
+      return response("<svg></svg>", 100, { text_group: GROUP });
+    }),
+    closeImage: vi.fn(),
+    openPaths: vi.fn(async () => []),
+    textPlan: vi.fn(async (): Promise<TextPlan> => {
+      order.push("plan");
+      return PLAN([LINE]);
+    }),
+    textSetLine: vi.fn(async (_id: string, _line: string, change: TextLineChange) => ({ plan: PLAN([{ ...LINE, string: "EST.", enabled: change.enabled ?? true }]), textGroup: GROUP.replace("h1", "h2") })),
+    redrawImage: vi.fn(async () => RESULT),
+    acceptRedraw: vi.fn(async (id: string) => ({ image: image(id), original: image(`${id}-original`) })),
+  } satisfies LibraryPlatform;
+  return { platform, order };
+}
+
+describe("library: text", () => {
+  beforeEach(() => vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] }));
+  afterEach(() => vi.useRealTimers());
+
+  it("asks for the plan before the first trace and composes the answer", async () => {
+    const { platform, order } = textPlatform();
+    const lib = createLibrary(platform, CATALOG, { ...DEFAULT_SETTINGS, recogniseText: true });
+    lib.add([ok("a")]);
+    lib.generate("a");
+    await flush();
+    expect(order).toEqual(["plan", "trace"]);
+    const item = lib.selectedItem()!;
+    expect(textOf(item).plan?.lines).toHaveLength(1);
+    expect(shownAnswer(item)?.svg).toBe(`<svg>${GROUP}</svg>`);
+    expect(shownAnswer(item)?.base).toBe("<svg></svg>");
+    expect(shownAnswer(item)?.textGroup).toBe(GROUP);
+  });
+
+  it("does not ask when Recognise text is off, and traces the original", async () => {
+    const { platform } = textPlatform();
+    const lib = createLibrary(platform, CATALOG, { ...DEFAULT_SETTINGS, recogniseText: false });
+    lib.add([ok("a")]);
+    lib.generate("a");
+    await flush();
+    expect(platform.textPlan).not.toHaveBeenCalled();
+    expect(lib.selectedItem()!.shown).not.toBeNull();
+  });
+
+  it("a plan failure is kept on the item and the trace still runs", async () => {
+    const { platform } = textPlatform();
+    platform.textPlan.mockImplementation(async () => Promise.reject(new ApiError("text_unavailable", "no", 501)));
+    const lib = createLibrary(platform, CATALOG, { ...DEFAULT_SETTINGS, recogniseText: true });
+    lib.add([ok("a")]);
+    lib.generate("a");
+    await flush();
+    expect(textOf(lib.selectedItem()!).error?.code).toBe("text_unavailable");
+    expect(lib.selectedItem()!.shown).not.toBeNull();
+  });
+
+  it("a string edit recomposes every trace without tracing; an enabled change traces again", async () => {
+    const { platform } = textPlatform();
+    const lib = createLibrary(platform, CATALOG, { ...DEFAULT_SETTINGS, recogniseText: true });
+    lib.add([ok("a")]);
+    lib.generate("a");
+    await flush();
+    await lib.setTextLine("a", "a-t0", { string: "EST." });
+    expect(platform.vectorize).toHaveBeenCalledTimes(1);
+    expect(shownAnswer(lib.selectedItem()!)?.svg).toBe(`<svg>${GROUP.replace("h1", "h2")}</svg>`);
+    expect(textOf(lib.selectedItem()!).plan?.lines[0].string).toBe("EST.");
+    await lib.setTextLine("a", "a-t0", { enabled: false });
+    await flush();
+    expect(platform.vectorize).toHaveBeenCalledTimes(2);
+    expect(platform.textPlan).toHaveBeenCalledTimes(1);
+  });
+
+  it("using a redraw forgets the plan so it is read again", async () => {
+    const { platform } = textPlatform();
+    const lib = createLibrary(platform, CATALOG, { ...DEFAULT_SETTINGS, recogniseText: true });
+    lib.add([ok("a")]);
+    lib.generate("a");
+    await flush();
+    expect(platform.textPlan).toHaveBeenCalledTimes(1);
+    await lib.redraw("a");
+    await lib.acceptRedraw("a");
+    expect(textOf(lib.selectedItem()!).plan).toBeNull();
+    lib.generate("a");
+    await flush();
+    expect(platform.textPlan).toHaveBeenCalledTimes(2);
+  });
+
+  it("a plan is asked once; cancelling it traces the original and ends the phase", async () => {
+    const { platform } = textPlatform();
+    let signal: AbortSignal | undefined;
+    platform.textPlan.mockImplementation(((_id: string, opts: { signal: AbortSignal }) => {
+      signal = opts.signal;
+      return new Promise<TextPlan>((_, reject) => signal!.addEventListener("abort", () => reject(new ApiError("cancelled", "x", 499))));
+    }) as never);
+    const lib = createLibrary(platform, CATALOG, { ...DEFAULT_SETTINGS, recogniseText: true });
+    lib.add([ok("a")]);
+    lib.generate("a");
+    expect(textOf(lib.selectedItem()!)).toMatchObject({ asked: true, phase: "finding" });
+    lib.cancelText("a");
+    await flush();
+    expect(signal?.aborted).toBe(true);
+    expect(textOf(lib.selectedItem()!)).toMatchObject({ phase: null, error: null, plan: null });
+    expect(lib.selectedItem()!.shown).not.toBeNull();
+    lib.generate("a");
+    await flush();
+    expect(platform.textPlan).toHaveBeenCalledTimes(1);
   });
 });

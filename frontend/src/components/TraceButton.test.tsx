@@ -17,7 +17,7 @@ const base: ImageItem = {
   errorKey: null,
   auto: null,
 };
-const answer = { svg: "<svg/>", elapsedMs: 900, stats: {} };
+const answer = { svg: "<svg/>", base: "<svg/>", textGroup: null, elapsedMs: 900, stats: {} };
 
 describe("TraceButton", () => {
   beforeEach(() => vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "Date"] }));

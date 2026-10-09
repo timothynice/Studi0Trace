@@ -3,8 +3,9 @@
  * job running for it. Framework-free: React reads it through `useLibrary`, tests call it directly.
  */
 import { ApiError, type AutoResult, type EngineDescription, type ParamValues, type Preset, type VectorizeResponse } from "@/lib/api";
+import { composeSvg } from "@/lib/textsvg";
 import { normalizeValues, paramsKey, specsFor } from "@/lib/schema";
-import type { Drift, OpenedImage, OpenFailure, OpenOutcome, Phase, Platform, RedrawPhase, RedrawResult, Roughness, Settings } from "@/platform/types";
+import type { Drift, OpenedImage, OpenFailure, OpenOutcome, Phase, Platform, RedrawPhase, RedrawResult, Roughness, Settings, TextLineChange, TextPhase, TextPlan } from "@/platform/types";
 
 export const ENGINE = "vexel";
 /** A trace quicker than this is run again by itself when its settings move. */
@@ -13,7 +14,12 @@ export const LIVE_MS = 2000;
 export const DEBOUNCE_MS = 250;
 
 export interface TraceAnswer {
+  /** What is shown and exported: `base` with the text group composed in. */
   svg: string;
+  /** The SVG as the engine traced it. */
+  base: string;
+  /** The re-set text drawn over the trace; null when there is none. */
+  textGroup: string | null;
   elapsedMs: number;
   stats: Record<string, number>;
 }
@@ -48,7 +54,21 @@ export interface ImageItem {
   redraw?: RedrawState;
   /** Whether the image looks rough (the inspector's hint); absent until the app has answered. */
   rough?: Roughness;
+  /** Text re-setting (the Mac app); absent until asked. */
+  text?: TextState;
 }
+
+/** An image's text plan: asked once per image bytes, before the first trace. */
+export interface TextState {
+  plan: TextPlan | null;
+  phase: TextPhase | null;
+  error: ApiError | null;
+  asked: boolean;
+}
+
+export const NO_TEXT: TextState = { plan: null, phase: null, error: null, asked: false };
+
+export const textOf = (item: Pick<ImageItem, "text">): TextState => item.text ?? NO_TEXT;
 
 /** An image's AI redraw: the one running, the one waiting for a decision, and the original while the source is a redraw. */
 export interface RedrawState {
@@ -85,7 +105,7 @@ export interface Catalog {
 }
 
 /** What the library asks of the platform; the redraw methods are there in the Mac app (tests may leave them out). */
-export type LibraryPlatform = Pick<Platform, "vectorize" | "closeImage" | "openPaths"> & Partial<Pick<Platform, "imageRoughness" | "redrawImage" | "acceptRedraw" | "discardRedraw" | "revertRedraw">>;
+export type LibraryPlatform = Pick<Platform, "vectorize" | "closeImage" | "openPaths"> & Partial<Pick<Platform, "imageRoughness" | "redrawImage" | "acceptRedraw" | "discardRedraw" | "revertRedraw" | "textPlan" | "textSetLine">>;
 
 export interface Library {
   getState(): LibraryState;
@@ -116,6 +136,10 @@ export interface Library {
   discardRedraw(id: string): void;
   /** The original is the source again, with its traces. */
   revertRedraw(id: string): Promise<void>;
+  /** A line's string or font changed (the traces are composed again, nothing traces) or it was switched on or off (every trace of the image is dropped and traced again). */
+  setTextLine(id: string, lineId: string, change: TextLineChange): Promise<void>;
+  /** Abandons the text plan being asked; the trace then goes on without it. */
+  cancelText(id: string): void;
 }
 
 export interface ExportMark {
@@ -195,6 +219,15 @@ export function createLibrary(platform: LibraryPlatform, catalog: Catalog, initi
     redrawing.delete(id);
   };
 
+  const texting = new Map<string, { controller: AbortController; done: Promise<void> }>();
+  /** Images whose line edit is in flight: a second edit is ignored until it lands. */
+  const editing = new Set<string>();
+  const patchText = (id: string, change: Partial<TextState>) => patch(id, (i) => ({ text: { ...textOf(i), ...change } }));
+  const abortText = (id: string) => {
+    texting.get(id)?.controller.abort();
+    texting.delete(id);
+  };
+
   const clearTimer = (id: string) => {
     clearTimeout(timers.get(id));
     timers.delete(id);
@@ -209,7 +242,7 @@ export function createLibrary(platform: LibraryPlatform, catalog: Catalog, initi
   const answerOf = (res: VectorizeResponse): TraceAnswer | ApiError => {
     const r = res.results[ENGINE];
     if (!r || r.error || !r.svg) return new ApiError(r?.error?.code ?? "engine_failed", r?.error?.message ?? "The engine returned no vector");
-    return { svg: r.svg, elapsedMs: r.elapsed_ms ?? 0, stats: r.stats ?? {} };
+    return { svg: composeSvg(r.svg, res.text_group), base: r.svg, textGroup: res.text_group ?? null, elapsedMs: r.elapsed_ms ?? 0, stats: r.stats ?? {} };
   };
 
   const finish = (id: string, jobId: string, key: string, res: VectorizeResponse) => {
@@ -228,7 +261,7 @@ export function createLibrary(platform: LibraryPlatform, catalog: Catalog, initi
     if (auto) {
       for (const c of auto.candidates) {
         const preset = presetById.get(c.preset);
-        if (preset && c.svg) traces[paramsKey(resolve(preset.params))] = { svg: c.svg, elapsedMs: c.elapsed_ms ?? 0, stats: c.stats ?? {} };
+        if (preset && c.svg) traces[paramsKey(resolve(preset.params))] = { svg: composeSvg(c.svg, res.text_group), base: c.svg, textGroup: res.text_group ?? null, elapsedMs: c.elapsed_ms ?? 0, stats: c.stats ?? {} };
       }
       const pick = auto.pick ? presetById.get(auto.pick) : undefined;
       if (pick && current) params = resolve(pick.params);
@@ -245,7 +278,58 @@ export function createLibrary(platform: LibraryPlatform, catalog: Catalog, initi
     patch(id, isCancel(err) ? { job: null } : { job: null, error: toApiError(err), errorKey: item.job.key });
   };
 
+  /** The plan, once per image bytes, before the first trace; a failure is kept and the trace goes on. */
+  const ensureText = (id: string): Promise<void> => {
+    const item = find(id);
+    if (!item || !settings.recogniseText || !platform.textPlan) return Promise.resolve();
+    const running = texting.get(id);
+    if (running) return running.done; // a trace asked for meanwhile waits for the same plan
+    const t = textOf(item);
+    if (t.plan || t.asked) return Promise.resolve();
+    const controller = new AbortController();
+    const current = () => texting.get(id)?.controller === controller && !!find(id);
+    patchText(id, { asked: true, phase: "finding", error: null });
+    const done = (async () => {
+      try {
+        const plan = await platform.textPlan!(id, {
+          signal: controller.signal,
+          onPhase: (phase) => {
+            if (current() && phase !== "done" && phase !== "failed") patchText(id, { phase });
+          },
+        });
+        if (current()) patchText(id, { plan, phase: null });
+      } catch (err) {
+        if (!current()) return;
+        const e = toApiError(err);
+        patchText(id, { phase: null, error: e.code === "cancelled" ? null : e });
+      } finally {
+        if (texting.get(id)?.controller === controller) texting.delete(id);
+      }
+    })();
+    texting.set(id, { controller, done });
+    return done;
+  };
+
+  const needsText = (id: string) => {
+    const item = find(id);
+    return !!item && settings.recogniseText && !!platform.textPlan && (texting.has(id) || (!textOf(item).plan && !textOf(item).asked));
+  };
+
   const generate = (id: string) => {
+    const item = find(id);
+    if (!item) return;
+    const key = traceKey(item);
+    if (item.traces[key]) {
+      patch(id, { shown: key, error: null, errorKey: null });
+      return;
+    }
+    if (item.job?.key === key) return;
+    // the plan comes first, and is only waited for when there is one to ask; otherwise the trace starts at once
+    if (needsText(id)) void ensureText(id).then(() => startTrace(id));
+    else startTrace(id);
+  };
+
+  const startTrace = (id: string) => {
     const item = find(id);
     if (!item) return;
     const key = traceKey(item);
@@ -352,6 +436,8 @@ export function createLibrary(platform: LibraryPlatform, catalog: Catalog, initi
       abortJob(item);
       clearTimer(id);
       abortRedraw(id);
+      abortText(id);
+      editing.delete(id);
       roughAsked.delete(id);
       platform.closeImage(id);
       set({ ...state, selected: selectAfterRemoving(id), items: state.items.filter((i) => i.image.id !== id) });
@@ -362,6 +448,8 @@ export function createLibrary(platform: LibraryPlatform, catalog: Catalog, initi
         abortJob(item);
         clearTimer(item.image.id);
         abortRedraw(item.image.id);
+        abortText(item.image.id);
+        editing.delete(item.image.id);
         roughAsked.delete(item.image.id);
         platform.closeImage(item.image.id);
       }
@@ -489,8 +577,10 @@ export function createLibrary(platform: LibraryPlatform, catalog: Catalog, initi
           error: null,
           errorKey: null,
           rough: { rough: false, reason: null },
+          text: undefined,
           redraw: { ...NO_REDRAW, active: true, original: accepted.original, drift: r.pending.drift, kept },
         });
+        abortText(id);
         if (settings.traceOnOpen) generate(id);
       } finally {
         deciding.delete(id);
@@ -502,6 +592,33 @@ export function createLibrary(platform: LibraryPlatform, catalog: Catalog, initi
       if (!item || !redrawOf(item).pending) return;
       void platform.discardRedraw?.(id).catch(() => {});
       patchRedraw(id, { pending: null });
+    },
+
+    async setTextLine(id, lineId, change) {
+      if (!find(id) || !platform.textSetLine || editing.has(id)) return;
+      editing.add(id);
+      try {
+        const answer = await platform.textSetLine(id, lineId, change);
+        const now = find(id);
+        if (!now) return;
+        if (change.enabled !== undefined) {
+          // what is painted out changed: every trace of this image is stale
+          abortJob(now);
+          clearTimer(id);
+          patch(id, { traces: {}, shown: null, exported: null, auto: null, job: null, error: null, errorKey: null, text: { ...textOf(now), plan: answer.plan } });
+          generate(id);
+          return;
+        }
+        const traces = Object.fromEntries(Object.entries(now.traces).map(([k, t]) => [k, { ...t, svg: composeSvg(t.base, answer.textGroup), textGroup: answer.textGroup }]));
+        patch(id, { traces, text: { ...textOf(now), plan: answer.plan } });
+      } finally {
+        editing.delete(id);
+      }
+    },
+
+    cancelText(id) {
+      abortText(id);
+      if (find(id)) patchText(id, { phase: null });
     },
 
     async revertRedraw(id) {
@@ -520,10 +637,11 @@ export function createLibrary(platform: LibraryPlatform, catalog: Catalog, initi
         const now = find(id);
         if (!now) return;
         abortJob(now);
+        abortText(id);
         clearTimer(id);
         const kept = redrawOf(now).kept ?? { preset: now.preset, params: now.params, traces: {}, shown: null, exported: null, auto: null };
         roughAsked.delete(id);
-        patch(id, { ...kept, image, job: null, error: null, errorKey: null, rough: undefined, redraw: NO_REDRAW });
+        patch(id, { ...kept, image, job: null, error: null, errorKey: null, rough: undefined, text: undefined, redraw: NO_REDRAW });
       } finally {
         deciding.delete(id);
       }

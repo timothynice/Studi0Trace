@@ -61,7 +61,7 @@ describe("Sidebar", () => {
 
   it("badges a traced image, amber when its settings have moved since, and dims one that is tracing", () => {
     const key = paramsKey({ detail: 6 });
-    const answer = { svg: "<svg/>", elapsedMs: 1, stats: {} };
+    const answer = { svg: "<svg/>", base: "<svg/>", textGroup: null, elapsedMs: 1, stats: {} };
     setup({
       items: [
         item("t", { preset: "balanced", params: { detail: 6 }, traces: { [key]: answer }, shown: key }),

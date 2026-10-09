@@ -21,7 +21,7 @@ const item = (id: string, name: string, traced = true): ImageItem => ({
   image: { id, name, path: null, width: 4, height: 2, format: "PNG", previewUrl: `blob:${id}` },
   preset: "balanced",
   params: { detail: 6 },
-  traces: traced ? { [key]: { svg: `<svg id="${id}"/>`, elapsedMs: 1, stats: {} } } : {},
+  traces: traced ? { [key]: { svg: `<svg id="${id}"/>`, base: `<svg id="${id}"/>`, textGroup: null, elapsedMs: 1, stats: {} } } : {},
   shown: traced ? key : null,
   exported: null,
   job: null,

@@ -13,7 +13,7 @@ const item: ImageItem = {
   image: { id: "a", name: "a.png", path: null, width: 4, height: 4, format: "PNG", previewUrl: "blob:a" },
   preset: "balanced",
   params: { detail: 6, min_region: 8 },
-  traces: { [key]: { svg: SVG16, elapsedMs: 1530, stats: { paths: 1, nodes: 4, bytes: 4544 } } },
+  traces: { [key]: { svg: SVG16, base: SVG16, textGroup: null, elapsedMs: 1530, stats: { paths: 1, nodes: 4, bytes: 4544 } } },
   shown: key,
   exported: null,
   job: null,
@@ -50,7 +50,7 @@ describe("VectorizePanel", () => {
   });
 
   it("says one shape, not 1 shapes", () => {
-    const one: ImageItem = { ...item, traces: { [key]: { svg: '<svg xmlns="http://www.w3.org/2000/svg"><circle r="1"/></svg>', elapsedMs: 10, stats: { paths: 0, nodes: 0, bytes: 60 } } } };
+    const one: ImageItem = { ...item, traces: { [key]: { svg: '<svg xmlns="http://www.w3.org/2000/svg"><circle r="1"/></svg>', base: '<svg xmlns="http://www.w3.org/2000/svg"><circle r="1"/></svg>', textGroup: null, elapsedMs: 10, stats: { paths: 0, nodes: 0, bytes: 60 } } } };
     render(<VectorizePanel item={one} catalog={{ engine: VEXEL, presets: VEXEL_PRESETS }} specs={specsFor(VEXEL)} invalidField={null} onPick={vi.fn()} onParam={vi.fn()} onGenerate={vi.fn()} onCancel={vi.fn()} exportMenu={null} />);
     expect(screen.getByText("1 shape · 0 nodes · 60 B · 10 ms")).toBeInTheDocument();
   });
