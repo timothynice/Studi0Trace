@@ -73,7 +73,9 @@ On the bench against two well-known open-source tracers, Vexel is the most faith
   </tr>
 </table>
 
-**Rough source? Redraw it first (optional).** A small, blurry or pixel-doubled image is the hardest thing to trace. Image ▸ Redraw with AI… shows an AI redraw against the original with a drift check, and only replaces the image when you say so. Your images stay on your Mac: nothing is uploaded unless you choose AI redraw, which sends that one image to OpenAI with your own API key. It is the only thing in the app that touches the network, and it is off until you turn it on.
+**Small text comes out as type.** Lines of text are recognised on your Mac, matched to a Google Font or one installed on it, set in that font and drawn as outlines; the Text section lets you correct the words, pick another font or leave a line to the trace. Read text with AI (Settings ▸ Text) asks OpenAI for the words and the typeface, with your own key.
+
+**Rough source? Redraw it first (optional).** A small, blurry or pixel-doubled image is the hardest thing to trace. Image ▸ Redraw with AI… shows an AI redraw against the original with a drift check, and only replaces the image when you say so. Your images stay on your Mac: nothing is uploaded unless you choose AI redraw or turn on Read text with AI, which send that one image to OpenAI with your own API key. Those two and the fonts are the only things in the app that touch the network: a matched Google Font is downloaded from Google with no image attached, and the AI features are off until you turn them on.
 
 <details>
 <summary>AI redraw, in detail</summary>

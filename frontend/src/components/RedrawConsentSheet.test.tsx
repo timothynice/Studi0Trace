@@ -48,4 +48,11 @@ describe("RedrawConsentSheet", () => {
     await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("The keychain would not store the key."));
     expect(screen.getByRole("alert")).not.toHaveTextContent("OSStatus");
   });
+
+  it("has a text-reading variant", () => {
+    render(<RedrawConsentSheet open variant="text" onOpenChange={vi.fn()} onSave={vi.fn()} />);
+    expect(screen.getByRole("dialog", { name: "Read text with AI" })).toBeInTheDocument();
+    expect(screen.getByText(/the image is never changed/)).toBeInTheDocument();
+    expect(screen.queryByText(/may change shapes/)).toBeNull();
+  });
 });

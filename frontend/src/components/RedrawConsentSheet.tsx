@@ -2,17 +2,20 @@ import * as Dialog from "@radix-ui/react-dialog";
 import { X } from "lucide-react";
 import { useEffect, useState } from "react";
 
-import { CONSENT_CHANGES, CONSENT_UPLOAD, keyErrorText, PRIVACY_SENTENCE } from "@/lib/redraw";
+import { CONSENT_CHANGES, CONSENT_TEXT_UPLOAD, CONSENT_UPLOAD, keyErrorText, PRIVACY_SENTENCE } from "@/lib/redraw";
 
 export interface RedrawConsentSheetProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   /** Stores the key (in the Keychain, through the platform); a rejection's message is shown and the sheet stays. */
   onSave: (key: string) => Promise<void>;
+  /** What the key is for: AI redraw (the default) or Read text with AI. */
+  variant?: "redraw" | "text";
 }
 
 /** AI redraw's first use: what is uploaded, to whom and on whose bill, and the key. It comes only when no key is stored. */
-export function RedrawConsentSheet({ open, onOpenChange, onSave }: RedrawConsentSheetProps) {
+export function RedrawConsentSheet({ open, onOpenChange, onSave, variant = "redraw" }: RedrawConsentSheetProps) {
+  const text = variant === "text";
   const [key, setKey] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -40,14 +43,14 @@ export function RedrawConsentSheet({ open, onOpenChange, onSave }: RedrawConsent
         <Dialog.Overlay className="fixed inset-0 z-50 bg-black/30" />
         <Dialog.Content aria-describedby="redraw-consent-text" className="fixed left-1/2 top-16 z-50 w-[460px] max-w-[calc(100vw-32px)] -translate-x-1/2 space-y-4 rounded-xl border bg-background p-5 shadow-elevated">
           <div className="flex items-center justify-between">
-            <Dialog.Title className="text-[15px] font-semibold">Redraw with AI</Dialog.Title>
+            <Dialog.Title className="text-[15px] font-semibold">{text ? "Read text with AI" : "Redraw with AI"}</Dialog.Title>
             <Dialog.Close className="mac-icon" aria-label="Close">
               <X className="h-4 w-4" aria-hidden="true" />
             </Dialog.Close>
           </div>
           <div id="redraw-consent-text" className="space-y-2 text-[13px] leading-snug">
-            <p>{CONSENT_UPLOAD}</p>
-            <p>{CONSENT_CHANGES}</p>
+            <p>{text ? CONSENT_TEXT_UPLOAD : CONSENT_UPLOAD}</p>
+            {!text && <p>{CONSENT_CHANGES}</p>}
             <p className="text-muted-foreground">{PRIVACY_SENTENCE}</p>
           </div>
           <form
@@ -83,7 +86,7 @@ export function RedrawConsentSheet({ open, onOpenChange, onSave }: RedrawConsent
                 </button>
               </Dialog.Close>
               <button type="submit" className="mac-primary h-8 w-auto px-4" disabled={!key.trim() || saving}>
-                Save Key and Redraw
+                {text ? "Save Key and Turn On" : "Save Key and Redraw"}
               </button>
             </div>
           </form>

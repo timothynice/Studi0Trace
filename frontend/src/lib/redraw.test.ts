@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import { ApiError } from "./api";
-import { colourText, CONSENT_CHANGES, CONSENT_UPLOAD, edgesText, PRIVACY_SENTENCE, redrawErrorText, redrawFailureText, roughHint, VERDICT_LABEL } from "./redraw";
+import { colourText, CONSENT_CHANGES, CONSENT_TEXT_UPLOAD, CONSENT_UPLOAD, edgesText, PRIVACY_SENTENCE, redrawErrorText, redrawFailureText, roughHint, VERDICT_LABEL } from "./redraw";
 
 const drift = (edgeF1: number, deltaE: number) => ({ edgeF1, deltaE, verdict: "large" as const });
 
@@ -57,7 +57,8 @@ describe("redraw words", () => {
   });
 
   it("says what is uploaded, to whom, on whose bill, and that it is checked first", () => {
-    expect(PRIVACY_SENTENCE).toBe("Your images stay on your Mac: nothing is uploaded unless you choose AI redraw, which sends that one image to OpenAI with your own API key.");
+    expect(PRIVACY_SENTENCE).toBe("Your images stay on your Mac: nothing is uploaded unless you choose AI redraw or turn on Read text with AI, which send that one image to OpenAI with your own API key.");
+    expect(CONSENT_TEXT_UPLOAD).toContain("the image is never changed");
     expect(CONSENT_UPLOAD).toContain("uploaded to OpenAI with your API key and billed to your OpenAI account");
     expect(CONSENT_CHANGES).toContain("may change shapes, spacing and colours");
   });

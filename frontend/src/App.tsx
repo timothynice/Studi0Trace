@@ -72,9 +72,27 @@ export default function App() {
 function SettingsWindow() {
   const { settings, change } = useSettings();
   const key = useRedrawKey();
+  const [consent, setConsent] = useState(false);
   return (
     <div className="min-h-dvh bg-background">
-      <SettingsView settings={settings} onChange={change} redraw={CAN_REDRAW ? { stored: key.stored, onSave: key.save, onRemove: key.remove } : undefined} />
+      <SettingsView
+        settings={settings}
+        onChange={change}
+        redraw={CAN_REDRAW ? { stored: key.stored, onSave: key.save, onRemove: key.remove } : undefined}
+        text={CAN_TEXT ? { keyStored: key.stored, onNeedKey: () => setConsent(true) } : undefined}
+      />
+      {CAN_TEXT && (
+        <RedrawConsentSheet
+          open={consent}
+          variant="text"
+          onOpenChange={setConsent}
+          onSave={async (k) => {
+            await key.save(k);
+            setConsent(false);
+            change({ ...settings, readTextWithAi: true });
+          }}
+        />
+      )}
     </div>
   );
 }

@@ -16,6 +16,8 @@ export interface SettingsViewProps {
   onChange: (next: Settings) => void;
   /** The AI redraw group, in the Mac app only. */
   redraw?: RedrawKeyControls;
+  /** The Text group, in the Mac app only: whether a key is stored (null while unknown) and how to ask for one. */
+  text?: { keyStored: boolean | null; onNeedKey: () => void };
 }
 
 function KeyRow({ controls }: { controls: RedrawKeyControls }) {
@@ -151,7 +153,7 @@ function Toggle({ label, checked, onChange }: { label: string; checked: boolean;
 }
 
 /** The settings, as grouped rows in the manner of System Settings. */
-export function SettingsView({ settings, onChange, redraw }: SettingsViewProps) {
+export function SettingsView({ settings, onChange, redraw, text }: SettingsViewProps) {
   const set = <K extends keyof Settings>(key: K, value: Settings[K]) => onChange({ ...settings, [key]: value });
   return (
     <div className="space-y-5 p-5">
@@ -190,6 +192,29 @@ export function SettingsView({ settings, onChange, redraw }: SettingsViewProps) 
           </Row>
           <Row label="Suggest for rough images" hint="A hint in the inspector for small or pixel-doubled images">
             <Toggle label="Suggest for rough images" checked={settings.suggestRedraw} onChange={(v) => set("suggestRedraw", v)} />
+          </Row>
+        </Group>
+      )}
+      {text && (
+        <Group title="Text">
+          <Row label="Recognise text" hint="Lines of text are set in a matching font and drawn as outlines">
+            <Toggle label="Recognise text" checked={settings.recogniseText} onChange={(v) => set("recogniseText", v)} />
+          </Row>
+          <Row label="Read text with AI" hint="OpenAI reads each line and names its typeface, with your key">
+            <Toggle
+              label="Read text with AI"
+              checked={settings.readTextWithAi}
+              onChange={(v) => {
+                if (v && text.keyStored === false) text.onNeedKey();
+                else set("readTextWithAi", v);
+              }}
+            />
+          </Row>
+          <Row label="Model">
+            <input aria-label="Model" spellCheck={false} autoComplete="off" className="h-7 w-40 min-w-0 rounded-md border bg-background/70 px-2 text-[12px]" value={settings.textModel} onChange={(e) => set("textModel", e.target.value)} />
+          </Row>
+          <Row label="Hidden text in exports" hint="An invisible text layer, for search and screen readers">
+            <Toggle label="Hidden text in exports" checked={settings.hiddenText} onChange={(v) => set("hiddenText", v)} />
           </Row>
         </Group>
       )}

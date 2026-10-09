@@ -115,4 +115,29 @@ describe("SettingsView", () => {
     fireEvent.click(screen.getByRole("button", { name: "Remove" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("The keychain would not remove the key.");
   });
+
+  it("has a Text group whose AI switch asks for a key when none is stored", () => {
+    const onChange = vi.fn();
+    const onNeedKey = vi.fn();
+    render(<SettingsView settings={DEFAULT_SETTINGS} onChange={onChange} text={{ keyStored: false, onNeedKey }} />);
+    expect(screen.getByRole("switch", { name: "Recognise text" })).toBeChecked();
+    expect(screen.getByRole("switch", { name: "Hidden text in exports" })).toBeChecked();
+    fireEvent.click(screen.getByRole("switch", { name: "Read text with AI" }));
+    expect(onNeedKey).toHaveBeenCalled();
+    expect(onChange).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByRole("textbox", { name: "Model" }), { target: { value: "gpt-5" } });
+    expect(onChange).toHaveBeenCalledWith({ ...DEFAULT_SETTINGS, textModel: "gpt-5" });
+  });
+
+  it("turns Read text with AI on at once when a key is stored", () => {
+    const onChange = vi.fn();
+    render(<SettingsView settings={DEFAULT_SETTINGS} onChange={onChange} text={{ keyStored: true, onNeedKey: vi.fn() }} />);
+    fireEvent.click(screen.getByRole("switch", { name: "Read text with AI" }));
+    expect(onChange).toHaveBeenCalledWith({ ...DEFAULT_SETTINGS, readTextWithAi: true });
+  });
+
+  it("has no Text group in a browser", () => {
+    render(<SettingsView settings={DEFAULT_SETTINGS} onChange={vi.fn()} />);
+    expect(screen.queryByRole("switch", { name: "Recognise text" })).toBeNull();
+  });
 });
