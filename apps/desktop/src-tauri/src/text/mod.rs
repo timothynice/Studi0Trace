@@ -2,6 +2,7 @@
 //! matched (catalog.rs, fonts.rs) and fitted (glyphs.rs, ink.rs, fit.rs), the text is painted out of what the
 //! trace sees (ink.rs) and the glyph outlines are composed on top (compose.rs). Nothing here is seen by the
 //! engine, the core or the worker.
+pub mod catalog;
 pub mod fit;
 pub mod glyphs;
 pub mod ink;
