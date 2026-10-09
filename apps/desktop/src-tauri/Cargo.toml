@@ -41,6 +41,11 @@ rustls = { version = "0.23", default-features = false, features = ["std", "ring"
 futures-util = { version = "0.3", default-features = false }
 base64 = "0.22"
 image = { version = "0.25", default-features = false, features = ["png"] }
+# Text re-setting (src/text/): shaping and outlines (rustybuzz re-exports the ttf-parser it is built on), the
+# rasteriser the fit scores with (resvg's own), the installed fonts' catalogue.
+rustybuzz = "0.20"
+tiny-skia = "0.12"
+fontdb = "0.23"
 # PDF export (export.rs): a vector PDF from the SVG, gradients kept; `filters` rasterises a blur through resvg.
 # No `text`: the engine writes no text, and fonts would bring fontdb.
 svg2pdf = { version = "0.13", default-features = false, features = ["filters"] }
@@ -50,6 +55,10 @@ svg2pdf = { version = "0.13", default-features = false, features = ["filters"] }
 objc2 = "0.6"
 # already in the tree through rustls-platform-verifier; the OpenAI key's generic password (keychain.rs)
 security-framework = "3"
+# Vision's text recogniser (text/vision.rs): on-device OCR
+objc2-vision = { version = "0.3", features = ["VNRecognizeTextRequest", "VNRequestHandler", "VNObservation", "VNRequest"] }
+objc2-foundation = { version = "0.3", features = ["NSArray", "NSData", "NSDictionary", "NSError", "NSString", "NSObject"] }
+objc2-core-foundation = { version = "0.3", features = ["CFCGTypes"] }
 
 [dev-dependencies]
 muda = "0.20"

@@ -11,6 +11,7 @@ pub mod quit;
 pub mod redraw;
 pub mod settings;
 pub mod store;
+pub mod text;
 pub mod updates;
 pub mod worker;
 
