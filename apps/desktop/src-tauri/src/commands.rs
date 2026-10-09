@@ -3,7 +3,8 @@
 use crate::error::CommandError;
 use crate::intake;
 use crate::store::Opened;
-use crate::AppState;
+use crate::text::{self, LineChange, TextPlan};
+use crate::{AppState, TextState};
 use serde::Serialize;
 use serde_json::Value;
 use std::path::PathBuf;
@@ -78,7 +79,8 @@ pub async fn read_image(state: State<'_, AppState>, id: String) -> Result<Respon
 }
 
 #[tauri::command]
-pub fn close_image(state: State<'_, AppState>, id: String) -> bool {
+pub fn close_image(state: State<'_, AppState>, texts: State<'_, TextState>, id: String) -> bool {
+    texts.plans.forget(&id);
     close(&state.images, &state.redraws, &id)
 }
 
@@ -86,15 +88,24 @@ use crate::queue::JobSpec;
 use tauri::Emitter;
 
 #[tauri::command]
-pub async fn vectorize(app: tauri::AppHandle, state: State<'_, AppState>, image_id: String, parameters: Value, auto: bool, job: String) -> Result<Value, CommandError> {
-    let bytes = state.images.bytes(&image_id).ok_or_else(CommandError::expired)?;
+pub async fn vectorize(app: tauri::AppHandle, state: State<'_, AppState>, texts: State<'_, TextState>, image_id: String, parameters: Value, auto: bool, job: String) -> Result<Value, CommandError> {
+    let original = state.images.bytes(&image_id).ok_or_else(CommandError::expired)?;
+    // with text re-set, the worker traces the image with the text painted out, and the group rides on the answer
+    let (bytes, group) = match texts.plans.for_trace(&image_id, &text::bytes_hash(&original)) {
+        Some((painted, group)) => (painted, Some(group)),
+        None => (original, None),
+    };
     let (emitter, job_id) = (app.clone(), job.clone());
     let rx = state.queue.submit(JobSpec { id: job, image_id, bytes, parameters, auto, test: None }, move || {
         let _ = emitter.emit("trace-phase", serde_json::json!({ "job": job_id, "phase": "tracing" }));
     });
-    tauri::async_runtime::spawn_blocking(move || rx.recv().unwrap_or_else(|_| Err(CommandError::cancelled())))
+    let mut answer = tauri::async_runtime::spawn_blocking(move || rx.recv().unwrap_or_else(|_| Err(CommandError::cancelled())))
         .await
-        .unwrap_or_else(|e| Err(CommandError::crashed(e)))
+        .unwrap_or_else(|e| Err(CommandError::crashed(e)))?;
+    if let Value::Object(map) = &mut answer {
+        map.insert("text_group".into(), group.map(Value::String).unwrap_or(Value::Null));
+    }
+    Ok(answer)
 }
 
 #[tauri::command]
@@ -280,8 +291,8 @@ pub(crate) fn show_settings_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>)
     }
     tauri::WebviewWindowBuilder::new(app, "settings", tauri::WebviewUrl::App("index.html".into()))
         .title("Settings")
-        // the AI redraw group made the sheet taller
-        .inner_size(520.0, 780.0)
+        // the AI redraw and Text groups made the sheet taller
+        .inner_size(520.0, 900.0)
         .resizable(false)
         .minimizable(false)
         .maximizable(false)
@@ -516,8 +527,11 @@ pub fn cancel_redraw(state: State<'_, AppState>, id: String) -> bool {
 
 /// Use redraw: the image's source becomes its redraw; the original is kept for Show Original and Revert.
 #[tauri::command]
-pub fn accept_redraw(state: State<'_, AppState>, id: String) -> Result<Accepted, CommandError> {
-    accept(&state.images, &state.redraws, &id)
+pub fn accept_redraw(state: State<'_, AppState>, texts: State<'_, TextState>, id: String) -> Result<Accepted, CommandError> {
+    let accepted = accept(&state.images, &state.redraws, &id);
+    // the image's bytes changed: the plan of the old ones goes
+    texts.plans.forget(&id);
+    accepted
 }
 
 /// Discard: the redraw awaiting a decision is let go of; the image is as it was.
@@ -528,8 +542,110 @@ pub fn discard_redraw(state: State<'_, AppState>, id: String) -> bool {
 
 /// Revert to Original: the image's source is its original again.
 #[tauri::command]
-pub fn revert_redraw(state: State<'_, AppState>, id: String) -> Result<Opened, CommandError> {
-    state.images.revert(&id).ok_or_else(|| CommandError::new(409, "not_redrawn", "This image is not drawn from a redraw."))
+pub fn revert_redraw(state: State<'_, AppState>, texts: State<'_, TextState>, id: String) -> Result<Opened, CommandError> {
+    let reverted = state.images.revert(&id).ok_or_else(|| CommandError::new(409, "not_redrawn", "This image is not drawn from a redraw."));
+    texts.plans.forget(&id);
+    reverted
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LineAnswer {
+    pub plan: TextPlan,
+    pub text_group: String,
+}
+
+fn text_deps(texts: &TextState, settings: &Settings, reader: Option<Arc<dyn text::reader::Reader>>) -> text::Deps {
+    text::Deps { finder: Arc::new(text::vision::Vision), reader, catalog: texts.catalog.clone(), fonts: texts.fonts.clone(), cache_dir: texts.cache_dir.clone(), hidden_text: settings.hidden_text }
+}
+
+/// Finds, reads and fits the text of an image; the plan is kept for the image's bytes and answered again from
+/// the cache. With Read text with AI on, the key is read first; without one the Vision reading stands and the
+/// plan says `no_key`.
+#[tauri::command]
+pub async fn text_plan(app: tauri::AppHandle, state: State<'_, AppState>, texts: State<'_, TextState>, image_id: String) -> Result<TextPlan, CommandError> {
+    let bytes = state.images.bytes(&image_id).ok_or_else(CommandError::expired)?;
+    let hash = text::bytes_hash(&bytes);
+    if let Some(p) = texts.plans.get(&image_id, &hash) {
+        return Ok(p.plan.clone());
+    }
+    let settings = settings::load(&app);
+    let generation = texts.plans.reserve(&image_id);
+    let source = match redraw::blocking(move || Source::decode(&bytes)).await {
+        Ok(s) => Arc::new(s),
+        Err(e) => {
+            texts.plans.fail(&image_id, generation);
+            return Err(e);
+        }
+    };
+    let mut ai_error = None;
+    let reader: Option<Arc<dyn text::reader::Reader>> = if settings.read_text_with_ai {
+        match redraw::blocking(keychain::read_key).await {
+            Ok(Some(key)) => text::reader_openai::AiReader::new(&openai::base_url(), &key, &settings.text_model).ok().map(|r| Arc::new(r) as Arc<dyn text::reader::Reader>),
+            Ok(None) => {
+                ai_error = Some("no_key".to_string());
+                None
+            }
+            Err(e) => {
+                ai_error = Some(e.code().unwrap_or("keychain").to_string());
+                None
+            }
+        }
+    } else {
+        None
+    };
+    if !texts.plans.is_current(&image_id, generation) {
+        return Err(redraw::error("cancelled"));
+    }
+    let (emitter, id) = (app.clone(), image_id.clone());
+    let phase: Arc<dyn Fn(text::Phase) + Send + Sync> = Arc::new(move |p| {
+        let _ = emitter.emit("text-phase", serde_json::json!({ "id": id, "phase": p }));
+    });
+    let deps = text_deps(&texts, &settings, reader);
+    let task = tauri::async_runtime::spawn({
+        let image_id = image_id.clone();
+        async move { text::plan(&image_id, source, deps, phase).await }
+    });
+    texts.plans.arm(&image_id, generation, redraw::abort_handle(&task));
+    let mut planned = match task.await {
+        Ok(Ok(planned)) => planned,
+        Ok(Err(e)) => {
+            texts.plans.fail(&image_id, generation);
+            return Err(e);
+        }
+        Err(e) => {
+            texts.plans.fail(&image_id, generation);
+            return Err(join_failure(e));
+        }
+    };
+    if planned.plan.ai_error.is_none() {
+        planned.plan.ai_error = ai_error;
+    }
+    let kept = texts.plans.put_if_current(&image_id, generation, hash, planned).ok_or_else(|| redraw::error("cancelled"))?;
+    Ok(kept.plan.clone())
+}
+
+#[tauri::command]
+pub fn text_cancel(texts: State<'_, TextState>, image_id: String) -> bool {
+    texts.plans.cancel(&image_id)
+}
+
+#[tauri::command]
+pub async fn text_set_line(app: tauri::AppHandle, state: State<'_, AppState>, texts: State<'_, TextState>, image_id: String, line_id: String, change: LineChange) -> Result<LineAnswer, CommandError> {
+    let bytes = state.images.bytes(&image_id).ok_or_else(CommandError::expired)?;
+    let hash = text::bytes_hash(&bytes);
+    let planned = texts.plans.get(&image_id, &hash).ok_or_else(|| CommandError::new(409, "no_plan", "The text of this image has not been read yet."))?;
+    let settings = settings::load(&app);
+    let source = Arc::new(redraw::blocking(move || Source::decode(&bytes)).await?);
+    let deps = text_deps(&texts, &settings, None);
+    let next = text::set_line(source, &planned, &line_id, change, deps).await?;
+    let kept = texts.plans.put(&image_id, hash, next);
+    Ok(LineAnswer { plan: kept.plan.clone(), text_group: kept.group.clone() })
+}
+
+#[tauri::command]
+pub fn text_search_fonts(texts: State<'_, TextState>, query: String) -> Vec<text::FontRef> {
+    texts.catalog.search(&query, 20)
 }
 
 #[cfg(test)]

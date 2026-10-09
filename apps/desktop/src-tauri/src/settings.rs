@@ -26,6 +26,12 @@ pub struct Settings {
     pub redraw_model: String,
     pub redraw_quality: String,
     pub suggest_redraw: bool,
+    /// Text re-setting (text/): whether lines of text are recognised and re-set on every trace, whether the AI
+    /// reader runs (needs the stored key), its model, and whether exports carry the invisible <text>.
+    pub recognise_text: bool,
+    pub read_text_with_ai: bool,
+    pub text_model: String,
+    pub hidden_text: bool,
     pub recent: Vec<String>,
 }
 
@@ -41,6 +47,10 @@ impl Default for Settings {
             redraw_model: "gpt-image-2".into(),
             redraw_quality: "medium".into(),
             suggest_redraw: true,
+            recognise_text: true,
+            read_text_with_ai: false,
+            text_model: "gpt-5-mini".into(),
+            hidden_text: true,
             recent: Vec::new(),
         }
     }
@@ -65,6 +75,10 @@ impl Settings {
         take(value, "redrawModel", &mut s.redraw_model);
         take(value, "redrawQuality", &mut s.redraw_quality);
         take(value, "suggestRedraw", &mut s.suggest_redraw);
+        take(value, "recogniseText", &mut s.recognise_text);
+        take(value, "readTextWithAi", &mut s.read_text_with_ai);
+        take(value, "textModel", &mut s.text_model);
+        take(value, "hiddenText", &mut s.hidden_text);
         take(value, "recent", &mut s.recent);
         s
     }
@@ -168,7 +182,7 @@ mod tests {
         let v = serde_json::to_value(Settings::default()).unwrap();
         assert_eq!(
             v,
-            serde_json::json!({"appearance": "system", "exportTo": "ask", "revealAfterExport": false, "traceOnOpen": false, "liveUpdate": true, "checkForUpdates": true, "redrawModel": "gpt-image-2", "redrawQuality": "medium", "suggestRedraw": true, "recent": []})
+            serde_json::json!({"appearance": "system", "exportTo": "ask", "revealAfterExport": false, "traceOnOpen": false, "liveUpdate": true, "checkForUpdates": true, "redrawModel": "gpt-image-2", "redrawQuality": "medium", "suggestRedraw": true, "recogniseText": true, "readTextWithAi": false, "textModel": "gpt-5-mini", "hiddenText": true, "recent": []})
         );
         // a file from an older version, missing keys, still reads, and checks for updates
         let old: Settings = serde_json::from_value(serde_json::json!({"appearance": "dark"})).unwrap();

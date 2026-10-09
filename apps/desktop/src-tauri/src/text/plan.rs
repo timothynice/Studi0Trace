@@ -44,11 +44,6 @@ pub struct LineChange {
     pub enabled: Option<bool>,
 }
 
-pub fn bytes_hash(bytes: &[u8]) -> [u8; 32] {
-    use sha2::{Digest, Sha256};
-    Sha256::digest(bytes).into()
-}
-
 fn all_caps(s: &str) -> bool {
     s.chars().filter(|c| c.is_alphabetic()).all(|c| c.is_uppercase())
 }

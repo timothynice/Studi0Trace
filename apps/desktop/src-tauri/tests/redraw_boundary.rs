@@ -40,3 +40,26 @@ fn every_redraw_command_is_registered() {
         assert!(lib.contains(&format!("commands::{cmd},")), "{cmd} is not in the handler list");
     }
 }
+
+#[test]
+fn text_stays_out_of_the_worker_and_talks_to_the_network_from_two_files_only() {
+    let worker = read("src/worker.rs");
+    assert!(!worker.contains("text::") && !worker.contains("crate::text"), "worker.rs uses the text module");
+    for entry in std::fs::read_dir(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/text")).unwrap() {
+        let path = entry.unwrap().path();
+        let name = path.file_name().unwrap().to_string_lossy().to_string();
+        let src = std::fs::read_to_string(&path).unwrap();
+        let may = name == "fonts.rs";
+        assert!(may || !src.contains("reqwest"), "{name} mentions reqwest");
+        // naming the reader's file (`pub mod reader_openai;`, a comment) is not reaching OpenAI
+        assert!(name == "reader_openai.rs" || name == "fonts.rs" || !src.replace("reader_openai", "").contains("openai"), "{name} mentions openai");
+    }
+}
+
+#[test]
+fn every_text_command_is_registered() {
+    let lib = read("src/lib.rs");
+    for cmd in ["text_plan", "text_cancel", "text_set_line", "text_search_fonts"] {
+        assert!(lib.contains(&format!("commands::{cmd},")), "{cmd} is not in the handler list");
+    }
+}

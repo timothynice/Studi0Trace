@@ -26,6 +26,15 @@ pub struct AppState {
     pub redraws: redraw::Redraws,
 }
 
+/// Text re-setting's own state: the plans per image, the font catalogue (built once; fontdb scans the installed
+/// fonts), the Google Fonts fetcher and its cache folder in the app's data directory.
+pub struct TextState {
+    pub plans: text::Plans,
+    pub catalog: std::sync::Arc<text::catalog::Catalog>,
+    pub fonts: Option<std::sync::Arc<text::fonts::GoogleFonts>>,
+    pub cache_dir: std::path::PathBuf,
+}
+
 pub fn run() {
     tauri::Builder::default()
         // Settings is a fixed-size window of its own: a remembered size (it was 520x400 once) would override the one
@@ -74,9 +83,16 @@ pub fn run() {
             commands::accept_redraw,
             commands::discard_redraw,
             commands::revert_redraw,
+            commands::text_plan,
+            commands::text_cancel,
+            commands::text_set_line,
+            commands::text_search_fonts,
         ])
         .setup(|app| {
             use tauri::Manager;
+            let cache_dir = app.path().app_data_dir().map(|d| d.join("fonts")).unwrap_or_else(|_| std::env::temp_dir().join("studi0trace-fonts"));
+            let fonts = text::fonts::GoogleFonts::new(cache_dir.clone(), &text::fonts::base_url()).ok().map(std::sync::Arc::new);
+            app.manage(TextState { plans: text::Plans::default(), catalog: std::sync::Arc::new(text::catalog::Catalog::load()), fonts, cache_dir });
             let (menu, handles) = menu::build(app.handle(), &settings::load(app.handle()).recent)?;
             app.set_menu(menu)?;
             app.manage(handles);
