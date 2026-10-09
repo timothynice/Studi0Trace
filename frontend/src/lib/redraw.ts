@@ -36,7 +36,7 @@ export function roughHint(r: Roughness | undefined): string | null {
 
 /** A redraw failure's words by its code: the same as the Rust side's table, since a server message may quote the
  *  key (a 401's does) and the engine's own for a crash speaks of a trace. */
-const ERROR_WORDS: Record<string, string> = {
+export const ERROR_WORDS: Record<string, string> = {
   no_key: "Add your OpenAI API key to use AI redraw.",
   invalid_key: "OpenAI did not accept your API key. Replace it in Settings ▸ AI redraw.",
   quota: "Your OpenAI account is out of credit or rate limited.",

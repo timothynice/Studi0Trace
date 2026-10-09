@@ -4,7 +4,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
 import { ApiError, apiErrorFromBody, type EngineDescription, type Preset, type VectorizeResponse } from "@/lib/api";
-import { DEFAULT_SETTINGS, type Drift, type ExportAllResult, type MenuCommand, type OpenFailure, type OpenOutcome, type Platform, type RedrawPhase, type Roughness, type Settings } from "./types";
+import { DEFAULT_SETTINGS, type Drift, type ExportAllResult, type MenuCommand, type OpenFailure, type OpenOutcome, type Platform, type FontRef, type RedrawPhase, type Roughness, type Settings, type TextPhase, type TextPlan } from "./types";
 
 interface CommandError {
   status: number;
@@ -264,5 +264,27 @@ export function nativePlatform(): Platform {
       previews.set(id, url);
       return { ...answer, previewUrl: url };
     },
+    async textPlan(id, { signal, onPhase }) {
+      const cancelled = () => new ApiError("cancelled", "The text reading was cancelled", 499);
+      if (signal.aborted) throw cancelled();
+      // the abort listener first: a cancel that lands while the phase listener is being set up still reaches the app
+      const abort = () => void invoke("text_cancel", { imageId: id }).catch(() => {});
+      signal.addEventListener("abort", abort, { once: true });
+      let offPhase = () => {};
+      try {
+        offPhase = await listening<{ id: string; phase: TextPhase }>("text-phase", (p) => {
+          if (p.id === id && !signal.aborted) onPhase?.(p.phase);
+        }).catch(() => () => {});
+        if (signal.aborted) throw cancelled();
+        const plan = await call<TextPlan>("text_plan", { imageId: id });
+        if (signal.aborted) throw cancelled();
+        return plan;
+      } finally {
+        offPhase();
+        signal.removeEventListener("abort", abort);
+      }
+    },
+    textSetLine: (id, lineId, change) => call<{ plan: TextPlan; textGroup: string }>("text_set_line", { imageId: id, lineId, change }),
+    textSearchFonts: (query) => call<FontRef[]>("text_search_fonts", { query }),
   };
 }

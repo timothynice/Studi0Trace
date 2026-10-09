@@ -6,6 +6,8 @@ import { DEFAULT_SETTINGS, type OpenOutcome, type Platform, type Settings } from
 
 const SETTINGS_KEY = "studi0trace.settings";
 /** AI redraw runs in the Mac app only: the browser harness has no Keychain and no road to OpenAI. */
+/** Text re-setting runs in the Mac app only: the browser harness has no fonts of its own to match and no Vision. */
+const noText = () => Promise.reject(new ApiError("unavailable", "Text re-setting needs the Mac app"));
 const noRedraw = () => Promise.reject(new ApiError("unavailable", "AI redraw needs the Mac app"));
 export const ACCEPTED = "image/png,image/jpeg,image/gif,image/webp,image/bmp";
 
@@ -120,5 +122,8 @@ export function webPlatform(): Platform {
     acceptRedraw: noRedraw,
     discardRedraw: noRedraw,
     revertRedraw: noRedraw,
+    textPlan: noText,
+    textSetLine: noText,
+    textSearchFonts: async () => [],
   };
 }

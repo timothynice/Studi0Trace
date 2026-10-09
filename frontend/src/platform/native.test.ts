@@ -327,4 +327,34 @@ describe("native platform", () => {
     await expect(nativePlatform().imageRoughness("i")).resolves.toEqual({ rough: true, reason: "doubled" });
     expect(calls[0]).toEqual({ cmd: "image_roughness", payload: { id: "i" } });
   });
+
+  it("textPlan listens for text-phase before invoking and cancels on abort", async () => {
+    ipc((cmd, args) => {
+      if (cmd === "text_plan") {
+        void emit("text-phase", { id: (args as { imageId: string }).imageId, phase: "finding" });
+        return { image: "i1", reader: "vision", lines: [], aiError: null, fontsOffline: false };
+      }
+      if (cmd === "text_cancel") return true;
+      return undefined;
+    });
+    const phases: string[] = [];
+    const plan = await nativePlatform().textPlan("i1", { signal: new AbortController().signal, onPhase: (p) => phases.push(p) });
+    expect(plan.lines).toEqual([]);
+    expect(phases).toEqual(["finding"]);
+    expect(calls.find((c) => c.cmd === "text_plan")?.payload).toEqual({ imageId: "i1" });
+    const aborted = new AbortController();
+    const p = nativePlatform().textPlan("i1", { signal: aborted.signal });
+    aborted.abort();
+    await expect(p).rejects.toMatchObject({ code: "cancelled" });
+    expect(calls.find((c) => c.cmd === "text_cancel")?.payload).toEqual({ imageId: "i1" });
+  });
+
+  it("textSetLine and textSearchFonts pass camelCase keys", async () => {
+    ipc((cmd) => (cmd === "text_set_line" ? { plan: { image: "i1", reader: "vision", lines: [], aiError: null, fontsOffline: false }, textGroup: "<g/>" } : []));
+    const p = nativePlatform();
+    await expect(p.textSetLine("i1", "l1", { enabled: false })).resolves.toMatchObject({ textGroup: "<g/>" });
+    expect(calls[0]).toEqual({ cmd: "text_set_line", payload: { imageId: "i1", lineId: "l1", change: { enabled: false } } });
+    await expect(p.textSearchFonts("jos")).resolves.toEqual([]);
+    expect(calls[1]).toEqual({ cmd: "text_search_fonts", payload: { query: "jos" } });
+  });
 });

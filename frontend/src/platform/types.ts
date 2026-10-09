@@ -38,6 +38,60 @@ export interface TraceOptions {
   onPhase?: (phase: Phase) => void;
 }
 
+/** Text re-setting: where a font comes from, and what the app reads, matches and fits of each line of text. */
+export type TextSource = "google" | "installed";
+export interface FontRef {
+  family: string;
+  weight: number;
+  italic: boolean;
+  source: TextSource;
+}
+export type TextClass = "type" | "script" | "custom";
+export type DeclineReason = "script" | "custom" | "gradient" | "mismatch" | "no_fit" | "rotated" | "fonts";
+export type TextStatus = { kind: "matched" } | { kind: "declined"; reason: DeclineReason } | { kind: "off" };
+export interface TextFit {
+  size: number;
+  baseline: number;
+  x: number;
+  tracking: number;
+  nudges: number[];
+  iou: number;
+}
+export interface TextCandidate {
+  font: FontRef;
+  iou: number;
+}
+export interface TextLine {
+  id: string;
+  quad: [number, number][];
+  string: string;
+  class: TextClass;
+  colour: [number, number, number];
+  status: TextStatus;
+  candidates: TextCandidate[];
+  chosen: number | null;
+  enabled: boolean;
+  fit: TextFit | null;
+}
+/** What the app reports while it plans an image's text; `done` and `failed` come as the answer does. */
+export type TextPhase = "finding" | "reading" | "matching" | "done" | "failed";
+export interface TextPlan {
+  image: string;
+  reader: "vision" | "ai";
+  lines: TextLine[];
+  aiError: string | null;
+  fontsOffline: boolean;
+}
+export interface TextLineChange {
+  string?: string;
+  font?: FontRef;
+  enabled?: boolean;
+}
+export interface TextOptions {
+  signal: AbortSignal;
+  onPhase?: (phase: TextPhase) => void;
+}
+
 export type RedrawModel = "gpt-image-2" | "gpt-image-1.5";
 export type RedrawQuality = "medium" | "high";
 /** What the app reports while it redraws an image; `done` and `failed` come as the answer does. */
@@ -86,6 +140,11 @@ export interface Settings {
   redrawModel: RedrawModel;
   redrawQuality: RedrawQuality;
   suggestRedraw: boolean;
+  /** Text re-setting (the Mac app): recognise text and set it in a matched font, read it with AI instead of Vision, the model asked, and whether the text stays in the SVG as hidden, selectable text. */
+  recogniseText: boolean;
+  readTextWithAi: boolean;
+  textModel: string;
+  hiddenText: boolean;
   /** Paths, most recent first; only the app changes it. */
   recent: string[];
 }
@@ -100,6 +159,10 @@ export const DEFAULT_SETTINGS: Settings = {
   redrawModel: "gpt-image-2",
   redrawQuality: "medium",
   suggestRedraw: true,
+  recogniseText: true,
+  readTextWithAi: false,
+  textModel: "gpt-5-mini",
+  hiddenText: true,
   recent: [],
 };
 
@@ -217,4 +280,10 @@ export interface Platform {
   acceptRedraw(id: string): Promise<AcceptedRedraw>;
   discardRedraw(id: string): Promise<void>;
   revertRedraw(id: string): Promise<OpenedImage>;
+  /** Text re-setting (the Mac app; a browser answers "not available"). Finds, reads and matches the image's text; aborting the signal abandons it. */
+  textPlan(id: string, opts: TextOptions): Promise<TextPlan>;
+  /** Changes one line (its string, its font or whether it is set) and answers the new plan with the text group to compose. */
+  textSetLine(id: string, lineId: string, change: TextLineChange): Promise<{ plan: TextPlan; textGroup: string }>;
+  /** Fonts whose family matches the query, for the line's font picker. */
+  textSearchFonts(query: string): Promise<FontRef[]>;
 }

@@ -111,6 +111,8 @@ export interface VectorizeResponse {
   parameters_used: Record<string, Record<string, unknown>>;
   /** Per engine, only when the request asked for Auto. */
   auto?: Record<string, AutoResult> | null;
+  /** The text group to compose into the SVG, when the request asked for text and the app planned it. */
+  text_group?: string | null;
 }
 
 export interface UploadResponse {
