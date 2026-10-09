@@ -30,9 +30,22 @@ pub struct AppState {
 /// fonts), the Google Fonts fetcher and its cache folder in the app's data directory.
 pub struct TextState {
     pub plans: text::Plans,
-    pub catalog: std::sync::Arc<text::catalog::Catalog>,
+    /// Built on first use (`catalog()`), never on the main thread: fontdb scans every installed font.
+    pub catalog: std::sync::Arc<std::sync::OnceLock<std::sync::Arc<text::catalog::Catalog>>>,
     pub fonts: Option<std::sync::Arc<text::fonts::GoogleFonts>>,
     pub cache_dir: std::path::PathBuf,
+}
+
+impl TextState {
+    /// The catalogue, scanned on the first call. Blocks while it scans: call it from the blocking pool only.
+    pub fn catalog(&self) -> std::sync::Arc<text::catalog::Catalog> {
+        catalog_of(&self.catalog)
+    }
+}
+
+/// [`TextState::catalog`] for a cell a closure has taken a clone of.
+pub fn catalog_of(cell: &std::sync::OnceLock<std::sync::Arc<text::catalog::Catalog>>) -> std::sync::Arc<text::catalog::Catalog> {
+    cell.get_or_init(|| std::sync::Arc::new(text::catalog::Catalog::load())).clone()
 }
 
 pub fn run() {
@@ -92,7 +105,7 @@ pub fn run() {
             use tauri::Manager;
             let cache_dir = app.path().app_data_dir().map(|d| d.join("fonts")).unwrap_or_else(|_| std::env::temp_dir().join("studi0trace-fonts"));
             let fonts = text::fonts::GoogleFonts::new(cache_dir.clone(), &text::fonts::base_url()).ok().map(std::sync::Arc::new);
-            app.manage(TextState { plans: text::Plans::default(), catalog: std::sync::Arc::new(text::catalog::Catalog::load()), fonts, cache_dir });
+            app.manage(TextState { plans: text::Plans::default(), catalog: Default::default(), fonts, cache_dir });
             let (menu, handles) = menu::build(app.handle(), &settings::load(app.handle()).recent)?;
             app.set_menu(menu)?;
             app.manage(handles);

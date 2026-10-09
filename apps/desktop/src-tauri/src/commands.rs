@@ -85,16 +85,25 @@ pub fn close_image(state: State<'_, AppState>, texts: State<'_, TextState>, id: 
 }
 
 use crate::queue::JobSpec;
-use tauri::Emitter;
+use tauri::{Emitter, Manager};
 
 #[tauri::command]
-pub async fn vectorize(app: tauri::AppHandle, state: State<'_, AppState>, texts: State<'_, TextState>, image_id: String, parameters: Value, auto: bool, job: String) -> Result<Value, CommandError> {
+pub async fn vectorize(app: tauri::AppHandle, state: State<'_, AppState>, image_id: String, parameters: Value, auto: bool, job: String) -> Result<Value, CommandError> {
     let original = state.images.bytes(&image_id).ok_or_else(CommandError::expired)?;
-    // with text re-set, the worker traces the image with the text painted out, and the group rides on the answer
-    let (bytes, group) = match texts.plans.for_trace(&image_id, &text::bytes_hash(&original)) {
-        Some((painted, group)) => (painted, Some(group)),
-        None => (original, None),
-    };
+    // with Recognise text on and a plan for these bytes, the worker traces the image with the text painted out and
+    // the group rides on the answer; the hash of the bytes is taken off the async runtime
+    let recognise = settings::load(&app).recognise_text;
+    let (handle, id) = (app.clone(), image_id.clone());
+    let (bytes, group) = redraw::blocking(move || {
+        if recognise {
+            let texts = handle.state::<TextState>();
+            if let Some((painted, group)) = texts.plans.for_trace(&id, &text::bytes_hash(&original)) {
+                return Ok((painted, Some(group)));
+            }
+        }
+        Ok((original, None))
+    })
+    .await?;
     let (emitter, job_id) = (app.clone(), job.clone());
     let rx = state.queue.submit(JobSpec { id: job, image_id, bytes, parameters, auto, test: None }, move || {
         let _ = emitter.emit("trace-phase", serde_json::json!({ "job": job_id, "phase": "tracing" }));
@@ -292,7 +301,7 @@ pub(crate) fn show_settings_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>)
     tauri::WebviewWindowBuilder::new(app, "settings", tauri::WebviewUrl::App("index.html".into()))
         .title("Settings")
         // the AI redraw and Text groups made the sheet taller
-        .inner_size(520.0, 900.0)
+        .inner_size(520.0, 850.0)
         .resizable(false)
         .minimizable(false)
         .maximizable(false)
@@ -555,8 +564,24 @@ pub struct LineAnswer {
     pub text_group: String,
 }
 
-fn text_deps(texts: &TextState, settings: &Settings, reader: Option<Arc<dyn text::reader::Reader>>) -> text::Deps {
-    text::Deps { finder: Arc::new(text::vision::Vision), reader, catalog: texts.catalog.clone(), fonts: texts.fonts.clone(), cache_dir: texts.cache_dir.clone(), hidden_text: settings.hidden_text }
+/// What a command takes from the state to build a plan's [`text::Deps`] on the blocking pool: the catalogue is
+/// scanned there, on first use, and never on the main thread or the async runtime.
+#[derive(Clone)]
+struct TextParts {
+    catalog: Arc<std::sync::OnceLock<Arc<text::catalog::Catalog>>>,
+    fonts: Option<Arc<text::fonts::GoogleFonts>>,
+    cache_dir: PathBuf,
+}
+
+impl TextParts {
+    fn of(texts: &TextState) -> TextParts {
+        TextParts { catalog: texts.catalog.clone(), fonts: texts.fonts.clone(), cache_dir: texts.cache_dir.clone() }
+    }
+
+    /// Blocks while the catalogue is first scanned.
+    fn deps(self, hidden_text: bool, reader: Option<Arc<dyn text::reader::Reader>>) -> text::Deps {
+        text::Deps { finder: Arc::new(text::vision::Vision), reader, catalog: crate::catalog_of(&self.catalog), fonts: self.fonts, cache_dir: self.cache_dir, hidden_text }
+    }
 }
 
 /// Finds, reads and fits the text of an image; the plan is kept for the image's bytes and answered again from
@@ -565,23 +590,28 @@ fn text_deps(texts: &TextState, settings: &Settings, reader: Option<Arc<dyn text
 #[tauri::command]
 pub async fn text_plan(app: tauri::AppHandle, state: State<'_, AppState>, texts: State<'_, TextState>, image_id: String) -> Result<TextPlan, CommandError> {
     let bytes = state.images.bytes(&image_id).ok_or_else(CommandError::expired)?;
-    let hash = text::bytes_hash(&bytes);
+    let hashed = bytes.clone();
+    let hash = redraw::blocking(move || Ok(text::bytes_hash(&hashed))).await?;
     if let Some(p) = texts.plans.get(&image_id, &hash) {
         return Ok(p.plan.clone());
     }
     let settings = settings::load(&app);
     let generation = texts.plans.reserve(&image_id);
-    let source = match redraw::blocking(move || Source::decode(&bytes)).await {
-        Ok(s) => Arc::new(s),
-        Err(e) => {
-            texts.plans.fail(&image_id, generation);
-            return Err(e);
-        }
-    };
+    // a close between the read above and the reservation would otherwise let a plan run for a closed image
+    if state.images.bytes(&image_id).is_none() {
+        texts.plans.fail(&image_id, generation);
+        return Err(CommandError::expired());
+    }
     let mut ai_error = None;
     let reader: Option<Arc<dyn text::reader::Reader>> = if settings.read_text_with_ai {
         match redraw::blocking(keychain::read_key).await {
-            Ok(Some(key)) => text::reader_openai::AiReader::new(&openai::base_url(), &key, &settings.text_model).ok().map(|r| Arc::new(r) as Arc<dyn text::reader::Reader>),
+            Ok(Some(key)) => match text::reader_openai::AiReader::new(&openai::base_url(), &key, &settings.text_model) {
+                Ok(r) => Some(Arc::new(r) as Arc<dyn text::reader::Reader>),
+                Err(_) => {
+                    ai_error = Some("bad_reply".to_string());
+                    None
+                }
+            },
             Ok(None) => {
                 ai_error = Some("no_key".to_string());
                 None
@@ -594,6 +624,15 @@ pub async fn text_plan(app: tauri::AppHandle, state: State<'_, AppState>, texts:
     } else {
         None
     };
+    let (parts, hidden_text) = (TextParts::of(&texts), settings.hidden_text);
+    let prepared = redraw::blocking(move || Ok((Source::decode(&bytes)?, parts.deps(hidden_text, reader)))).await;
+    let (source, deps) = match prepared {
+        Ok((source, deps)) => (Arc::new(source), deps),
+        Err(e) => {
+            texts.plans.fail(&image_id, generation);
+            return Err(e);
+        }
+    };
     if !texts.plans.is_current(&image_id, generation) {
         return Err(redraw::error("cancelled"));
     }
@@ -601,7 +640,6 @@ pub async fn text_plan(app: tauri::AppHandle, state: State<'_, AppState>, texts:
     let phase: Arc<dyn Fn(text::Phase) + Send + Sync> = Arc::new(move |p| {
         let _ = emitter.emit("text-phase", serde_json::json!({ "id": id, "phase": p }));
     });
-    let deps = text_deps(&texts, &settings, reader);
     let task = tauri::async_runtime::spawn({
         let image_id = image_id.clone();
         async move { text::plan(&image_id, source, deps, phase).await }
@@ -636,16 +674,18 @@ pub async fn text_set_line(app: tauri::AppHandle, state: State<'_, AppState>, te
     let hash = text::bytes_hash(&bytes);
     let planned = texts.plans.get(&image_id, &hash).ok_or_else(|| CommandError::new(409, "no_plan", "The text of this image has not been read yet."))?;
     let settings = settings::load(&app);
-    let source = Arc::new(redraw::blocking(move || Source::decode(&bytes)).await?);
-    let deps = text_deps(&texts, &settings, None);
+    let (parts, hidden_text) = (TextParts::of(&texts), settings.hidden_text);
+    let (source, deps) = redraw::blocking(move || Ok((Source::decode(&bytes)?, parts.deps(hidden_text, None)))).await?;
+    let source = Arc::new(source);
     let next = text::set_line(source, &planned, &line_id, change, deps).await?;
     let kept = texts.plans.put(&image_id, hash, next);
     Ok(LineAnswer { plan: kept.plan.clone(), text_group: kept.group.clone() })
 }
 
 #[tauri::command]
-pub fn text_search_fonts(texts: State<'_, TextState>, query: String) -> Vec<text::FontRef> {
-    texts.catalog.search(&query, 20)
+pub async fn text_search_fonts(texts: State<'_, TextState>, query: String) -> Result<Vec<text::FontRef>, CommandError> {
+    let cell = texts.catalog.clone();
+    redraw::blocking(move || Ok(crate::catalog_of(&cell).search(&query, 20))).await
 }
 
 #[cfg(test)]
