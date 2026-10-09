@@ -1,0 +1,62 @@
+"""Renders the text fixture set: three OFL fonts, three strings, three cap heights, two trackings, two
+backdrops, with the truth of every rendering in truth.json. Glyphs are drawn one at a time with the
+font's own advances and no kerning, as the app shapes them (kern off)."""
+import json
+from pathlib import Path
+
+from PIL import Image, ImageDraw, ImageFont
+
+HERE = Path(__file__).resolve().parent
+FONTS = [("JosefinSans-Light.ttf", "Josefin Sans", 300), ("Montserrat-Regular.ttf", "Montserrat", 400), ("PlayfairDisplay-Regular.ttf", "Playfair Display", 400)]
+STRINGS = ["EST. 2026", "LIFE IS BETTER OUTSIDE", "Ideas for a brighter tomorrow"]
+CAPS = [12.0, 18.0, 30.0]
+TRACKINGS = [0.0, 0.2]  # em
+INK = (24, 28, 44)
+
+
+def cap_ratio(path: str) -> float:
+    """Cap height over em, measured on H at 1000 px."""
+    f = ImageFont.truetype(path, 1000)
+    _, top, _, bottom = f.getbbox("H", anchor="ls")
+    return (bottom - top) / 1000.0
+
+
+def render(font_path, cap_px, tracking_em, string, backdrop):
+    size = cap_px / cap_ratio(font_path)
+    font = ImageFont.truetype(font_path, size)
+    tracking_px = tracking_em * size
+    advances = [font.getlength(ch) for ch in string]
+    width = int(round(sum(advances) + tracking_px * (len(string) - 1))) + 60
+    height = int(round(cap_px)) + 40
+    img = Image.new("RGB", (width, height), (255, 255, 255))
+    if backdrop == "gradient":
+        px = img.load()
+        for y in range(height):
+            for x in range(width):
+                t = x / max(1, width - 1)
+                px[x, y] = (int(255 - 40 * t), int(250 - 20 * t), int(245 + 10 * t))
+    draw = ImageDraw.Draw(img)
+    x, baseline = 30.0, cap_px + 20.0
+    for ch, adv in zip(string, advances):
+        draw.text((x, baseline), ch, font=font, fill=INK, anchor="ls")
+        x += adv + tracking_px
+    return img, size, baseline, tracking_px
+
+
+def main():
+    truth = []
+    for file, family, weight in FONTS:
+        for string in STRINGS:
+            for cap in CAPS:
+                for tr in TRACKINGS:
+                    for backdrop in ("white", "gradient"):
+                        slug = f"{family.split()[0].lower()}-{string.split()[0].lower().strip('.')}-{int(cap)}-t{int(tr * 10)}-{backdrop}.png"
+                        img, size, baseline, tracking_px = render(str(HERE / "fonts" / file), cap, tr, string, backdrop)
+                        img.save(HERE / slug)
+                        truth.append({"file": slug, "font": file, "family": family, "weight": weight, "string": string, "cap_px": cap, "size_px": size, "baseline": baseline, "x": 30.0, "tracking_px": tracking_px, "backdrop": backdrop, "colour": list(INK)})
+    (HERE / "truth.json").write_text(json.dumps(truth, indent=1))
+    print(len(truth), "items")
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,1946 @@
+[
+ {
+  "file": "josefin-est-12-t0-white.png",
+  "font": "JosefinSans-Light.ttf",
+  "family": "Josefin Sans",
+  "weight": 300,
+  "string": "EST. 2026",
+  "cap_px": 12.0,
+  "size_px": 16.901408450704228,
+  "baseline": 32.0,
+  "x": 30.0,
+  "tracking_px": 0.0,
+  "backdrop": "white",
+  "colour": [
+   24,
+   28,
+   44
+  ]
+ },
+ {
+  "file": "josefin-est-12-t0-gradient.png",
+  "font": "JosefinSans-Light.ttf",
+  "family": "Josefin Sans",
+  "weight": 300,
+  "string": "EST. 2026",
+  "cap_px": 12.0,
+  "size_px": 16.901408450704228,
+  "baseline": 32.0,
+  "x": 30.0,
+  "tracking_px": 0.0,
+  "backdrop": "gradient",
+  "colour": [
+   24,
+   28,
+   44
+  ]
+ },
+ {
+  "file": "josefin-est-12-t2-white.png",
+  "font": "JosefinSans-Light.ttf",
+  "family": "Josefin Sans",
+  "weight": 300,
+  "string": "EST. 2026",
+  "cap_px": 12.0,
+  "size_px": 16.901408450704228,
+  "baseline": 32.0,
+  "x": 30.0,
+  "tracking_px": 3.380281690140846,
+  "backdrop": "white",
+  "colour": [
+   24,
+   28,
+   44
+  ]
+ },
+ {
+  "file": "josefin-est-12-t2-gradient.png",
+  "font": "JosefinSans-Light.ttf",
+  "family": "Josefin Sans",
+  "weight": 300,
+  "string": "EST. 2026",
+  "cap_px": 12.0,
+  "size_px": 16.901408450704228,
+  "baseline": 32.0,
+  "x": 30.0,
+  "tracking_px": 3.380281690140846,
+  "backdrop": "gradient",
+  "colour": [
+   24,
+   28,
+   44
+  ]
+ },
+ {
+  "file": "josefin-est-18-t0-white.png",
+  "font": "JosefinSans-Light.ttf",
+  "family": "Josefin Sans",
+  "weight": 300,
+  "string": "EST. 2026",
+  "cap_px": 18.0,
+  "size_px": 25.35211267605634,
+  "baseline": 38.0,
+  "x": 30.0,
+  "tracking_px": 0.0,
+  "backdrop": "white",
+  "colour": [
+   24,
+   28,
+   44
+  ]
+ },
+ {
+  "file": "josefin-est-18-t0-gradient.png",
+  "font": "JosefinSans-Light.ttf",
+  "family": "Josefin Sans",
+  "weight": 300,
+  "string": "EST. 2026",
+  "cap_px": 18.0,
+  "size_px": 25.35211267605634,
+  "baseline": 38.0,
+  "x": 30.0,
+  "tracking_px": 0.0,
+  "backdrop": "gradient",
+  "colour": [
+   24,
+   28,
+   44
+  ]
+ },
+ {
+  "file": "josefin-est-18-t2-white.png",
+  "font": "JosefinSans-Light.ttf",
+  "family": "Josefin Sans",
+  "weight": 300,
+  "string": "EST. 2026",
+  "cap_px": 18.0,
+  "size_px": 25.35211267605634,
+  "baseline": 38.0,
+  "x": 30.0,
+  "tracking_px": 5.070422535211268,
+  "backdrop": "white",
+  "colour": [
+   24,
+   28,
+   44
+  ]
+ },
+ {
+  "file": "josefin-est-18-t2-gradient.png",
+  "font": "JosefinSans-Light.ttf",
+  "family": "Josefin Sans",
+  "weight": 300,
+  "string": "EST. 2026",
+  "cap_px": 18.0,
+  "size_px": 25.35211267605634,
+  "baseline": 38.0,
+  "x": 30.0,
+  "tracking_px": 5.070422535211268,
+  "backdrop": "gradient",
+  "colour": [
+   24,
+   28,
+   44
+  ]
+ },
+ {
+  "file": "josefin-est-30-t0-white.png",
+  "font": "JosefinSans-Light.ttf",
+  "family": "Josefin Sans",
+  "weight": 300,
+  "string": "EST. 2026",
+  "cap_px": 30.0,
+  "size_px": 42.25352112676057,
+  "baseline": 50.0,
+  "x": 30.0,
+  "tracking_px": 0.0,
+  "backdrop": "white",
+  "colour": [
+   24,
+   28,
+   44
+  ]
+ },
+ {
+  "file": "josefin-est-30-t0-gradient.png",
+  "font": "JosefinSans-Light.ttf",
+  "family": "Josefin Sans",
+  "weight": 300,
+  "string": "EST. 2026",
+  "cap_px": 30.0,
+  "size_px": 42.25352112676057,
+  "baseline": 50.0,
+  "x": 30.0,
+  "tracking_px": 0.0,
+  "backdrop": "gradient",
+  "colour": [
+   24,
+   28,
+   44
+  ]
+ },
+ {
+  "file": "josefin-est-30-t2-white.png",
+  "font": "JosefinSans-Light.ttf",
+  "family": "Josefin Sans",
+  "weight": 300,
+  "string": "EST. 2026",
+  "cap_px": 30.0,
+  "size_px": 42.25352112676057,
+  "baseline": 50.0,
+  "x": 30.0,
+  "tracking_px": 8.450704225352114,
+  "backdrop": "white",
+  "colour": [
+   24,
+   28,
+   44
+  ]
+ },
+ {
+  "file": "josefin-est-30-t2-gradient.png",
+  "font": "JosefinSans-Light.ttf",
+  "family": "Josefin Sans",
+  "weight": 300,
+  "string": "EST. 2026",
+  "cap_px": 30.0,
+  "size_px": 42.25352112676057,
+  "baseline": 50.0,
+  "x": 30.0,
+  "tracking_px": 8.450704225352114,
+  "backdrop": "gradient",
+  "colour": [
+   24,
+   28,
+   44
+  ]
+ },
+ {
+  "file": "josefin-life-12-t0-white.png",
+  "font": "JosefinSans-Light.ttf",
+  "family": "Josefin Sans",
+  "weight": 300,
+  "string": "LIFE IS BETTER OUTSIDE",
+  "cap_px": 12.0,
+  "size_px": 16.901408450704228,
+  "baseline": 32.0,
+  "x": 30.0,
+  "tracking_px": 0.0,
+  "backdrop": "white",
+  "colour": [
+   24,
+   28,
+   44
+  ]
+ },
+ {
+  "file": "josefin-life-12-t0-gradient.png",
+  "font": "JosefinSans-Light.ttf",
+  "family": "Josefin Sans",
+  "weight": 300,
+  "string": "LIFE IS BETTER OUTSIDE",
+  "cap_px": 12.0,
+  "size_px": 16.901408450704228,
+  "baseline": 32.0,
+  "x": 30.0,
+  "tracking_px": 0.0,
+  "backdrop": "gradient",
+  "colour": [
+   24,
+   28,
+   44
+  ]
+ },
+ {
+  "file": "josefin-life-12-t2-white.png",
+  "font": "JosefinSans-Light.ttf",
+  "family": "Josefin Sans",
+  "weight": 300,
+  "string": "LIFE IS BETTER OUTSIDE",
+  "cap_px": 12.0,
+  "size_px": 16.901408450704228,
+  "baseline": 32.0,
+  "x": 30.0,
+  "tracking_px": 3.380281690140846,
+  "backdrop": "white",
+  "colour": [
+   24,
+   28,
+   44
+  ]
+ },
+ {
+  "file": "josefin-life-12-t2-gradient.png",
+  "font": "JosefinSans-Light.ttf",
+  "family": "Josefin Sans",
+  "weight": 300,
+  "string": "LIFE IS BETTER OUTSIDE",
+  "cap_px": 12.0,
+  "size_px": 16.901408450704228,
+  "baseline": 32.0,
+  "x": 30.0,
+  "tracking_px": 3.380281690140846,
+  "backdrop": "gradient",
+  "colour": [
+   24,
+   28,
+   44
+  ]
+ },
+ {
+  "file": "josefin-life-18-t0-white.png",
+  "font": "JosefinSans-Light.ttf",
+  "family": "Josefin Sans",
+  "weight": 300,
+  "string": "LIFE IS BETTER OUTSIDE",
+  "cap_px": 18.0,
+  "size_px": 25.35211267605634,
+  "baseline": 38.0,
+  "x": 30.0,
+  "tracking_px": 0.0,
+  "backdrop": "white",
+  "colour": [
+   24,
+   28,
+   44
+  ]
+ },
+ {
+  "file": "josefin-life-18-t0-gradient.png",
+  "font": "JosefinSans-Light.ttf",
+  "family": "Josefin Sans",
+  "weight": 300,
+  "string": "LIFE IS BETTER OUTSIDE",
+  "cap_px": 18.0,
+  "size_px": 25.35211267605634,
+  "baseline": 38.0,
+  "x": 30.0,
+  "tracking_px": 0.0,
+  "backdrop": "gradient",
+  "colour": [
+   24,
+   28,
+   44
+  ]
+ },
+ {
+  "file": "josefin-life-18-t2-white.png",
+  "font": "JosefinSans-Light.ttf",
+  "family": "Josefin Sans",
+  "weight": 300,
+  "string": "LIFE IS BETTER OUTSIDE",
+  "cap_px": 18.0,
+  "size_px": 25.35211267605634,
+  "baseline": 38.0,
+  "x": 30.0,
+  "tracking_px": 5.070422535211268,
+  "backdrop": "white",
+  "colour": [
+   24,
+   28,
+   44
+  ]
+ },
+ {
+  "file": "josefin-life-18-t2-gradient.png",
+  "font": "JosefinSans-Light.ttf",
+  "family": "Josefin Sans",
+  "weight": 300,
+  "string": "LIFE IS BETTER OUTSIDE",
+  "cap_px": 18.0,
+  "size_px": 25.35211267605634,
+  "baseline": 38.0,
+  "x": 30.0,
+  "tracking_px": 5.070422535211268,
+  "backdrop": "gradient",
+  "colour": [
+   24,
+   28,
+   44
+  ]
+ },
+ {
+  "file": "josefin-life-30-t0-white.png",
+  "font": "JosefinSans-Light.ttf",
+  "family": "Josefin Sans",
+  "weight": 300,
+  "string": "LIFE IS BETTER OUTSIDE",
+  "cap_px": 30.0,
+  "size_px": 42.25352112676057,
+  "baseline": 50.0,
+  "x": 30.0,
+  "tracking_px": 0.0,
+  "backdrop": "white",
+  "colour": [
+   24,
+   28,
+   44
+  ]
+ },
+ {
+  "file": "josefin-life-30-t0-gradient.png",
+  "font": "JosefinSans-Light.ttf",
+  "family": "Josefin Sans",
+  "weight": 300,
+  "string": "LIFE IS BETTER OUTSIDE",
+  "cap_px": 30.0,
+  "size_px": 42.25352112676057,
+  "baseline": 50.0,
+  "x": 30.0,
+  "tracking_px": 0.0,
+  "backdrop": "gradient",
+  "colour": [
+   24,
+   28,
+   44
+  ]
+ },
+ {
+  "file": "josefin-life-30-t2-white.png",
+  "font": "JosefinSans-Light.ttf",
+  "family": "Josefin Sans",
+  "weight": 300,
+  "string": "LIFE IS BETTER OUTSIDE",
+  "cap_px": 30.0,
+  "size_px": 42.25352112676057,
+  "baseline": 50.0,
+  "x": 30.0,
+  "tracking_px": 8.450704225352114,
+  "backdrop": "white",
+  "colour": [
+   24,
+   28,
+   44
+  ]
+ },
+ {
+  "file": "josefin-life-30-t2-gradient.png",
+  "font": "JosefinSans-Light.ttf",
+  "family": "Josefin Sans",
+  "weight": 300,
+  "string": "LIFE IS BETTER OUTSIDE",
+  "cap_px": 30.0,
+  "size_px": 42.25352112676057,
+  "baseline": 50.0,
+  "x": 30.0,
+  "tracking_px": 8.450704225352114,
+  "backdrop": "gradient",
+  "colour": [
+   24,
+   28,
+   44
+  ]
+ },
+ {
+  "file": "josefin-ideas-12-t0-white.png",
+  "font": "JosefinSans-Light.ttf",
+  "family": "Josefin Sans",
+  "weight": 300,
+  "string": "Ideas for a brighter tomorrow",
+  "cap_px": 12.0,
+  "size_px": 16.901408450704228,
+  "baseline": 32.0,
+  "x": 30.0,
+  "tracking_px": 0.0,
+  "backdrop": "white",
+  "colour": [
+   24,
+   28,
+   44
+  ]
+ },
+ {
+  "file": "josefin-ideas-12-t0-gradient.png",
+  "font": "JosefinSans-Light.ttf",
+  "family": "Josefin Sans",
+  "weight": 300,
+  "string": "Ideas for a brighter tomorrow",
+  "cap_px": 12.0,
+  "size_px": 16.901408450704228,
+  "baseline": 32.0,
+  "x": 30.0,
+  "tracking_px": 0.0,
+  "backdrop": "gradient",
+  "colour": [
+   24,
+   28,
+   44
+  ]
+ },
+ {
+  "file": "josefin-ideas-12-t2-white.png",
+  "font": "JosefinSans-Light.ttf",
+  "family": "Josefin Sans",
+  "weight": 300,
+  "string": "Ideas for a brighter tomorrow",
+  "cap_px": 12.0,
+  "size_px": 16.901408450704228,
+  "baseline": 32.0,
+  "x": 30.0,
+  "tracking_px": 3.380281690140846,
+  "backdrop": "white",
+  "colour": [
+   24,
+   28,
+   44
+  ]
+ },
+ {
+  "file": "josefin-ideas-12-t2-gradient.png",
+  "font": "JosefinSans-Light.ttf",
+  "family": "Josefin Sans",
+  "weight": 300,
+  "string": "Ideas for a brighter tomorrow",
+  "cap_px": 12.0,
+  "size_px": 16.901408450704228,
+  "baseline": 32.0,
+  "x": 30.0,
+  "tracking_px": 3.380281690140846,
+  "backdrop": "gradient",
+  "colour": [
+   24,
+   28,
+   44
+  ]
+ },
+ {
+  "file": "josefin-ideas-18-t0-white.png",
+  "font": "JosefinSans-Light.ttf",
+  "family": "Josefin Sans",
+  "weight": 300,
+  "string": "Ideas for a brighter tomorrow",
+  "cap_px": 18.0,
+  "size_px": 25.35211267605634,
+  "baseline": 38.0,
+  "x": 30.0,
+  "tracking_px": 0.0,
+  "backdrop": "white",
+  "colour": [
+   24,
+   28,
+   44
+  ]
+ },
+ {
+  "file": "josefin-ideas-18-t0-gradient.png",
+  "font": "JosefinSans-Light.ttf",
+  "family": "Josefin Sans",
+  "weight": 300,
+  "string": "Ideas for a brighter tomorrow",
+  "cap_px": 18.0,
+  "size_px": 25.35211267605634,
+  "baseline": 38.0,
+  "x": 30.0,
+  "tracking_px": 0.0,
+  "backdrop": "gradient",
+  "colour": [
+   24,
+   28,
+   44
+  ]
+ },
+ {
+  "file": "josefin-ideas-18-t2-white.png",
+  "font": "JosefinSans-Light.ttf",
+  "family": "Josefin Sans",
+  "weight": 300,
+  "string": "Ideas for a brighter tomorrow",
+  "cap_px": 18.0,
+  "size_px": 25.35211267605634,
+  "baseline": 38.0,
+  "x": 30.0,
+  "tracking_px": 5.070422535211268,
+  "backdrop": "white",
+  "colour": [
+   24,
+   28,
+   44
+  ]
+ },
+ {
+  "file": "josefin-ideas-18-t2-gradient.png",
+  "font": "JosefinSans-Light.ttf",
+  "family": "Josefin Sans",
+  "weight": 300,
+  "string": "Ideas for a brighter tomorrow",
+  "cap_px": 18.0,
+  "size_px": 25.35211267605634,
+  "baseline": 38.0,
+  "x": 30.0,
+  "tracking_px": 5.070422535211268,
+  "backdrop": "gradient",
+  "colour": [
+   24,
+   28,
+   44
+  ]
+ },
+ {
+  "file": "josefin-ideas-30-t0-white.png",
+  "font": "JosefinSans-Light.ttf",
+  "family": "Josefin Sans",
+  "weight": 300,
+  "string": "Ideas for a brighter tomorrow",
+  "cap_px": 30.0,
+  "size_px": 42.25352112676057,
+  "baseline": 50.0,
+  "x": 30.0,
+  "tracking_px": 0.0,
+  "backdrop": "white",
+  "colour": [
+   24,
+   28,
+   44
+  ]
+ },
+ {
+  "file": "josefin-ideas-30-t0-gradient.png",
+  "font": "JosefinSans-Light.ttf",
+  "family": "Josefin Sans",
+  "weight": 300,
+  "string": "Ideas for a brighter tomorrow",
+  "cap_px": 30.0,
+  "size_px": 42.25352112676057,
+  "baseline": 50.0,
+  "x": 30.0,
+  "tracking_px": 0.0,
+  "backdrop": "gradient",
+  "colour": [
+   24,
+   28,
+   44
+  ]
+ },
+ {
+  "file": "josefin-ideas-30-t2-white.png",
+  "font": "JosefinSans-Light.ttf",
+  "family": "Josefin Sans",
+  "weight": 300,
+  "string": "Ideas for a brighter tomorrow",
+  "cap_px": 30.0,
+  "size_px": 42.25352112676057,
+  "baseline": 50.0,
+  "x": 30.0,
+  "tracking_px": 8.450704225352114,
+  "backdrop": "white",
+  "colour": [
+   24,
+   28,
+   44
+  ]
+ },
+ {
+  "file": "josefin-ideas-30-t2-gradient.png",
+  "font": "JosefinSans-Light.ttf",
+  "family": "Josefin Sans",
+  "weight": 300,
+  "string": "Ideas for a brighter tomorrow",
+  "cap_px": 30.0,
+  "size_px": 42.25352112676057,
+  "baseline": 50.0,
+  "x": 30.0,
+  "tracking_px": 8.450704225352114,
+  "backdrop": "gradient",
+  "colour": [
+   24,
+   28,
+   44
+  ]
+ },
+ {
+  "file": "montserrat-est-12-t0-white.png",
+  "font": "Montserrat-Regular.ttf",
+  "family": "Montserrat",
+  "weight": 400,
+  "string": "EST. 2026",
+  "cap_px": 12.0,
+  "size_px": 17.142857142857142,
+  "baseline": 32.0,
+  "x": 30.0,
+  "tracking_px": 0.0,
+  "backdrop": "white",
+  "colour": [
+   24,
+   28,
+   44
+  ]
+ },
+ {
+  "file": "montserrat-est-12-t0-gradient.png",
+  "font": "Montserrat-Regular.ttf",
+  "family": "Montserrat",
+  "weight": 400,
+  "string": "EST. 2026",
+  "cap_px": 12.0,
+  "size_px": 17.142857142857142,
+  "baseline": 32.0,
+  "x": 30.0,
+  "tracking_px": 0.0,
+  "backdrop": "gradient",
+  "colour": [
+   24,
+   28,
+   44
+  ]
+ },
+ {
+  "file": "montserrat-est-12-t2-white.png",
+  "font": "Montserrat-Regular.ttf",
+  "family": "Montserrat",
+  "weight": 400,
+  "string": "EST. 2026",
+  "cap_px": 12.0,
+  "size_px": 17.142857142857142,
+  "baseline": 32.0,
+  "x": 30.0,
+  "tracking_px": 3.428571428571429,
+  "backdrop": "white",
+  "colour": [
+   24,
+   28,
+   44
+  ]
+ },
+ {
+  "file": "montserrat-est-12-t2-gradient.png",
+  "font": "Montserrat-Regular.ttf",
+  "family": "Montserrat",
+  "weight": 400,
+  "string": "EST. 2026",
+  "cap_px": 12.0,
+  "size_px": 17.142857142857142,
+  "baseline": 32.0,
+  "x": 30.0,
+  "tracking_px": 3.428571428571429,
+  "backdrop": "gradient",
+  "colour": [
+   24,
+   28,
+   44
+  ]
+ },
+ {
+  "file": "montserrat-est-18-t0-white.png",
+  "font": "Montserrat-Regular.ttf",
+  "family": "Montserrat",
+  "weight": 400,
+  "string": "EST. 2026",
+  "cap_px": 18.0,
+  "size_px": 25.714285714285715,
+  "baseline": 38.0,
+  "x": 30.0,
+  "tracking_px": 0.0,
+  "backdrop": "white",
+  "colour": [
+   24,
+   28,
+   44
+  ]
+ },
+ {
+  "file": "montserrat-est-18-t0-gradient.png",
+  "font": "Montserrat-Regular.ttf",
+  "family": "Montserrat",
+  "weight": 400,
+  "string": "EST. 2026",
+  "cap_px": 18.0,
+  "size_px": 25.714285714285715,
+  "baseline": 38.0,
+  "x": 30.0,
+  "tracking_px": 0.0,
+  "backdrop": "gradient",
+  "colour": [
+   24,
+   28,
+   44
+  ]
+ },
+ {
+  "file": "montserrat-est-18-t2-white.png",
+  "font": "Montserrat-Regular.ttf",
+  "family": "Montserrat",
+  "weight": 400,
+  "string": "EST. 2026",
+  "cap_px": 18.0,
+  "size_px": 25.714285714285715,
+  "baseline": 38.0,
+  "x": 30.0,
+  "tracking_px": 5.142857142857143,
+  "backdrop": "white",
+  "colour": [
+   24,
+   28,
+   44
+  ]
+ },
+ {
+  "file": "montserrat-est-18-t2-gradient.png",
+  "font": "Montserrat-Regular.ttf",
+  "family": "Montserrat",
+  "weight": 400,
+  "string": "EST. 2026",
+  "cap_px": 18.0,
+  "size_px": 25.714285714285715,
+  "baseline": 38.0,
+  "x": 30.0,
+  "tracking_px": 5.142857142857143,
+  "backdrop": "gradient",
+  "colour": [
+   24,
+   28,
+   44
+  ]
+ },
+ {
+  "file": "montserrat-est-30-t0-white.png",
+  "font": "Montserrat-Regular.ttf",
+  "family": "Montserrat",
+  "weight": 400,
+  "string": "EST. 2026",
+  "cap_px": 30.0,
+  "size_px": 42.85714285714286,
+  "baseline": 50.0,
+  "x": 30.0,
+  "tracking_px": 0.0,
+  "backdrop": "white",
+  "colour": [
+   24,
+   28,
+   44
+  ]
+ },
+ {
+  "file": "montserrat-est-30-t0-gradient.png",
+  "font": "Montserrat-Regular.ttf",
+  "family": "Montserrat",
+  "weight": 400,
+  "string": "EST. 2026",
+  "cap_px": 30.0,
+  "size_px": 42.85714285714286,
+  "baseline": 50.0,
+  "x": 30.0,
+  "tracking_px": 0.0,
+  "backdrop": "gradient",
+  "colour": [
+   24,
+   28,
+   44
+  ]
+ },
+ {
+  "file": "montserrat-est-30-t2-white.png",
+  "font": "Montserrat-Regular.ttf",
+  "family": "Montserrat",
+  "weight": 400,
+  "string": "EST. 2026",
+  "cap_px": 30.0,
+  "size_px": 42.85714285714286,
+  "baseline": 50.0,
+  "x": 30.0,
+  "tracking_px": 8.571428571428573,
+  "backdrop": "white",
+  "colour": [
+   24,
+   28,
+   44
+  ]
+ },
+ {
+  "file": "montserrat-est-30-t2-gradient.png",
+  "font": "Montserrat-Regular.ttf",
+  "family": "Montserrat",
+  "weight": 400,
+  "string": "EST. 2026",
+  "cap_px": 30.0,
+  "size_px": 42.85714285714286,
+  "baseline": 50.0,
+  "x": 30.0,
+  "tracking_px": 8.571428571428573,
+  "backdrop": "gradient",
+  "colour": [
+   24,
+   28,
+   44
+  ]
+ },
+ {
+  "file": "montserrat-life-12-t0-white.png",
+  "font": "Montserrat-Regular.ttf",
+  "family": "Montserrat",
+  "weight": 400,
+  "string": "LIFE IS BETTER OUTSIDE",
+  "cap_px": 12.0,
+  "size_px": 17.142857142857142,
+  "baseline": 32.0,
+  "x": 30.0,
+  "tracking_px": 0.0,
+  "backdrop": "white",
+  "colour": [
+   24,
+   28,
+   44
+  ]
+ },
+ {
+  "file": "montserrat-life-12-t0-gradient.png",
+  "font": "Montserrat-Regular.ttf",
+  "family": "Montserrat",
+  "weight": 400,
+  "string": "LIFE IS BETTER OUTSIDE",
+  "cap_px": 12.0,
+  "size_px": 17.142857142857142,
+  "baseline": 32.0,
+  "x": 30.0,
+  "tracking_px": 0.0,
+  "backdrop": "gradient",
+  "colour": [
+   24,
+   28,
+   44
+  ]
+ },
+ {
+  "file": "montserrat-life-12-t2-white.png",
+  "font": "Montserrat-Regular.ttf",
+  "family": "Montserrat",
+  "weight": 400,
+  "string": "LIFE IS BETTER OUTSIDE",
+  "cap_px": 12.0,
+  "size_px": 17.142857142857142,
+  "baseline": 32.0,
+  "x": 30.0,
+  "tracking_px": 3.428571428571429,
+  "backdrop": "white",
+  "colour": [
+   24,
+   28,
+   44
+  ]
+ },
+ {
+  "file": "montserrat-life-12-t2-gradient.png",
+  "font": "Montserrat-Regular.ttf",
+  "family": "Montserrat",
+  "weight": 400,
+  "string": "LIFE IS BETTER OUTSIDE",
+  "cap_px": 12.0,
+  "size_px": 17.142857142857142,
+  "baseline": 32.0,
+  "x": 30.0,
+  "tracking_px": 3.428571428571429,
+  "backdrop": "gradient",
+  "colour": [
+   24,
+   28,
+   44
+  ]
+ },
+ {
+  "file": "montserrat-life-18-t0-white.png",
+  "font": "Montserrat-Regular.ttf",
+  "family": "Montserrat",
+  "weight": 400,
+  "string": "LIFE IS BETTER OUTSIDE",
+  "cap_px": 18.0,
+  "size_px": 25.714285714285715,
+  "baseline": 38.0,
+  "x": 30.0,
+  "tracking_px": 0.0,
+  "backdrop": "white",
+  "colour": [
+   24,
+   28,
+   44
+  ]
+ },
+ {
+  "file": "montserrat-life-18-t0-gradient.png",
+  "font": "Montserrat-Regular.ttf",
+  "family": "Montserrat",
+  "weight": 400,
+  "string": "LIFE IS BETTER OUTSIDE",
+  "cap_px": 18.0,
+  "size_px": 25.714285714285715,
+  "baseline": 38.0,
+  "x": 30.0,
+  "tracking_px": 0.0,
+  "backdrop": "gradient",
+  "colour": [
+   24,
+   28,
+   44
+  ]
+ },
+ {
+  "file": "montserrat-life-18-t2-white.png",
+  "font": "Montserrat-Regular.ttf",
+  "family": "Montserrat",
+  "weight": 400,
+  "string": "LIFE IS BETTER OUTSIDE",
+  "cap_px": 18.0,
+  "size_px": 25.714285714285715,
+  "baseline": 38.0,
+  "x": 30.0,
+  "tracking_px": 5.142857142857143,
+  "backdrop": "white",
+  "colour": [
+   24,
+   28,
+   44
+  ]
+ },
+ {
+  "file": "montserrat-life-18-t2-gradient.png",
+  "font": "Montserrat-Regular.ttf",
+  "family": "Montserrat",
+  "weight": 400,
+  "string": "LIFE IS BETTER OUTSIDE",
+  "cap_px": 18.0,
+  "size_px": 25.714285714285715,
+  "baseline": 38.0,
+  "x": 30.0,
+  "tracking_px": 5.142857142857143,
+  "backdrop": "gradient",
+  "colour": [
+   24,
+   28,
+   44
+  ]
+ },
+ {
+  "file": "montserrat-life-30-t0-white.png",
+  "font": "Montserrat-Regular.ttf",
+  "family": "Montserrat",
+  "weight": 400,
+  "string": "LIFE IS BETTER OUTSIDE",
+  "cap_px": 30.0,
+  "size_px": 42.85714285714286,
+  "baseline": 50.0,
+  "x": 30.0,
+  "tracking_px": 0.0,
+  "backdrop": "white",
+  "colour": [
+   24,
+   28,
+   44
+  ]
+ },
+ {
+  "file": "montserrat-life-30-t0-gradient.png",
+  "font": "Montserrat-Regular.ttf",
+  "family": "Montserrat",
+  "weight": 400,
+  "string": "LIFE IS BETTER OUTSIDE",
+  "cap_px": 30.0,
+  "size_px": 42.85714285714286,
+  "baseline": 50.0,
+  "x": 30.0,
+  "tracking_px": 0.0,
+  "backdrop": "gradient",
+  "colour": [
+   24,
+   28,
+   44
+  ]
+ },
+ {
+  "file": "montserrat-life-30-t2-white.png",
+  "font": "Montserrat-Regular.ttf",
+  "family": "Montserrat",
+  "weight": 400,
+  "string": "LIFE IS BETTER OUTSIDE",
+  "cap_px": 30.0,
+  "size_px": 42.85714285714286,
+  "baseline": 50.0,
+  "x": 30.0,
+  "tracking_px": 8.571428571428573,
+  "backdrop": "white",
+  "colour": [
+   24,
+   28,
+   44
+  ]
+ },
+ {
+  "file": "montserrat-life-30-t2-gradient.png",
+  "font": "Montserrat-Regular.ttf",
+  "family": "Montserrat",
+  "weight": 400,
+  "string": "LIFE IS BETTER OUTSIDE",
+  "cap_px": 30.0,
+  "size_px": 42.85714285714286,
+  "baseline": 50.0,
+  "x": 30.0,
+  "tracking_px": 8.571428571428573,
+  "backdrop": "gradient",
+  "colour": [
+   24,
+   28,
+   44
+  ]
+ },
+ {
+  "file": "montserrat-ideas-12-t0-white.png",
+  "font": "Montserrat-Regular.ttf",
+  "family": "Montserrat",
+  "weight": 400,
+  "string": "Ideas for a brighter tomorrow",
+  "cap_px": 12.0,
+  "size_px": 17.142857142857142,
+  "baseline": 32.0,
+  "x": 30.0,
+  "tracking_px": 0.0,
+  "backdrop": "white",
+  "colour": [
+   24,
+   28,
+   44
+  ]
+ },
+ {
+  "file": "montserrat-ideas-12-t0-gradient.png",
+  "font": "Montserrat-Regular.ttf",
+  "family": "Montserrat",
+  "weight": 400,
+  "string": "Ideas for a brighter tomorrow",
+  "cap_px": 12.0,
+  "size_px": 17.142857142857142,
+  "baseline": 32.0,
+  "x": 30.0,
+  "tracking_px": 0.0,
+  "backdrop": "gradient",
+  "colour": [
+   24,
+   28,
+   44
+  ]
+ },
+ {
+  "file": "montserrat-ideas-12-t2-white.png",
+  "font": "Montserrat-Regular.ttf",
+  "family": "Montserrat",
+  "weight": 400,
+  "string": "Ideas for a brighter tomorrow",
+  "cap_px": 12.0,
+  "size_px": 17.142857142857142,
+  "baseline": 32.0,
+  "x": 30.0,
+  "tracking_px": 3.428571428571429,
+  "backdrop": "white",
+  "colour": [
+   24,
+   28,
+   44
+  ]
+ },
+ {
+  "file": "montserrat-ideas-12-t2-gradient.png",
+  "font": "Montserrat-Regular.ttf",
+  "family": "Montserrat",
+  "weight": 400,
+  "string": "Ideas for a brighter tomorrow",
+  "cap_px": 12.0,
+  "size_px": 17.142857142857142,
+  "baseline": 32.0,
+  "x": 30.0,
+  "tracking_px": 3.428571428571429,
+  "backdrop": "gradient",
+  "colour": [
+   24,
+   28,
+   44
+  ]
+ },
+ {
+  "file": "montserrat-ideas-18-t0-white.png",
+  "font": "Montserrat-Regular.ttf",
+  "family": "Montserrat",
+  "weight": 400,
+  "string": "Ideas for a brighter tomorrow",
+  "cap_px": 18.0,
+  "size_px": 25.714285714285715,
+  "baseline": 38.0,
+  "x": 30.0,
+  "tracking_px": 0.0,
+  "backdrop": "white",
+  "colour": [
+   24,
+   28,
+   44
+  ]
+ },
+ {
+  "file": "montserrat-ideas-18-t0-gradient.png",
+  "font": "Montserrat-Regular.ttf",
+  "family": "Montserrat",
+  "weight": 400,
+  "string": "Ideas for a brighter tomorrow",
+  "cap_px": 18.0,
+  "size_px": 25.714285714285715,
+  "baseline": 38.0,
+  "x": 30.0,
+  "tracking_px": 0.0,
+  "backdrop": "gradient",
+  "colour": [
+   24,
+   28,
+   44
+  ]
+ },
+ {
+  "file": "montserrat-ideas-18-t2-white.png",
+  "font": "Montserrat-Regular.ttf",
+  "family": "Montserrat",
+  "weight": 400,
+  "string": "Ideas for a brighter tomorrow",
+  "cap_px": 18.0,
+  "size_px": 25.714285714285715,
+  "baseline": 38.0,
+  "x": 30.0,
+  "tracking_px": 5.142857142857143,
+  "backdrop": "white",
+  "colour": [
+   24,
+   28,
+   44
+  ]
+ },
+ {
+  "file": "montserrat-ideas-18-t2-gradient.png",
+  "font": "Montserrat-Regular.ttf",
+  "family": "Montserrat",
+  "weight": 400,
+  "string": "Ideas for a brighter tomorrow",
+  "cap_px": 18.0,
+  "size_px": 25.714285714285715,
+  "baseline": 38.0,
+  "x": 30.0,
+  "tracking_px": 5.142857142857143,
+  "backdrop": "gradient",
+  "colour": [
+   24,
+   28,
+   44
+  ]
+ },
+ {
+  "file": "montserrat-ideas-30-t0-white.png",
+  "font": "Montserrat-Regular.ttf",
+  "family": "Montserrat",
+  "weight": 400,
+  "string": "Ideas for a brighter tomorrow",
+  "cap_px": 30.0,
+  "size_px": 42.85714285714286,
+  "baseline": 50.0,
+  "x": 30.0,
+  "tracking_px": 0.0,
+  "backdrop": "white",
+  "colour": [
+   24,
+   28,
+   44
+  ]
+ },
+ {
+  "file": "montserrat-ideas-30-t0-gradient.png",
+  "font": "Montserrat-Regular.ttf",
+  "family": "Montserrat",
+  "weight": 400,
+  "string": "Ideas for a brighter tomorrow",
+  "cap_px": 30.0,
+  "size_px": 42.85714285714286,
+  "baseline": 50.0,
+  "x": 30.0,
+  "tracking_px": 0.0,
+  "backdrop": "gradient",
+  "colour": [
+   24,
+   28,
+   44
+  ]
+ },
+ {
+  "file": "montserrat-ideas-30-t2-white.png",
+  "font": "Montserrat-Regular.ttf",
+  "family": "Montserrat",
+  "weight": 400,
+  "string": "Ideas for a brighter tomorrow",
+  "cap_px": 30.0,
+  "size_px": 42.85714285714286,
+  "baseline": 50.0,
+  "x": 30.0,
+  "tracking_px": 8.571428571428573,
+  "backdrop": "white",
+  "colour": [
+   24,
+   28,
+   44
+  ]
+ },
+ {
+  "file": "montserrat-ideas-30-t2-gradient.png",
+  "font": "Montserrat-Regular.ttf",
+  "family": "Montserrat",
+  "weight": 400,
+  "string": "Ideas for a brighter tomorrow",
+  "cap_px": 30.0,
+  "size_px": 42.85714285714286,
+  "baseline": 50.0,
+  "x": 30.0,
+  "tracking_px": 8.571428571428573,
+  "backdrop": "gradient",
+  "colour": [
+   24,
+   28,
+   44
+  ]
+ },
+ {
+  "file": "playfair-est-12-t0-white.png",
+  "font": "PlayfairDisplay-Regular.ttf",
+  "family": "Playfair Display",
+  "weight": 400,
+  "string": "EST. 2026",
+  "cap_px": 12.0,
+  "size_px": 16.997167138810198,
+  "baseline": 32.0,
+  "x": 30.0,
+  "tracking_px": 0.0,
+  "backdrop": "white",
+  "colour": [
+   24,
+   28,
+   44
+  ]
+ },
+ {
+  "file": "playfair-est-12-t0-gradient.png",
+  "font": "PlayfairDisplay-Regular.ttf",
+  "family": "Playfair Display",
+  "weight": 400,
+  "string": "EST. 2026",
+  "cap_px": 12.0,
+  "size_px": 16.997167138810198,
+  "baseline": 32.0,
+  "x": 30.0,
+  "tracking_px": 0.0,
+  "backdrop": "gradient",
+  "colour": [
+   24,
+   28,
+   44
+  ]
+ },
+ {
+  "file": "playfair-est-12-t2-white.png",
+  "font": "PlayfairDisplay-Regular.ttf",
+  "family": "Playfair Display",
+  "weight": 400,
+  "string": "EST. 2026",
+  "cap_px": 12.0,
+  "size_px": 16.997167138810198,
+  "baseline": 32.0,
+  "x": 30.0,
+  "tracking_px": 3.3994334277620397,
+  "backdrop": "white",
+  "colour": [
+   24,
+   28,
+   44
+  ]
+ },
+ {
+  "file": "playfair-est-12-t2-gradient.png",
+  "font": "PlayfairDisplay-Regular.ttf",
+  "family": "Playfair Display",
+  "weight": 400,
+  "string": "EST. 2026",
+  "cap_px": 12.0,
+  "size_px": 16.997167138810198,
+  "baseline": 32.0,
+  "x": 30.0,
+  "tracking_px": 3.3994334277620397,
+  "backdrop": "gradient",
+  "colour": [
+   24,
+   28,
+   44
+  ]
+ },
+ {
+  "file": "playfair-est-18-t0-white.png",
+  "font": "PlayfairDisplay-Regular.ttf",
+  "family": "Playfair Display",
+  "weight": 400,
+  "string": "EST. 2026",
+  "cap_px": 18.0,
+  "size_px": 25.495750708215297,
+  "baseline": 38.0,
+  "x": 30.0,
+  "tracking_px": 0.0,
+  "backdrop": "white",
+  "colour": [
+   24,
+   28,
+   44
+  ]
+ },
+ {
+  "file": "playfair-est-18-t0-gradient.png",
+  "font": "PlayfairDisplay-Regular.ttf",
+  "family": "Playfair Display",
+  "weight": 400,
+  "string": "EST. 2026",
+  "cap_px": 18.0,
+  "size_px": 25.495750708215297,
+  "baseline": 38.0,
+  "x": 30.0,
+  "tracking_px": 0.0,
+  "backdrop": "gradient",
+  "colour": [
+   24,
+   28,
+   44
+  ]
+ },
+ {
+  "file": "playfair-est-18-t2-white.png",
+  "font": "PlayfairDisplay-Regular.ttf",
+  "family": "Playfair Display",
+  "weight": 400,
+  "string": "EST. 2026",
+  "cap_px": 18.0,
+  "size_px": 25.495750708215297,
+  "baseline": 38.0,
+  "x": 30.0,
+  "tracking_px": 5.09915014164306,
+  "backdrop": "white",
+  "colour": [
+   24,
+   28,
+   44
+  ]
+ },
+ {
+  "file": "playfair-est-18-t2-gradient.png",
+  "font": "PlayfairDisplay-Regular.ttf",
+  "family": "Playfair Display",
+  "weight": 400,
+  "string": "EST. 2026",
+  "cap_px": 18.0,
+  "size_px": 25.495750708215297,
+  "baseline": 38.0,
+  "x": 30.0,
+  "tracking_px": 5.09915014164306,
+  "backdrop": "gradient",
+  "colour": [
+   24,
+   28,
+   44
+  ]
+ },
+ {
+  "file": "playfair-est-30-t0-white.png",
+  "font": "PlayfairDisplay-Regular.ttf",
+  "family": "Playfair Display",
+  "weight": 400,
+  "string": "EST. 2026",
+  "cap_px": 30.0,
+  "size_px": 42.492917847025495,
+  "baseline": 50.0,
+  "x": 30.0,
+  "tracking_px": 0.0,
+  "backdrop": "white",
+  "colour": [
+   24,
+   28,
+   44
+  ]
+ },
+ {
+  "file": "playfair-est-30-t0-gradient.png",
+  "font": "PlayfairDisplay-Regular.ttf",
+  "family": "Playfair Display",
+  "weight": 400,
+  "string": "EST. 2026",
+  "cap_px": 30.0,
+  "size_px": 42.492917847025495,
+  "baseline": 50.0,
+  "x": 30.0,
+  "tracking_px": 0.0,
+  "backdrop": "gradient",
+  "colour": [
+   24,
+   28,
+   44
+  ]
+ },
+ {
+  "file": "playfair-est-30-t2-white.png",
+  "font": "PlayfairDisplay-Regular.ttf",
+  "family": "Playfair Display",
+  "weight": 400,
+  "string": "EST. 2026",
+  "cap_px": 30.0,
+  "size_px": 42.492917847025495,
+  "baseline": 50.0,
+  "x": 30.0,
+  "tracking_px": 8.498583569405099,
+  "backdrop": "white",
+  "colour": [
+   24,
+   28,
+   44
+  ]
+ },
+ {
+  "file": "playfair-est-30-t2-gradient.png",
+  "font": "PlayfairDisplay-Regular.ttf",
+  "family": "Playfair Display",
+  "weight": 400,
+  "string": "EST. 2026",
+  "cap_px": 30.0,
+  "size_px": 42.492917847025495,
+  "baseline": 50.0,
+  "x": 30.0,
+  "tracking_px": 8.498583569405099,
+  "backdrop": "gradient",
+  "colour": [
+   24,
+   28,
+   44
+  ]
+ },
+ {
+  "file": "playfair-life-12-t0-white.png",
+  "font": "PlayfairDisplay-Regular.ttf",
+  "family": "Playfair Display",
+  "weight": 400,
+  "string": "LIFE IS BETTER OUTSIDE",
+  "cap_px": 12.0,
+  "size_px": 16.997167138810198,
+  "baseline": 32.0,
+  "x": 30.0,
+  "tracking_px": 0.0,
+  "backdrop": "white",
+  "colour": [
+   24,
+   28,
+   44
+  ]
+ },
+ {
+  "file": "playfair-life-12-t0-gradient.png",
+  "font": "PlayfairDisplay-Regular.ttf",
+  "family": "Playfair Display",
+  "weight": 400,
+  "string": "LIFE IS BETTER OUTSIDE",
+  "cap_px": 12.0,
+  "size_px": 16.997167138810198,
+  "baseline": 32.0,
+  "x": 30.0,
+  "tracking_px": 0.0,
+  "backdrop": "gradient",
+  "colour": [
+   24,
+   28,
+   44
+  ]
+ },
+ {
+  "file": "playfair-life-12-t2-white.png",
+  "font": "PlayfairDisplay-Regular.ttf",
+  "family": "Playfair Display",
+  "weight": 400,
+  "string": "LIFE IS BETTER OUTSIDE",
+  "cap_px": 12.0,
+  "size_px": 16.997167138810198,
+  "baseline": 32.0,
+  "x": 30.0,
+  "tracking_px": 3.3994334277620397,
+  "backdrop": "white",
+  "colour": [
+   24,
+   28,
+   44
+  ]
+ },
+ {
+  "file": "playfair-life-12-t2-gradient.png",
+  "font": "PlayfairDisplay-Regular.ttf",
+  "family": "Playfair Display",
+  "weight": 400,
+  "string": "LIFE IS BETTER OUTSIDE",
+  "cap_px": 12.0,
+  "size_px": 16.997167138810198,
+  "baseline": 32.0,
+  "x": 30.0,
+  "tracking_px": 3.3994334277620397,
+  "backdrop": "gradient",
+  "colour": [
+   24,
+   28,
+   44
+  ]
+ },
+ {
+  "file": "playfair-life-18-t0-white.png",
+  "font": "PlayfairDisplay-Regular.ttf",
+  "family": "Playfair Display",
+  "weight": 400,
+  "string": "LIFE IS BETTER OUTSIDE",
+  "cap_px": 18.0,
+  "size_px": 25.495750708215297,
+  "baseline": 38.0,
+  "x": 30.0,
+  "tracking_px": 0.0,
+  "backdrop": "white",
+  "colour": [
+   24,
+   28,
+   44
+  ]
+ },
+ {
+  "file": "playfair-life-18-t0-gradient.png",
+  "font": "PlayfairDisplay-Regular.ttf",
+  "family": "Playfair Display",
+  "weight": 400,
+  "string": "LIFE IS BETTER OUTSIDE",
+  "cap_px": 18.0,
+  "size_px": 25.495750708215297,
+  "baseline": 38.0,
+  "x": 30.0,
+  "tracking_px": 0.0,
+  "backdrop": "gradient",
+  "colour": [
+   24,
+   28,
+   44
+  ]
+ },
+ {
+  "file": "playfair-life-18-t2-white.png",
+  "font": "PlayfairDisplay-Regular.ttf",
+  "family": "Playfair Display",
+  "weight": 400,
+  "string": "LIFE IS BETTER OUTSIDE",
+  "cap_px": 18.0,
+  "size_px": 25.495750708215297,
+  "baseline": 38.0,
+  "x": 30.0,
+  "tracking_px": 5.09915014164306,
+  "backdrop": "white",
+  "colour": [
+   24,
+   28,
+   44
+  ]
+ },
+ {
+  "file": "playfair-life-18-t2-gradient.png",
+  "font": "PlayfairDisplay-Regular.ttf",
+  "family": "Playfair Display",
+  "weight": 400,
+  "string": "LIFE IS BETTER OUTSIDE",
+  "cap_px": 18.0,
+  "size_px": 25.495750708215297,
+  "baseline": 38.0,
+  "x": 30.0,
+  "tracking_px": 5.09915014164306,
+  "backdrop": "gradient",
+  "colour": [
+   24,
+   28,
+   44
+  ]
+ },
+ {
+  "file": "playfair-life-30-t0-white.png",
+  "font": "PlayfairDisplay-Regular.ttf",
+  "family": "Playfair Display",
+  "weight": 400,
+  "string": "LIFE IS BETTER OUTSIDE",
+  "cap_px": 30.0,
+  "size_px": 42.492917847025495,
+  "baseline": 50.0,
+  "x": 30.0,
+  "tracking_px": 0.0,
+  "backdrop": "white",
+  "colour": [
+   24,
+   28,
+   44
+  ]
+ },
+ {
+  "file": "playfair-life-30-t0-gradient.png",
+  "font": "PlayfairDisplay-Regular.ttf",
+  "family": "Playfair Display",
+  "weight": 400,
+  "string": "LIFE IS BETTER OUTSIDE",
+  "cap_px": 30.0,
+  "size_px": 42.492917847025495,
+  "baseline": 50.0,
+  "x": 30.0,
+  "tracking_px": 0.0,
+  "backdrop": "gradient",
+  "colour": [
+   24,
+   28,
+   44
+  ]
+ },
+ {
+  "file": "playfair-life-30-t2-white.png",
+  "font": "PlayfairDisplay-Regular.ttf",
+  "family": "Playfair Display",
+  "weight": 400,
+  "string": "LIFE IS BETTER OUTSIDE",
+  "cap_px": 30.0,
+  "size_px": 42.492917847025495,
+  "baseline": 50.0,
+  "x": 30.0,
+  "tracking_px": 8.498583569405099,
+  "backdrop": "white",
+  "colour": [
+   24,
+   28,
+   44
+  ]
+ },
+ {
+  "file": "playfair-life-30-t2-gradient.png",
+  "font": "PlayfairDisplay-Regular.ttf",
+  "family": "Playfair Display",
+  "weight": 400,
+  "string": "LIFE IS BETTER OUTSIDE",
+  "cap_px": 30.0,
+  "size_px": 42.492917847025495,
+  "baseline": 50.0,
+  "x": 30.0,
+  "tracking_px": 8.498583569405099,
+  "backdrop": "gradient",
+  "colour": [
+   24,
+   28,
+   44
+  ]
+ },
+ {
+  "file": "playfair-ideas-12-t0-white.png",
+  "font": "PlayfairDisplay-Regular.ttf",
+  "family": "Playfair Display",
+  "weight": 400,
+  "string": "Ideas for a brighter tomorrow",
+  "cap_px": 12.0,
+  "size_px": 16.997167138810198,
+  "baseline": 32.0,
+  "x": 30.0,
+  "tracking_px": 0.0,
+  "backdrop": "white",
+  "colour": [
+   24,
+   28,
+   44
+  ]
+ },
+ {
+  "file": "playfair-ideas-12-t0-gradient.png",
+  "font": "PlayfairDisplay-Regular.ttf",
+  "family": "Playfair Display",
+  "weight": 400,
+  "string": "Ideas for a brighter tomorrow",
+  "cap_px": 12.0,
+  "size_px": 16.997167138810198,
+  "baseline": 32.0,
+  "x": 30.0,
+  "tracking_px": 0.0,
+  "backdrop": "gradient",
+  "colour": [
+   24,
+   28,
+   44
+  ]
+ },
+ {
+  "file": "playfair-ideas-12-t2-white.png",
+  "font": "PlayfairDisplay-Regular.ttf",
+  "family": "Playfair Display",
+  "weight": 400,
+  "string": "Ideas for a brighter tomorrow",
+  "cap_px": 12.0,
+  "size_px": 16.997167138810198,
+  "baseline": 32.0,
+  "x": 30.0,
+  "tracking_px": 3.3994334277620397,
+  "backdrop": "white",
+  "colour": [
+   24,
+   28,
+   44
+  ]
+ },
+ {
+  "file": "playfair-ideas-12-t2-gradient.png",
+  "font": "PlayfairDisplay-Regular.ttf",
+  "family": "Playfair Display",
+  "weight": 400,
+  "string": "Ideas for a brighter tomorrow",
+  "cap_px": 12.0,
+  "size_px": 16.997167138810198,
+  "baseline": 32.0,
+  "x": 30.0,
+  "tracking_px": 3.3994334277620397,
+  "backdrop": "gradient",
+  "colour": [
+   24,
+   28,
+   44
+  ]
+ },
+ {
+  "file": "playfair-ideas-18-t0-white.png",
+  "font": "PlayfairDisplay-Regular.ttf",
+  "family": "Playfair Display",
+  "weight": 400,
+  "string": "Ideas for a brighter tomorrow",
+  "cap_px": 18.0,
+  "size_px": 25.495750708215297,
+  "baseline": 38.0,
+  "x": 30.0,
+  "tracking_px": 0.0,
+  "backdrop": "white",
+  "colour": [
+   24,
+   28,
+   44
+  ]
+ },
+ {
+  "file": "playfair-ideas-18-t0-gradient.png",
+  "font": "PlayfairDisplay-Regular.ttf",
+  "family": "Playfair Display",
+  "weight": 400,
+  "string": "Ideas for a brighter tomorrow",
+  "cap_px": 18.0,
+  "size_px": 25.495750708215297,
+  "baseline": 38.0,
+  "x": 30.0,
+  "tracking_px": 0.0,
+  "backdrop": "gradient",
+  "colour": [
+   24,
+   28,
+   44
+  ]
+ },
+ {
+  "file": "playfair-ideas-18-t2-white.png",
+  "font": "PlayfairDisplay-Regular.ttf",
+  "family": "Playfair Display",
+  "weight": 400,
+  "string": "Ideas for a brighter tomorrow",
+  "cap_px": 18.0,
+  "size_px": 25.495750708215297,
+  "baseline": 38.0,
+  "x": 30.0,
+  "tracking_px": 5.09915014164306,
+  "backdrop": "white",
+  "colour": [
+   24,
+   28,
+   44
+  ]
+ },
+ {
+  "file": "playfair-ideas-18-t2-gradient.png",
+  "font": "PlayfairDisplay-Regular.ttf",
+  "family": "Playfair Display",
+  "weight": 400,
+  "string": "Ideas for a brighter tomorrow",
+  "cap_px": 18.0,
+  "size_px": 25.495750708215297,
+  "baseline": 38.0,
+  "x": 30.0,
+  "tracking_px": 5.09915014164306,
+  "backdrop": "gradient",
+  "colour": [
+   24,
+   28,
+   44
+  ]
+ },
+ {
+  "file": "playfair-ideas-30-t0-white.png",
+  "font": "PlayfairDisplay-Regular.ttf",
+  "family": "Playfair Display",
+  "weight": 400,
+  "string": "Ideas for a brighter tomorrow",
+  "cap_px": 30.0,
+  "size_px": 42.492917847025495,
+  "baseline": 50.0,
+  "x": 30.0,
+  "tracking_px": 0.0,
+  "backdrop": "white",
+  "colour": [
+   24,
+   28,
+   44
+  ]
+ },
+ {
+  "file": "playfair-ideas-30-t0-gradient.png",
+  "font": "PlayfairDisplay-Regular.ttf",
+  "family": "Playfair Display",
+  "weight": 400,
+  "string": "Ideas for a brighter tomorrow",
+  "cap_px": 30.0,
+  "size_px": 42.492917847025495,
+  "baseline": 50.0,
+  "x": 30.0,
+  "tracking_px": 0.0,
+  "backdrop": "gradient",
+  "colour": [
+   24,
+   28,
+   44
+  ]
+ },
+ {
+  "file": "playfair-ideas-30-t2-white.png",
+  "font": "PlayfairDisplay-Regular.ttf",
+  "family": "Playfair Display",
+  "weight": 400,
+  "string": "Ideas for a brighter tomorrow",
+  "cap_px": 30.0,
+  "size_px": 42.492917847025495,
+  "baseline": 50.0,
+  "x": 30.0,
+  "tracking_px": 8.498583569405099,
+  "backdrop": "white",
+  "colour": [
+   24,
+   28,
+   44
+  ]
+ },
+ {
+  "file": "playfair-ideas-30-t2-gradient.png",
+  "font": "PlayfairDisplay-Regular.ttf",
+  "family": "Playfair Display",
+  "weight": 400,
+  "string": "Ideas for a brighter tomorrow",
+  "cap_px": 30.0,
+  "size_px": 42.492917847025495,
+  "baseline": 50.0,
+  "x": 30.0,
+  "tracking_px": 8.498583569405099,
+  "backdrop": "gradient",
+  "colour": [
+   24,
+   28,
+   44
+  ]
+ }
+]
