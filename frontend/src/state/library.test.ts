@@ -871,7 +871,20 @@ describe("library: text", () => {
     expect(platform.textPlan).toHaveBeenCalledTimes(2);
   });
 
-  it("a plan is asked once; cancelling it traces the original and ends the phase", async () => {
+  it("a plan is asked once per image bytes, however the settings move", async () => {
+    const { platform } = textPlatform();
+    const lib = createLibrary(platform, CATALOG, { ...DEFAULT_SETTINGS, recogniseText: true });
+    lib.add([ok("a")]);
+    lib.generate("a");
+    await flush();
+    lib.setParam("a", "detail", 9); // another key: generate reaches the plan check again
+    lib.generate("a");
+    await flush();
+    expect(platform.vectorize).toHaveBeenCalledTimes(2);
+    expect(platform.textPlan).toHaveBeenCalledTimes(1);
+  });
+
+  it("cancelling the plan ends its phase and traces nothing on its account", async () => {
     const { platform } = textPlatform();
     let signal: AbortSignal | undefined;
     platform.textPlan.mockImplementation(((_id: string, opts: { signal: AbortSignal }) => {
@@ -886,9 +899,77 @@ describe("library: text", () => {
     await flush();
     expect(signal?.aborted).toBe(true);
     expect(textOf(lib.selectedItem()!)).toMatchObject({ phase: null, error: null, plan: null });
-    expect(lib.selectedItem()!.shown).not.toBeNull();
+    expect(platform.vectorize).not.toHaveBeenCalled();
+    // asking again goes straight to the trace: the plan is not asked twice
     lib.generate("a");
     await flush();
     expect(platform.textPlan).toHaveBeenCalledTimes(1);
+    expect(platform.vectorize).toHaveBeenCalledTimes(1);
+  });
+
+  it("a plan superseded by a used redraw does not trace the new bytes unasked", async () => {
+    const { platform } = textPlatform();
+    let resolvePlan: (p: TextPlan) => void = () => {};
+    platform.textPlan.mockImplementation((() => new Promise<TextPlan>((r) => (resolvePlan = r))) as never);
+    const lib = createLibrary(platform, CATALOG, { ...DEFAULT_SETTINGS, recogniseText: true });
+    lib.add([ok("a")]);
+    lib.generate("a");
+    await lib.redraw("a");
+    await lib.acceptRedraw("a");
+    resolvePlan(PLAN([LINE]));
+    await flush();
+    expect(platform.vectorize).not.toHaveBeenCalled();
+    expect(textOf(lib.selectedItem()!).plan).toBeNull();
+  });
+
+  it("edits to one image are applied in order and none is lost", async () => {
+    const { platform } = textPlatform();
+    const lib = createLibrary(platform, CATALOG, { ...DEFAULT_SETTINGS, recogniseText: true });
+    lib.add([ok("a")]);
+    lib.generate("a");
+    await flush();
+    const seen: (string | undefined)[] = [];
+    const releases: (() => void)[] = [];
+    platform.textSetLine.mockImplementation((async (_id: string, _line: string, change: TextLineChange) => {
+      seen.push(change.string);
+      await new Promise<void>((r) => releases.push(r));
+      return { plan: PLAN([{ ...LINE, string: change.string! }]), textGroup: GROUP };
+    }) as never);
+    const first = lib.setTextLine("a", "a-t0", { string: "ONE" });
+    const second = lib.setTextLine("a", "a-t0", { string: "TWO" });
+    await flush();
+    expect(seen).toEqual(["ONE"]); // the second waits for the first
+    releases[0]();
+    await flush();
+    expect(seen).toEqual(["ONE", "TWO"]);
+    releases[1]();
+    await Promise.all([first, second]);
+    expect(textOf(lib.selectedItem()!).plan?.lines[0].string).toBe("TWO");
+  });
+
+  it("a failed edit does not stop the one behind it", async () => {
+    const { platform } = textPlatform();
+    const lib = createLibrary(platform, CATALOG, { ...DEFAULT_SETTINGS, recogniseText: true });
+    lib.add([ok("a")]);
+    lib.generate("a");
+    await flush();
+    platform.textSetLine.mockImplementationOnce((async () => Promise.reject(new ApiError("bad", "x", 500))) as never);
+    const first = lib.setTextLine("a", "a-t0", { string: "ONE" });
+    const second = lib.setTextLine("a", "a-t0", { string: "TWO" });
+    await expect(first).rejects.toThrow();
+    await second;
+    expect(platform.textSetLine).toHaveBeenCalledTimes(2);
+  });
+
+  it("a string edit makes the trace on screen unexported again", async () => {
+    const { platform } = textPlatform();
+    const lib = createLibrary(platform, CATALOG, { ...DEFAULT_SETTINGS, recogniseText: true });
+    lib.add([ok("a")]);
+    lib.generate("a");
+    await flush();
+    lib.markExported([{ id: "a", key: "auto" }]);
+    expect(unexportedCount(lib.getState())).toBe(0);
+    await lib.setTextLine("a", "a-t0", { string: "EST." });
+    expect(unexportedCount(lib.getState())).toBe(1);
   });
 });

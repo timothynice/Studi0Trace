@@ -219,9 +219,9 @@ export function createLibrary(platform: LibraryPlatform, catalog: Catalog, initi
     redrawing.delete(id);
   };
 
-  const texting = new Map<string, { controller: AbortController; done: Promise<void> }>();
-  /** Images whose line edit is in flight: a second edit is ignored until it lands. */
-  const editing = new Set<string>();
+  const texting = new Map<string, { controller: AbortController; done: Promise<boolean> }>();
+  /** Each image's line edits run one after another, in the order they were made. */
+  const editQueue = new Map<string, Promise<void>>();
   const patchText = (id: string, change: Partial<TextState>) => patch(id, (i) => ({ text: { ...textOf(i), ...change } }));
   const abortText = (id: string) => {
     texting.get(id)?.controller.abort();
@@ -278,18 +278,24 @@ export function createLibrary(platform: LibraryPlatform, catalog: Catalog, initi
     patch(id, isCancel(err) ? { job: null } : { job: null, error: toApiError(err), errorKey: item.job.key });
   };
 
-  /** The plan, once per image bytes, before the first trace; a failure is kept and the trace goes on. */
-  const ensureText = (id: string): Promise<void> => {
+  /**
+   * The plan, once per image bytes, before the first trace; a failure is kept and the trace goes on.
+   * Resolves true when the trace should go ahead, false when this plan was cancelled or superseded
+   * (the image was removed, its bytes changed, Cancel was pressed): then nothing is traced on its account.
+   */
+  const ensureText = (id: string): Promise<boolean> => {
     const item = find(id);
-    if (!item || !settings.recogniseText || !platform.textPlan) return Promise.resolve();
+    if (!item || !settings.recogniseText || !platform.textPlan) return Promise.resolve(true);
     const running = texting.get(id);
     if (running) return running.done; // a trace asked for meanwhile waits for the same plan
     const t = textOf(item);
-    if (t.plan || t.asked) return Promise.resolve();
+    if (t.plan || t.asked) return Promise.resolve(true);
     const controller = new AbortController();
     const current = () => texting.get(id)?.controller === controller && !!find(id);
+    const entry = { controller, done: Promise.resolve(false) };
+    texting.set(id, entry);
     patchText(id, { asked: true, phase: "finding", error: null });
-    const done = (async () => {
+    entry.done = (async () => {
       try {
         const plan = await platform.textPlan!(id, {
           signal: controller.signal,
@@ -297,17 +303,19 @@ export function createLibrary(platform: LibraryPlatform, catalog: Catalog, initi
             if (current() && phase !== "done" && phase !== "failed") patchText(id, { phase });
           },
         });
-        if (current()) patchText(id, { plan, phase: null });
+        if (!current()) return false;
+        patchText(id, { plan, phase: null });
+        return true;
       } catch (err) {
-        if (!current()) return;
+        if (!current()) return false;
         const e = toApiError(err);
         patchText(id, { phase: null, error: e.code === "cancelled" ? null : e });
+        return e.code !== "cancelled";
       } finally {
         if (texting.get(id)?.controller === controller) texting.delete(id);
       }
     })();
-    texting.set(id, { controller, done });
-    return done;
+    return entry.done;
   };
 
   const needsText = (id: string) => {
@@ -325,7 +333,7 @@ export function createLibrary(platform: LibraryPlatform, catalog: Catalog, initi
     }
     if (item.job?.key === key) return;
     // the plan comes first, and is only waited for when there is one to ask; otherwise the trace starts at once
-    if (needsText(id)) void ensureText(id).then(() => startTrace(id));
+    if (needsText(id)) void ensureText(id).then((go) => go && startTrace(id));
     else startTrace(id);
   };
 
@@ -437,7 +445,6 @@ export function createLibrary(platform: LibraryPlatform, catalog: Catalog, initi
       clearTimer(id);
       abortRedraw(id);
       abortText(id);
-      editing.delete(id);
       roughAsked.delete(id);
       platform.closeImage(id);
       set({ ...state, selected: selectAfterRemoving(id), items: state.items.filter((i) => i.image.id !== id) });
@@ -449,7 +456,6 @@ export function createLibrary(platform: LibraryPlatform, catalog: Catalog, initi
         clearTimer(item.image.id);
         abortRedraw(item.image.id);
         abortText(item.image.id);
-        editing.delete(item.image.id);
         roughAsked.delete(item.image.id);
         platform.closeImage(item.image.id);
       }
@@ -595,10 +601,10 @@ export function createLibrary(platform: LibraryPlatform, catalog: Catalog, initi
     },
 
     async setTextLine(id, lineId, change) {
-      if (!find(id) || !platform.textSetLine || editing.has(id)) return;
-      editing.add(id);
-      try {
-        const answer = await platform.textSetLine(id, lineId, change);
+      if (!platform.textSetLine) return;
+      const run = async () => {
+        if (!find(id)) return;
+        const answer = await platform.textSetLine!(id, lineId, change);
         const now = find(id);
         if (!now) return;
         if (change.enabled !== undefined) {
@@ -609,10 +615,17 @@ export function createLibrary(platform: LibraryPlatform, catalog: Catalog, initi
           generate(id);
           return;
         }
+        // the words changed, so what was exported no longer is what is on screen
         const traces = Object.fromEntries(Object.entries(now.traces).map(([k, t]) => [k, { ...t, svg: composeSvg(t.base, answer.textGroup), textGroup: answer.textGroup }]));
-        patch(id, { traces, text: { ...textOf(now), plan: answer.plan } });
+        patch(id, { traces, exported: null, text: { ...textOf(now), plan: answer.plan } });
+      };
+      // one edit after another, in order: a failed edit does not stop the ones behind it
+      const mine = (editQueue.get(id) ?? Promise.resolve()).then(run, run);
+      editQueue.set(id, mine);
+      try {
+        await mine;
       } finally {
-        editing.delete(id);
+        if (editQueue.get(id) === mine) editQueue.delete(id);
       }
     },
 
