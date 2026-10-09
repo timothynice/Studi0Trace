@@ -27,7 +27,7 @@ pub fn base_url() -> String {
 
 fn chosen_base(set: Option<&str>) -> String {
     set.map(|b| b.trim().trim_end_matches('/'))
-        .filter(|b| is_https(b) || is_loopback(b))
+        .filter(|b| is_https(b) || is_loopback_base(b))
         .map_or_else(|| DEFAULT_BASE.to_string(), str::to_string)
 }
 
@@ -101,7 +101,8 @@ fn transport(e: &reqwest::Error) -> CommandError {
     }
 }
 
-fn is_loopback(base: &str) -> bool {
+/// Whether `base` is a plain-`http://` address on this machine (what a mock server in a test is).
+pub fn is_loopback_base(base: &str) -> bool {
     // the host ends at the port or the path: `http://127.0.0.1.example.com` is not loopback
     ["http://127.0.0.1", "http://localhost", "http://[::1]"].iter().any(|p| base.strip_prefix(p).is_some_and(|rest| rest.is_empty() || rest.starts_with([':', '/'])))
 }
@@ -147,7 +148,7 @@ impl Api {
         }
         let base = base.trim().trim_end_matches('/').to_string();
         let mut builder = reqwest::Client::builder().timeout(timeout).connect_timeout(Duration::from_secs(15));
-        if is_loopback(&base) {
+        if is_loopback_base(&base) {
             // the tests' mock server: never through a system proxy
             builder = builder.no_proxy();
         }

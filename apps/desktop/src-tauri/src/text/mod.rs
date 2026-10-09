@@ -4,6 +4,7 @@
 //! engine, the core or the worker.
 pub mod catalog;
 pub mod fit;
+pub mod fonts;
 pub mod glyphs;
 pub mod ink;
 
