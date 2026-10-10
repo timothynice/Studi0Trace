@@ -17,6 +17,10 @@ const TIE_IOU: f32 = 0.05;
 const STROKE_CHARGE: f32 = 0.25;
 /// An ink stroke under this share of the ink's height is a hairline: the family's 200 and 300 are fitted too.
 const HAIRLINE: f32 = 0.08;
+/// Screened candidates fitted in full per line.
+const REFINED: usize = 4;
+/// Families whose neighbouring weights are screened per line.
+const NEIGHBOUR_FAMILIES: usize = 3;
 /// Shortlist families (and the previous lines' winners) fitted before the early stop may apply.
 const EAGER_FAMILIES: usize = 4;
 /// Reader hints fitted per line.
@@ -95,12 +99,13 @@ fn pick(fitted: &[(Candidate, Fit)]) -> Option<usize> {
     (0..fitted.len()).filter(|&i| acceptable(&fitted[i].1) && fitted[i].1.iou >= best - TIE_IOU).max_by(|&a, &b| merit(&fitted[a].1).total_cmp(&merit(&fitted[b].1)).then(b.cmp(&a)))
 }
 
-/// `fonts` fitted in order, best first. A full fit costs a quarter of a second, so the list is not run to the
-/// end: the first `eager` fonts are always fitted (the reader's hints, the previous lines' winners, the top of
-/// the shortlist, a font the user asked for), and after them each font is fitted only while no acceptable fit
-/// reaches `FIT_SURE`, stopping as soon as one does (a fit of the wrong weight does not stop it). A font that is
-/// never fitted is not a candidate; one that cannot be located or loaded is left out.
-fn fit_candidates(string: &str, ink: &ink::LineInk, fonts: &[FontRef], eager: usize, catalog: &catalog::Catalog, cache_dir: &Path) -> Vec<(Candidate, Fit)> {
+/// `fonts` fitted in order, best first: in full (`fit::fit_line`) when `full`, else screened (`fit_line_quick`).
+/// The list is not run to the end: the first `eager` fonts are always fitted (the reader's hints, the previous
+/// lines' winners, the top of the shortlist, a font the user asked for), and after them each font is fitted only
+/// while no fit of the ink's weight reaches `FIT_SURE`, stopping as soon as one does (a fit of the wrong weight
+/// does not stop it). A font that is never fitted is not a candidate; one that cannot be located or loaded is
+/// left out.
+fn fit_candidates(string: &str, ink: &ink::LineInk, fonts: &[FontRef], eager: usize, catalog: &catalog::Catalog, cache_dir: &Path, full: bool) -> Vec<(Candidate, Fit)> {
     let caps = all_caps(string);
     let mut out: Vec<(Candidate, Fit)> = Vec::new();
     let mut best = 0.0f32;
@@ -111,7 +116,8 @@ fn fit_candidates(string: &str, ink: &ink::LineInk, fonts: &[FontRef], eager: us
         let Some((path, index)) = catalog.locate(f, cache_dir) else { continue };
         let Ok(font) = glyphs::Font::load(&path, index) else { continue };
         let shaped = font.shape(string);
-        if let Some(fit) = fit::fit_line(&shaped, ink, caps) {
+        let fitted = if full { fit::fit_line(&shaped, ink, caps) } else { fit::fit_line_quick(&shaped, ink, caps) };
+        if let Some(fit) = fitted {
             if stroke_agrees(&fit) {
                 best = best.max(fit.iou);
             }
@@ -126,39 +132,72 @@ fn sort_best_first(fitted: &mut [(Candidate, Fit)]) {
     fitted.sort_by(|a, b| b.0.iou.total_cmp(&a.0.iou));
 }
 
-/// The best family's other weights worth fitting: always its neighbours ±100, and its 200 and 300 when the ink's
-/// stroke is under `HAIRLINE` of its height (the weight the stem picked is a guess, and a light source is where
-/// IoU most often prefers the heavier face). Those already fitted are left out.
+/// The screened candidates in the order they are worth a full fit: those of the ink's weight first, each group by
+/// its IoU less the stroke's charge (`pick`'s merit).
+fn by_promise(fitted: &mut [(Candidate, Fit)]) {
+    let merit = |f: &Fit| f.iou - STROKE_CHARGE * stroke_error(f);
+    fitted.sort_by(|a, b| stroke_agrees(&b.1).cmp(&stroke_agrees(&a.1)).then(merit(&b.1).total_cmp(&merit(&a.1))));
+}
+
+/// The `REFINED` most promising screened candidates fitted in full (a screen is a tenth of a full fit, so every font
+/// is screened and only these few are fitted), first and best first, then the rest as screened. Returns the list
+/// and how many at its head are full fits.
+fn refine(string: &str, ink: &ink::LineInk, mut fitted: Vec<(Candidate, Fit)>, catalog: &catalog::Catalog, cache_dir: &Path) -> (Vec<(Candidate, Fit)>, usize) {
+    by_promise(&mut fitted);
+    let rest = fitted.split_off(fitted.len().min(REFINED));
+    let fonts: Vec<FontRef> = fitted.iter().map(|(c, _)| c.font.clone()).collect();
+    let mut full = fit_candidates(string, ink, &fonts, fonts.len(), catalog, cache_dir, true);
+    let n = full.len();
+    let mut rest: Vec<(Candidate, Fit)> = rest.into_iter().filter(|(c, _)| !full.iter().any(|(f, _)| f.font == c.font)).collect();
+    sort_best_first(&mut rest);
+    full.extend(rest);
+    (full, n)
+}
+
+/// The other weights worth fitting of the `NEIGHBOUR_FAMILIES` best families by IoU: each one's neighbours ±100,
+/// and its 200 and 300 when the ink's stroke is under `HAIRLINE` of its height (the weight the stem picked is a
+/// guess, a face at the wrong weight scores below a worse face at the right one, and a light source is where IoU
+/// most often prefers the heavier face). Those already fitted are left out.
 fn weight_neighbours(ink: &ink::LineInk, fitted: &[(Candidate, Fit)], catalog: &catalog::Catalog) -> Vec<FontRef> {
-    let Some((best, _)) = fitted.first() else { return Vec::new() };
     let hairline = match (fit::ink_stroke(ink), ink.ink_bounds) {
         (Some(w), Some((_, t, _, b))) if b > t => w / ((b - t) as f32) < HAIRLINE,
         _ => false,
     };
-    catalog
-        .weights_of(&best.font.family, best.font.source)
-        .into_iter()
-        .filter(|w| (*w as i32 - best.font.weight as i32).abs() == 100 || (hairline && (*w == 200 || *w == 300)))
-        .map(|weight| FontRef { weight, ..best.font.clone() })
-        .filter(|f| !fitted.iter().any(|(c, _)| c.font == *f))
-        .collect()
+    let mut ranked: Vec<&Candidate> = fitted.iter().map(|(c, _)| c).collect();
+    ranked.sort_by(|a, b| b.iou.total_cmp(&a.iou));
+    let mut families: Vec<&Candidate> = Vec::new();
+    for c in ranked {
+        if families.len() < NEIGHBOUR_FAMILIES && !families.iter().any(|f| f.font.family == c.font.family && f.font.source == c.font.source) {
+            families.push(c);
+        }
+    }
+    let mut out: Vec<FontRef> = Vec::new();
+    for best in families {
+        for weight in catalog.weights_of(&best.font.family, best.font.source) {
+            let f = FontRef { weight, ..best.font.clone() };
+            if ((weight as i32 - best.font.weight as i32).abs() == 100 || (hairline && (weight == 200 || weight == 300))) && !fitted.iter().any(|(c, _)| c.font == f) && !out.contains(&f) {
+                out.push(f);
+            }
+        }
+    }
+    out
 }
 
-/// The best family's other weights, fitted where they are already on this Mac or in the cache (a refit runs off
-/// the runtime and downloads nothing).
+/// The best families' other weights, screened where they are already on this Mac or in the cache (a refit runs
+/// off the runtime and downloads nothing).
 fn with_weight_neighbours(string: &str, ink: &ink::LineInk, fitted: &mut Vec<(Candidate, Fit)>, catalog: &catalog::Catalog, cache_dir: &Path) {
     let more = weight_neighbours(ink, fitted, catalog);
     if !more.is_empty() {
         let n = more.len();
-        fitted.extend(fit_candidates(string, ink, &more, n, catalog, cache_dir));
+        fitted.extend(fit_candidates(string, ink, &more, n, catalog, cache_dir, false));
         sort_best_first(fitted);
     }
 }
 
-/// The line's result from its fitted candidates: the `pick`, moved to the front of the list (the rest stay best
-/// first). A `forced` font (the user's choice) that was fitted is chosen and the line matched and enabled
-/// whatever its score.
-fn finish_line(line: &mut TextLine, mut fitted: Vec<(Candidate, Fit)>, any_located: bool, forced: Option<&FontRef>) {
+/// The line's result from its candidates, the first `full` of them fitted in full: the `pick` among those, moved to
+/// the front of the list (the rest stay in order). A `forced` font (the user's choice) that was fitted is chosen
+/// and the line matched and enabled whatever its score.
+fn finish_line(line: &mut TextLine, mut fitted: Vec<(Candidate, Fit)>, full: usize, any_located: bool, forced: Option<&FontRef>) {
     if fitted.is_empty() {
         line.status = Status::Declined(if any_located { Reason::NoFit } else { Reason::Fonts });
         line.candidates.clear();
@@ -168,7 +207,7 @@ fn finish_line(line: &mut TextLine, mut fitted: Vec<(Candidate, Fit)>, any_locat
         return;
     }
     let at = forced.and_then(|f| fitted.iter().position(|(c, _)| c.font == *f));
-    let pick = at.or_else(|| pick(&fitted));
+    let pick = at.or_else(|| pick(&fitted[..full.min(fitted.len())]));
     if let Some(p) = pick {
         let chosen = fitted.remove(p);
         fitted.insert(0, chosen);
@@ -331,10 +370,11 @@ async fn run(image_id: &str, source: Arc<Image>, deps: Deps, phase: &Arc<dyn Fn(
         let hinted = fonts.len() - lead;
         fonts.extend(shortlist.iter().filter(|f| !winners.contains(f)).cloned());
         let (catalog, cache_dir, ink, string) = (deps.catalog.clone(), deps.cache_dir.clone(), inks[i].clone(), text_lines[i].string.clone());
-        // the winners and the shortlist's head share the four-family budget; the hints are on top of it
+        // every font screened (the winners and the shortlist's head share the four-family budget; the hints are on top
+        // of it), the best families' other weights downloaded and screened, and the most promising fitted in full
         let (mut fitted, any_located) = crate::redraw::blocking(move || {
             let any_located = fonts.iter().any(|f| catalog.locate(f, &cache_dir).is_some());
-            Ok((fit_candidates(&string, &ink, &fonts, hinted + EAGER_FAMILIES, &catalog, &cache_dir), any_located))
+            Ok((fit_candidates(&string, &ink, &fonts, hinted + EAGER_FAMILIES, &catalog, &cache_dir, false), any_located))
         })
         .await?;
         let more = weight_neighbours(&inks[i], &fitted, &deps.catalog);
@@ -345,11 +385,12 @@ async fn run(image_id: &str, source: Arc<Image>, deps: Deps, phase: &Arc<dyn Fn(
             }
             let (catalog, cache_dir, ink, string) = (deps.catalog.clone(), deps.cache_dir.clone(), inks[i].clone(), text_lines[i].string.clone());
             let n = more.len();
-            fitted.extend(crate::redraw::blocking(move || Ok(fit_candidates(&string, &ink, &more, n, &catalog, &cache_dir))).await?);
-            sort_best_first(&mut fitted);
+            fitted.extend(crate::redraw::blocking(move || Ok(fit_candidates(&string, &ink, &more, n, &catalog, &cache_dir, false))).await?);
         }
+        let (catalog, cache_dir, ink, string) = (deps.catalog.clone(), deps.cache_dir.clone(), inks[i].clone(), text_lines[i].string.clone());
+        let (fitted, full) = crate::redraw::blocking(move || Ok(refine(&string, &ink, fitted, &catalog, &cache_dir))).await?;
         let line = &mut text_lines[i];
-        finish_line(line, fitted, any_located, None);
+        finish_line(line, fitted, full, any_located, None);
         if line.status == Status::Matched {
             let f = line.candidates[0].font.clone();
             winners.retain(|w| *w != f);
@@ -420,9 +461,17 @@ pub async fn set_line(source: Arc<Image>, planned: &Planned, line_id: &str, chan
                 }
             }
             let any_located = fonts.iter().any(|f| catalog.locate(f, &cache_dir).is_some());
-            let mut fitted = fit_candidates(&line.string, ink, &fonts, EAGER_FAMILIES, &catalog, &cache_dir);
+            let mut fitted = fit_candidates(&line.string, ink, &fonts, EAGER_FAMILIES, &catalog, &cache_dir, false);
             with_weight_neighbours(&line.string, ink, &mut fitted, &catalog, &cache_dir);
-            finish_line(line, fitted, any_located, keep.as_ref());
+            // the font the line stands on is fitted in full whatever its promise
+            if let Some(k) = keep.as_ref().and_then(|k| fitted.iter().position(|(c, _)| c.font == *k)) {
+                let kept = fitted.remove(k);
+                if let Some(fit) = refit_one(&line.string, ink, &kept.0.font, &catalog, &cache_dir) {
+                    fitted.push((Candidate { font: kept.0.font, iou: fit.iou }, fit));
+                }
+            }
+            let (fitted, full) = refine(&line.string, ink, fitted, &catalog, &cache_dir);
+            finish_line(line, fitted, full, any_located, keep.as_ref());
             // a line the user switched off stays off, unless this call asks for a font or for it on
             if was_off && change.enabled != Some(true) && change.font.is_none() && line.status == Status::Matched {
                 line.status = Status::Off;
@@ -470,7 +519,7 @@ pub async fn set_line(source: Arc<Image>, planned: &Planned, line_id: &str, chan
 }
 
 fn refit_one(string: &str, ink: &ink::LineInk, font: &FontRef, catalog: &catalog::Catalog, cache_dir: &Path) -> Option<Fit> {
-    fit_candidates(string, ink, std::slice::from_ref(font), 1, catalog, cache_dir).into_iter().next().map(|(_, f)| f)
+    fit_candidates(string, ink, std::slice::from_ref(font), 1, catalog, cache_dir, true).into_iter().next().map(|(_, f)| f)
 }
 
 
@@ -510,12 +559,17 @@ mod tests {
     #[test]
     fn the_chosen_candidate_leads_the_list_and_the_line_is_declined_when_none_is_acceptable() {
         let mut line = TextLine { id: "i-t0".into(), quad: [[0.0; 2]; 4], string: "AB".into(), class: Class::Type, colour: [0; 3], status: Status::Matched, candidates: Vec::new(), chosen: None, enabled: true, fit: None };
-        finish_line(&mut line, vec![fitted("K", 500, 0.80, 1.30), fitted("K", 300, 0.76, 1.02)], true, None);
+        finish_line(&mut line, vec![fitted("K", 500, 0.80, 1.30), fitted("K", 300, 0.76, 1.02)], 2, true, None);
         assert_eq!((line.status, line.chosen, line.candidates[0].font.weight), (Status::Matched, Some(0), 300));
         assert_eq!(line.fit.as_ref().unwrap().stroke, 1.02);
-        finish_line(&mut line, vec![fitted("K", 700, 0.9, 1.6)], true, None);
+        finish_line(&mut line, vec![fitted("K", 700, 0.9, 1.6)], 1, true, None);
         assert_eq!(line.status, Status::Declined(Reason::NoFit));
         assert!(line.fit.is_none() && line.chosen.is_none() && line.candidates.len() == 1);
+        // only a full fit is chosen: a screened candidate, however promising, stays in the list behind it
+        finish_line(&mut line, vec![fitted("K", 400, 0.70, 1.0), fitted("L", 400, 0.74, 1.0)], 1, true, None);
+        assert_eq!((line.status, line.candidates[0].font.family.as_str(), line.candidates.len()), (Status::Matched, "K", 2));
+        finish_line(&mut line, vec![fitted("L", 400, 0.74, 1.0)], 0, true, None);
+        assert_eq!(line.status, Status::Declined(Reason::NoFit), "nothing fitted in full, nothing chosen");
     }
 
     #[test]
@@ -544,5 +598,12 @@ mod tests {
         let weights = |stroke: f32| -> Vec<u16> { weight_neighbours(&ink_of(stroke), &list, &cat).iter().map(|f| f.weight).collect() };
         assert_eq!(weights(3.0), [400, 600]);
         assert_eq!(weights(1.5), [200, 300, 400, 600]);
+        // the three best families each get theirs, a fourth does not: a face at the wrong weight scores under a
+        // worse face at the right one, and must still reach its right weight
+        let json4 = ["K", "L", "M", "N"].iter().map(|n| format!(r#"{{"name":"{n}","category":"sans-serif","variants":[{}],"features":{{"cap":0.7,"x":0.5,"stem":0.1,"widths":[{widths}]}}}}"#, variants.join(","))).collect::<Vec<_>>().join(",");
+        let cat4 = catalog::Catalog::from_index(&format!(r#"{{"families":[{json4}]}}"#), fontdb::Database::new());
+        let list = vec![fitted("K", 400, 0.72, 0.9), fitted("K", 500, 0.71, 1.1), fitted("L", 400, 0.66, 1.6), fitted("M", 600, 0.65, 1.0), fitted("N", 400, 0.64, 1.0)];
+        let more: Vec<(String, u16)> = weight_neighbours(&ink_of(3.0), &list, &cat4).iter().map(|f| (f.family.clone(), f.weight)).collect();
+        assert_eq!(more, [("K".to_string(), 300), ("L".to_string(), 300), ("L".to_string(), 500), ("M".to_string(), 500), ("M".to_string(), 700)]);
     }
 }
