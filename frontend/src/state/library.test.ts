@@ -1501,6 +1501,44 @@ describe("library: traces by the painted set", () => {
     expect(shownAnswer(item())!.svg).toBe(svg);
   });
 
+  it("Use redraw, Revert and removing the image each abort a running prefetch, and its late answer is dropped", async () => {
+    // Use redraw
+    const a = await tracedOnBalanced();
+    await a.answer(a.calls[0]);
+    expect(a.calls[1]).toMatchObject({ req: { mask: [] } });
+    await a.lib.redraw("a");
+    await a.lib.acceptRedraw("a");
+    expect(a.calls[1].signal.aborted).toBe(true);
+    await a.answer(a.calls[1]);
+    expect(a.item().traces).toEqual({});
+    expect(a.item().shown).toBeNull();
+    // Revert, while the redraw's own prefetch runs
+    a.lib.generate("a");
+    await flush();
+    const full = a.calls[a.calls.length - 1];
+    expect(full.req.mask).toEqual(BOTH);
+    await a.answer(full);
+    const prefetch = a.calls[a.calls.length - 1];
+    expect(prefetch.req.mask).toEqual([]);
+    expect(a.item().job?.prefetch).toBe(true);
+    await a.lib.revertRedraw("a");
+    expect(prefetch.signal.aborted).toBe(true);
+    expect(a.item().job).toBeNull();
+    const kept = a.item().traces;
+    await a.answer(prefetch);
+    expect(a.item().traces).toBe(kept);
+    expect(Object.keys(kept)).toEqual([`${P}|a-t0,a-t1`]);
+    // removing the image
+    const b = await tracedOnBalanced();
+    await b.answer(b.calls[0]);
+    expect(b.calls[1]).toMatchObject({ req: { mask: [] } });
+    b.lib.remove("a");
+    expect(b.calls[1].signal.aborted).toBe(true);
+    await b.answer(b.calls[1]);
+    expect(b.lib.getState().items).toEqual([]);
+    expect(b.calls).toHaveLength(2);
+  });
+
   it("prefetches for the selected image only: another selected stops it, and it resumes when selected again", async () => {
     const { calls, answer, lib } = await tracedOnBalanced();
     await answer(calls[0]);
