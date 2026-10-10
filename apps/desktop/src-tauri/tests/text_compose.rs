@@ -436,4 +436,30 @@ mod round1 {
         let _ = std::fs::remove_dir_all(&dir);
         let _ = std::fs::remove_dir_all(&empty);
     }
+
+    // ---- final fix wave ----
+
+    #[test]
+    fn a_font_picked_for_a_declined_line_is_a_repaint_and_a_string_edit_of_a_matched_line_is_not() {
+        use studi0trace_desktop::text::repainted;
+        // only Josefin Light is offered: it scores under the accept on Montserrat ink, so the line is declined
+        let dir = cache(&[("Montserrat-Regular.ttf", "Montserrat", 400), ("JosefinSans-Light.ttf", "Josefin Sans", 300)]);
+        let img = image("montserrat-est-30-t0-white.png");
+        let d = deps(Arc::new(FixtureFinder(vec![line_box(&img, 14.0, 58.0)])), None, index(&[("Josefin Sans", 300), ("Montserrat", 400)]), &dir);
+        let only_josefin = Deps { catalog: Arc::new(index(&[("Josefin Sans", 300)])), ..d.clone() };
+        let declined = run_plan(&img, &only_josefin);
+        assert!(matches!(declined.plan.lines[0].status, Status::Declined(_)), "{:?}", declined.plan.lines[0]);
+        assert!(declined.painted.is_none());
+        let picked = edit(&img, &declined, "img-t0", LineChange { font: Some(font("Montserrat", 400)), ..Default::default() }, &d);
+        assert_eq!(picked.plan.lines[0].status, Status::Matched);
+        assert!(repainted(&declined, &picked), "the line is now painted out: the trace must be redone");
+        // a string edit of the matched line paints out the same ink
+        let restrung = edit(&img, &picked, "img-t0", LineChange { string: Some("EST. 2027".into()), ..Default::default() }, &d);
+        assert_eq!(restrung.plan.lines[0].status, Status::Matched);
+        assert!(!repainted(&picked, &restrung), "same composed lines, same painted bytes");
+        // and switching it off is a repaint again
+        let off = edit(&img, &restrung, "img-t0", LineChange { enabled: Some(false), ..Default::default() }, &d);
+        assert!(repainted(&restrung, &off));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

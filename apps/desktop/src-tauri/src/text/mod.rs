@@ -150,5 +150,5 @@ pub fn error(code: &'static str) -> CommandError {
     }
 }
 
-pub use plan::{plan, set_line, Deps, LineChange, Planned};
+pub use plan::{plan, repainted, set_line, Deps, LineChange, Planned};
 pub use plans::{bytes_hash, Entry, Plans};

@@ -518,6 +518,18 @@ pub async fn set_line(source: Arc<Image>, planned: &Planned, line_id: &str, chan
     .await
 }
 
+/// Whether an edit changed what the trace sees: the painted image `after` differs from `before`'s (a line composed or
+/// no longer composed — a font picked for a declined or Off line, a line switched on or off, a font that cannot be
+/// located). A string or font edit of a line that stays composed paints out the same ink and is not a repaint:
+/// the traces are composed again, not traced again.
+pub fn repainted(before: &Planned, after: &Planned) -> bool {
+    match (&before.painted, &after.painted) {
+        (None, None) => false,
+        (Some(a), Some(b)) => !(Arc::ptr_eq(a, b) || a == b),
+        _ => true,
+    }
+}
+
 fn refit_one(string: &str, ink: &ink::LineInk, font: &FontRef, catalog: &catalog::Catalog, cache_dir: &Path) -> Option<Fit> {
     fit_candidates(string, ink, std::slice::from_ref(font), 1, catalog, cache_dir, true).into_iter().next().map(|(_, f)| f)
 }

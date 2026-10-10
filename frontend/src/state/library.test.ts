@@ -794,7 +794,7 @@ function textPlatform() {
       order.push("plan");
       return PLAN([LINE]);
     }),
-    textSetLine: vi.fn(async (_id: string, _line: string, change: TextLineChange) => ({ plan: PLAN([{ ...LINE, string: "EST.", enabled: change.enabled ?? true }]), textGroup: GROUP.replace("h1", "h2") })),
+    textSetLine: vi.fn(async (_id: string, _line: string, change: TextLineChange) => ({ plan: PLAN([{ ...LINE, string: "EST.", enabled: change.enabled ?? true }]), textGroup: GROUP.replace("h1", "h2"), repainted: change.enabled !== undefined })),
     redrawImage: vi.fn(async () => RESULT),
     acceptRedraw: vi.fn(async (id: string) => ({ image: image(id), original: image(`${id}-original`) })),
   } satisfies LibraryPlatform;
@@ -933,7 +933,7 @@ describe("library: text", () => {
     platform.textSetLine.mockImplementation((async (_id: string, _line: string, change: TextLineChange) => {
       seen.push(change.string);
       await new Promise<void>((r) => releases.push(r));
-      return { plan: PLAN([{ ...LINE, string: change.string! }]), textGroup: GROUP };
+      return { plan: PLAN([{ ...LINE, string: change.string! }]), textGroup: GROUP, repainted: false };
     }) as never);
     const first = lib.setTextLine("a", "a-t0", { string: "ONE" });
     const second = lib.setTextLine("a", "a-t0", { string: "TWO" });
@@ -971,5 +971,36 @@ describe("library: text", () => {
     expect(unexportedCount(lib.getState())).toBe(0);
     await lib.setTextLine("a", "a-t0", { string: "EST." });
     expect(unexportedCount(lib.getState())).toBe(1);
+  });
+
+  it("a font picked for a declined or an Off line traces again; a string edit of a matched line does not", async () => {
+    const { platform } = textPlatform();
+    const declined: TextLine = { ...LINE, status: { kind: "declined", reason: "no_fit" }, chosen: null, enabled: false, fit: null };
+    const off: TextLine = { ...LINE, status: { kind: "off" }, enabled: false };
+    for (const line of [declined, off]) {
+      platform.textPlan.mockImplementation(async () => PLAN([line]));
+      const lib = createLibrary(platform, CATALOG, { ...DEFAULT_SETTINGS, recogniseText: true });
+      lib.add([ok("a")]);
+      lib.generate("a");
+      await flush();
+      const before = platform.vectorize.mock.calls.length;
+      // the app answers that the line is now painted out
+      platform.textSetLine.mockImplementationOnce((async () => ({ plan: PLAN([LINE]), textGroup: GROUP, repainted: true })) as never);
+      await lib.setTextLine("a", "a-t0", { font: { family: "Montserrat", weight: 400, italic: false, source: "google" } });
+      await flush();
+      expect(platform.vectorize.mock.calls.length).toBe(before + 1);
+      expect(lib.selectedItem()!.shown).not.toBeNull();
+      lib.remove("a");
+    }
+    // a string edit of a matched line is composed again, not traced
+    platform.textPlan.mockImplementation(async () => PLAN([LINE]));
+    const lib = createLibrary(platform, CATALOG, { ...DEFAULT_SETTINGS, recogniseText: true });
+    lib.add([ok("b")]);
+    lib.generate("b");
+    await flush();
+    const before = platform.vectorize.mock.calls.length;
+    await lib.setTextLine("b", "a-t0", { string: "EST." });
+    await flush();
+    expect(platform.vectorize.mock.calls.length).toBe(before);
   });
 });

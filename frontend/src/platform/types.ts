@@ -87,6 +87,12 @@ export interface TextLineChange {
   font?: FontRef;
   enabled?: boolean;
 }
+/** A line edit's answer: the new plan, the group to compose, and whether what the trace sees changed (a line now painted out or no longer): then every trace of the image is stale and is traced again. */
+export interface TextLineAnswer {
+  plan: TextPlan;
+  textGroup: string;
+  repainted: boolean;
+}
 export interface TextOptions {
   signal: AbortSignal;
   onPhase?: (phase: TextPhase) => void;
@@ -283,7 +289,7 @@ export interface Platform {
   /** Text re-setting (the Mac app; a browser answers "not available"). Finds, reads and matches the image's text; aborting the signal abandons it. */
   textPlan(id: string, opts: TextOptions): Promise<TextPlan>;
   /** Changes one line (its string, its font or whether it is set) and answers the new plan with the text group to compose. */
-  textSetLine(id: string, lineId: string, change: TextLineChange): Promise<{ plan: TextPlan; textGroup: string }>;
+  textSetLine(id: string, lineId: string, change: TextLineChange): Promise<TextLineAnswer>;
   /** Fonts whose family matches the query, for the line's font picker. */
   textSearchFonts(query: string): Promise<FontRef[]>;
 }

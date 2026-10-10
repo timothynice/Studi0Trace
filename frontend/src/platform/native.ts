@@ -4,7 +4,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
 import { ApiError, apiErrorFromBody, type EngineDescription, type Preset, type VectorizeResponse } from "@/lib/api";
-import { DEFAULT_SETTINGS, type Drift, type ExportAllResult, type MenuCommand, type OpenFailure, type OpenOutcome, type Platform, type FontRef, type RedrawPhase, type Roughness, type Settings, type TextPhase, type TextPlan } from "./types";
+import { DEFAULT_SETTINGS, type Drift, type ExportAllResult, type MenuCommand, type OpenFailure, type OpenOutcome, type Platform, type FontRef, type RedrawPhase, type Roughness, type Settings, type TextLineAnswer, type TextPhase, type TextPlan } from "./types";
 
 interface CommandError {
   status: number;
@@ -284,7 +284,7 @@ export function nativePlatform(): Platform {
         signal.removeEventListener("abort", abort);
       }
     },
-    textSetLine: (id, lineId, change) => call<{ plan: TextPlan; textGroup: string }>("text_set_line", { imageId: id, lineId, change }),
+    textSetLine: (id, lineId, change) => call<TextLineAnswer>("text_set_line", { imageId: id, lineId, change }),
     textSearchFonts: (query) => call<FontRef[]>("text_search_fonts", { query }),
   };
 }

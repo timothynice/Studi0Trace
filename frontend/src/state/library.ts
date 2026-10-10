@@ -136,7 +136,7 @@ export interface Library {
   discardRedraw(id: string): void;
   /** The original is the source again, with its traces. */
   revertRedraw(id: string): Promise<void>;
-  /** A line's string or font changed (the traces are composed again, nothing traces) or it was switched on or off (every trace of the image is dropped and traced again). */
+  /** A line's string, font or switch changed. When the answer says what the trace sees changed (`repainted`), every trace of the image is dropped and traced again; otherwise the traces are composed again and nothing traces. */
   setTextLine(id: string, lineId: string, change: TextLineChange): Promise<void>;
   /** Abandons the text plan being asked; the trace then goes on without it. */
   cancelText(id: string): void;
@@ -607,8 +607,9 @@ export function createLibrary(platform: LibraryPlatform, catalog: Catalog, initi
         const answer = await platform.textSetLine!(id, lineId, change);
         const now = find(id);
         if (!now) return;
-        if (change.enabled !== undefined) {
-          // what is painted out changed: every trace of this image is stale
+        if (answer.repainted) {
+          // what is painted out changed (a line switched on or off, a font picked for a declined or Off line): every
+          // trace of this image holds the old pixels under the new glyphs, and is traced again
           abortJob(now);
           clearTimer(id);
           patch(id, { traces: {}, shown: null, exported: null, auto: null, job: null, error: null, errorKey: null, text: { ...textOf(now), plan: answer.plan } });

@@ -562,6 +562,9 @@ pub fn revert_redraw(state: State<'_, AppState>, texts: State<'_, TextState>, id
 pub struct LineAnswer {
     pub plan: TextPlan,
     pub text_group: String,
+    /// The edit changed what the trace sees (`text::repainted`): the frontend traces the image again instead of
+    /// composing the new group over traces of the old painted bytes, which would draw the text twice.
+    pub repainted: bool,
 }
 
 /// What a command takes from the state to build a plan's [`text::Deps`] on the blocking pool: the catalogue is
@@ -678,8 +681,9 @@ pub async fn text_set_line(app: tauri::AppHandle, state: State<'_, AppState>, te
     let (source, deps) = redraw::blocking(move || Ok((Source::decode(&bytes)?, parts.deps(hidden_text, None)))).await?;
     let source = Arc::new(source);
     let next = text::set_line(source, &planned, &line_id, change, deps).await?;
+    let repainted = text::repainted(&planned, &next);
     let kept = texts.plans.put(&image_id, hash, next);
-    Ok(LineAnswer { plan: kept.plan.clone(), text_group: kept.group.clone() })
+    Ok(LineAnswer { plan: kept.plan.clone(), text_group: kept.group.clone(), repainted })
 }
 
 #[tauri::command]
