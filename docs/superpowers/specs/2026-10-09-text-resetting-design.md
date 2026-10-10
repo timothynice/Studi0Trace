@@ -55,20 +55,24 @@ it. The plan for an image is computed once and cached; traces reuse it.
    colour of the box's 2 px border ring; coverage per pixel is the pixel's position between the
    backdrop and the ink colour along the line joining them in linear RGB, clamped to 0..1; the ink
    colour is the median of pixels whose distance from the backdrop is at least 90 % of the box's
-   maximum. A pixel further off that line than 0.1 of its length (`OFF_LINE`) is another colour,
-   not a blend of the two (a gold swash reaching into a dark wordmark's box): it has no coverage,
+   maximum. A pixel further off that line than 0.1 of its length (`OFF_LINE`), in linear light
+   and in the encoded values both (images blend their edges on the encoded values: a half-covered
+   blue-on-yellow pixel is a quarter off the linear line), is another colour, not a blend of the
+   two (a gold swash reaching into a dark wordmark's box): it has no coverage,
    so it is in no segment, the fit does not chase it and the paint-out leaves it alone. The ink
    mask is coverage ≥ 0.5. Per-character segments are the mask's connected components merged
    where their x ranges overlap (dots of i and j, the two parts of a colon). When the segments
-   number the string's non-space characters, a gap over 1.8 × the median gap (and over a quarter
-   of the ink's height) with no space in the string there gets one (`repair_spaces`): Vision
+   number the string's non-space characters, a gap over 1.8 × the median gap and over the median
+   plus 0.35 of the ink's height, with no space in the string there and not between two digits (a
+   tabular 1 has a quarter em of air either side), gets one (`repair_spaces`): Vision
    drops the space in widely tracked text ("ABRIGHTER", "LIFEIS"), and the line keeps the
    repaired string. A line is **declined** — left to the trace — when the reader classed it
    `script` or `custom`, when the ink's spread is over 8 (gradient or multicolour text), or when
    the segment count differs from the string's non-space character count by more than a third
-   (the string and the ink disagree). The spread is the 90th percentile ΔE of the flat ink
-   pixels from their own median colour (not from the ink colour, which on large display letters
-   with grain is their darkest specks, 7–11 ΔE from a body of one colour), and only the
+   (the string and the ink disagree). The spread is the range of the flat ink pixels' colours:
+   the 90th minus the 10th percentile of their positions along their principal axis in Lab, so a
+   ramp of span D reads 0.8 D (not their distance from the ink colour, which on large display
+   letters with grain is their darkest specks, 7–11 ΔE from a body of one colour), and only the
    characters' pixels count: the components overlapping the quad as Vision gave it whose height
    is 0.4–1.3 of the line's, so a rule or divider in the grown box is not a second ink.
 3. **Match.** Candidates, in order: the AI hints; then a keyless shortlist from the bundled
@@ -138,7 +142,8 @@ it. The plan for an image is computed once and cached; traces reuse it.
    `scale(0.5)` group is a sibling, never a parent). Per matched, enabled line, one `<path>` of
    every glyph outline with `fill` set to the ink colour, carrying `data-line="<id>"` — one path
    per line so a line is one shape in Layers. When *Hidden text in exports* is on, each line also
-   gets `<text x y font-family font-size fill="none" pointer-events="none" data-line>string</text>`
+   gets `<text x y font-family font-size fill="none" pointer-events="none" data-line>string</text>`, its `x`
+   one value per character, each glyph's origin with its nudge (spaces at their computed place),
    after its path: searchable and read by screen readers, invisible, and nothing for `svgdoc.ts`
    (which ignores `<text>`), the core's renderer (built without text) or `svg2pdf` (likewise) to
    draw. The frontend composes (`lib/textsvg.ts`: insert the group before `</svg>`) for the
@@ -287,10 +292,12 @@ trace: `vectorize` traces the original bytes when there is no plan.
   index and installed appears once, as installed.
 - **Ink** (unit tests in `text/ink.rs`): colour, coverage, segments and the decline reasons on
   synthetic lines; the inpaint leaves a flat backdrop flat and a gradient backdrop within 2
-  levels of the gradient; a dropped word space is put back and nothing else changes; a rule or
-  a divider of another colour in the grown box is not a gradient, and large letters with grain
-  and darker specks are not one either; a neighbour's swash in the box is neither ink nor painted
-  out. Unit tests in `text/plan.rs`: a fit of the wrong weight is not acceptable, the light weight
+  levels of the gradient; a dropped word space is put back and nothing else changes, and a
+  tabular 1 among tracked digits is not set apart; a rule or a divider of another colour in the
+  grown box is not a gradient, large letters with grain and darker specks are not one either, a
+  14 ΔE ramp across wide letters is one and a 4 ΔE ramp is not; a neighbour's swash in the box is
+  neither ink nor painted out, while blue ink on yellow keeps its encoded-blend edges half covered
+  (`text/fit.rs`). Unit tests in `text/plan.rs`: a fit of the wrong weight is not acceptable, the light weight
   beats a heavier one that outscores it on a hairline, only a full fit is chosen, and the three
   best families' neighbours (and light weights on a hairline) are screened. `text/catalog.rs`:
   the sans floor is the families the catalogue holds at the stem's weight.
@@ -307,7 +314,8 @@ trace: `vectorize` traces the original bytes when there is no plan.
   (skipped where Vision is unavailable); `tests/text_openai.rs` uses `redraw_openai.rs`'s mock
   server: the request is `POST /v1/responses` with the key only in the header, the schema reply
   is parsed, each error status maps to its code, an AI failure leaves the Vision reading.
-- **Compose** (`tests/text_compose.rs`): the group's shape, one path per line, the hidden
+- **Compose** (`tests/text_compose.rs`): the group's shape, one path per line, the hidden (with one x per
+  character, a nudged glyph's included)
   `<text>` present or absent with the setting, coordinates in the source grid on the upsample
   path too, and the core's renderer draws the group's paths and nothing for the `<text>`.
 - **Boundary** (`tests/redraw_boundary.rs`): `worker.rs` never mentions `text`; only
@@ -330,7 +338,7 @@ regularising declined lines (that is `text-as-shapes`).
 2026-10-09, after real-image tuning (Task 16).
 
 **The three example images** (`tests/text_examples_gate.rs`, Vision and no key, real Google downloads, fonts
-cached): the gate passes. 21 lines matched of 25, every tracked tagline among them, each in the ink's weight
+cached): the gate passes. 19 lines matched of 25, every tracked tagline among them, each in the ink's weight
 (stroke 0.89–1.09 of the ink's), the crops looked at against the source.
 
 - 1 (2 lines, 2 matched, 6.9 s): `LUMORA` Kumbh Sans 400 (IoU 0.826, stroke 0.99); `A BRIGHTER TOMORROW` (space
@@ -346,9 +354,10 @@ cached): the gate passes. 21 lines matched of 25, every tracked tagline among th
 
 What changed, in order: the dropped word spaces put back from the ink; each glyph laid on its own segment; the
 acceptance an IoU floor (0.6) plus the stroke within 35 % of the ink's, ties broken by the stroke, the best
-families' other weights fitted; the gradient judged on the characters' flat pixels from their own median; a
+families' other weights fitted; the gradient judged on the range of the characters' flat pixels; a
 pixel off the ink's colour line not ink; the sans floor; every font screened and four fitted in full, display
-lines searched reduced. Image 3 went from 64 s to 7 s, image 2 from 28 s to 22 s with twice the fonts.
+lines searched reduced. Image 3 went from 64 s to 7 s; image 2 stayed at 22 s (21.9 s before) while trying
+twice the fonts.
 
 **Suites.** `cargo test --release` in `apps/desktop/src-tauri` green (`text_fit` 65 s, was 76 s); `cargo clippy
 --release --all-targets` reports nothing from `apps/desktop`.

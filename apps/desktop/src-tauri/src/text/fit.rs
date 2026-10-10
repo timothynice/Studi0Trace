@@ -6,8 +6,8 @@ use super::ink::LineInk;
 use super::{Fit, NUDGE_MAX};
 use tiny_skia::{FillRule, Paint, Pixmap, Transform};
 
-/// Glyph origins along the line for a fit: x of each glyph's origin in source pixels.
-fn origins(shaped: &Shaped, fit: &Fit) -> Vec<f32> {
+/// Glyph origins along the line for a fit: x of each glyph's origin in source pixels, nudges included.
+pub fn origins(shaped: &Shaped, fit: &Fit) -> Vec<f32> {
     let mut x = fit.x;
     let mut out = Vec::with_capacity(shaped.glyphs.len());
     for (i, g) in shaped.glyphs.iter().enumerate() {
@@ -660,6 +660,37 @@ mod tests {
         // black on white: linear light 0.79 of the way to black is the encoded mid-grey, 0.5 covered
         assert!((c[1] - 0.5).abs() < 0.02, "{}", c[1]);
         assert_eq!((c[0], c[2]), (0.0, 1.0));
+    }
+
+    #[test]
+    fn blue_ink_on_yellow_keeps_its_anti_aliased_edges() {
+        // three bars of blue on yellow, each edge column the half-and-half blend of the encoded values (how images
+        // anti-alias): that pixel is a quarter of the line's length off the linear-light line between the two
+        // colours, and is still ink, half covered
+        let (blue, yellow) = ([30u8, 60, 200], [250u8, 230, 60]);
+        let half: [u8; 3] = std::array::from_fn(|c| ((blue[c] as u16 + yellow[c] as u16) / 2) as u8);
+        let (w, h) = (120u32, 60u32);
+        let mut rgba = Vec::new();
+        for y in 0..h {
+            for x in 0..w {
+                let bar = [20u32, 40, 60].iter().find(|&&l| (l..l + 6).contains(&x) && (20..44).contains(&y)).copied();
+                let c = match bar {
+                    Some(l) if x == l || x == l + 5 => half,
+                    Some(_) => blue,
+                    None => yellow,
+                };
+                rgba.extend_from_slice(&[c[0], c[1], c[2], 255]);
+            }
+        }
+        let src = crate::redraw::Source { rgba, width: w, height: h };
+        let ink = super::super::ink::line_ink(&src, [[15.0, 18.0], [75.0, 18.0], [75.0, 46.0], [15.0, 46.0]]);
+        assert_eq!(ink.colour, blue);
+        assert_eq!(ink.segments.len(), 3, "{:?}", ink.segments);
+        let at = |x: u32, y: u32| ((y - ink.top) * ink.width + (x - ink.left)) as usize;
+        assert!(ink.coverage[at(20, 30)] > 0.1, "the edge pixel keeps its coverage: {}", ink.coverage[at(20, 30)]);
+        let encoded = encoded_coverage(&ink);
+        assert!((encoded[at(20, 30)] - 0.5).abs() < 0.1, "and reads half covered to the fit: {}", encoded[at(20, 30)]);
+        assert!((encoded[at(22, 30)] - 1.0).abs() < 0.02 && encoded[at(30, 30)] < 0.02);
     }
 
     #[test]

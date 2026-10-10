@@ -16,7 +16,9 @@ fn cache_with_fixture_font() -> (PathBuf, FontRef) {
 }
 
 fn plan(font: &FontRef, enabled: bool, status: Status) -> TextPlan {
-    let fit = Fit { size: 40.0, baseline: 60.0, x: 10.0, tracking: 2.0, nudges: vec![0.0; 9], iou: 0.95, stroke: 1.0 };
+    let mut nudges = vec![0.0; 9];
+    nudges[5] = 12.0;
+    let fit = Fit { size: 40.0, baseline: 60.0, x: 10.0, tracking: 2.0, nudges, iou: 0.95, stroke: 1.0 };
     TextPlan {
         image: "img".into(),
         reader: ReaderKind::Vision,
@@ -24,6 +26,13 @@ fn plan(font: &FontRef, enabled: bool, status: Status) -> TextPlan {
         ai_error: None,
         fonts_offline: false,
     }
+}
+
+/// A number as the group writes it: two decimals, trailing zeros dropped.
+fn num(v: f32) -> String {
+    let s = format!("{v:.2}");
+    let s = s.trim_end_matches('0').trim_end_matches('.').to_string();
+    if s == "-0" { "0".into() } else { s }
 }
 
 fn catalog() -> Catalog {
@@ -38,7 +47,18 @@ fn one_path_per_line_in_the_ink_colour_with_hidden_text_when_asked() {
     assert!(with.starts_with("<g id=\"text\">") && with.ends_with("</g>"), "{with}");
     assert_eq!(with.matches("<path ").count(), 1);
     assert!(with.contains("fill=\"#181c2c\"") && with.contains("data-line=\"img-t0\""));
-    assert!(with.contains("<text x=\"10\" y=\"60\" font-family=\"Montserrat\" font-size=\"40\" letter-spacing=\"2\" fill=\"none\" pointer-events=\"none\" data-line=\"img-t0\">EST. 2026</text>"), "{with}");
+    // the hidden text carries one x per character, each glyph's origin: 10, then the advances at 40 px plus the
+    // tracking of 2, and the nudge of the "2" after the space (12 px) on it alone
+    let shaped = studi0trace_desktop::text::glyphs::Font::load(&dir.join(cache_name(&font)), 0).unwrap().shape("EST. 2026");
+    let mut at = 10.0f32;
+    let mut xs = Vec::new();
+    for (i, g) in shaped.glyphs.iter().enumerate() {
+        xs.push(num(at + g.x_offset * 40.0 + if i == 5 { 12.0 } else { 0.0 }));
+        at += g.advance * 40.0 + 2.0;
+    }
+    assert_eq!(xs.len(), 9);
+    let want = format!("<text x=\"{}\" y=\"60\" font-family=\"Montserrat\" font-size=\"40\" fill=\"none\" pointer-events=\"none\" data-line=\"img-t0\">EST. 2026</text>", xs.join(" "));
+    assert!(with.contains(&want), "{with}\nwanted {want}");
     let without = text_group(&plan(&font, true, Status::Matched), false, &cat, &dir);
     assert!(!without.contains("<text"));
     assert_eq!(text_group(&plan(&font, false, Status::Off), true, &cat, &dir), "<g id=\"text\"></g>");

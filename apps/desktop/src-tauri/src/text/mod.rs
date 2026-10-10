@@ -23,7 +23,8 @@ use serde::{Deserialize, Serialize};
 pub const FIT_ACCEPT: f32 = 0.6;
 /// A fit whose drawn stroke differs from the ink's by more than this share is the wrong weight, and not accepted.
 pub const STROKE_AGREE: f32 = 0.35;
-/// 90th-percentile ΔE of the covered pixels from the ink colour above which the ink is a gradient.
+/// The range of the flat ink pixels' colours (90th minus 10th percentile along their principal axis in Lab, ΔE;
+/// `ink::colour_range`) above which the ink is a gradient: a ramp of 10 ΔE or more across the letters.
 pub const INK_SPREAD_MAX: f32 = 8.0;
 /// The share by which the ink's segment count may differ from the string's non-space characters.
 pub const MISMATCH_SHARE: f32 = 0.34;

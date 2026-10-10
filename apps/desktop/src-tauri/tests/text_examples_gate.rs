@@ -38,10 +38,12 @@ fn the_taglines_are_matched_and_the_scripts_declined() {
     let mut total = 0f32;
     // per image: the lines that must be Matched, the ones that must be declined, the ones that may be either but
     // only in a sans-serif, and how many of the serif small words must be Matched
-    let musts: [(&str, &[&str], &[&str], &[&str]); 3] = [
+    // (each must-decline entry is the readings it may be found under; one of them must be found)
+    type Musts<'a> = (&'a str, &'a [&'a str], &'a [&'a [&'a str]], &'a [&'a str]);
+    let musts: [Musts; 3] = [
         ("1", &["A BRIGHTER TOMORROW"], &[], &["LUMORA"]),
-        ("2", &["EST. 2026", "DENVER, CO", "LIFE IS BETTER OUTSIDE", "FIND WHAT MATTERS", "MORE EVERY DAY", "REACH HIGHER"], &["Awaits", "Explore"], &["ADVENTURE", "SUMMIT", "SUMMTT", "MOUNTAINS / FORESTS / LAKES / NEW PERSPECTIVES"]),
-        ("3", &["IDEAS FOR A BRIGHTER TOMORROW", "EST. 2026"], &["Creative", "reative"], &["HORIZON"]),
+        ("2", &["EST. 2026", "DENVER, CO", "LIFE IS BETTER OUTSIDE", "FIND WHAT MATTERS", "MORE EVERY DAY", "REACH HIGHER"], &[&["Awaits"], &["Explore"]], &["ADVENTURE", "SUMMIT", "SUMMTT", "MOUNTAINS / FORESTS / LAKES / NEW PERSPECTIVES"]),
+        ("3", &["IDEAS FOR A BRIGHTER TOMORROW", "EST. 2026"], &[&["Creative", "reative"]], &["HORIZON"]),
     ];
     let serif_words = ["GOOD", "PEOPLE", "GREAT", "PLACES", "EXPLORE", "CREATE", "BELONG"];
     for (n, matched, declined, sans) in musts {
@@ -70,18 +72,24 @@ fn the_taglines_are_matched_and_the_scripts_declined() {
                 None => failures.push(format!("{n}: no line reads {s:?} (strings: {:?})", lines.iter().map(|l| &l.string).collect::<Vec<_>>())),
             }
         }
-        for s in declined {
-            if let Some(l) = find(s) {
-                if !matches!(l.status, Status::Declined(_)) {
-                    failures.push(format!("{n}: {s:?} is {:?} in {}, not declined", l.status, chosen(l)));
-                }
+        for readings in declined {
+            match readings.iter().find_map(|s| find(s)) {
+                Some(l) if !matches!(l.status, Status::Declined(_)) => failures.push(format!("{n}: {:?} is {:?} in {}, not declined", l.string, l.status, chosen(l))),
+                Some(_) => {}
+                None => failures.push(format!("{n}: no line reads any of {readings:?}")),
             }
         }
         // Wander may be re-set only in a serif
-        if let Some(l) = find("Wander").filter(|l| l.status == Status::Matched) {
-            let family = &l.candidates[l.chosen.unwrap()].font.family;
-            if catalog.category(family) != Some("Serif") {
-                failures.push(format!("{n}: Wander is Matched in {family}, not a serif"));
+        if n == "2" {
+            match find("Wander") {
+                Some(l) if l.status == Status::Matched => {
+                    let family = &l.candidates[l.chosen.unwrap()].font.family;
+                    if catalog.category(family) != Some("Serif") {
+                        failures.push(format!("{n}: Wander is Matched in {family}, not a serif"));
+                    }
+                }
+                Some(_) => {}
+                None => failures.push(format!("{n}: no line reads \"Wander\"")),
             }
         }
         for s in sans {
@@ -99,7 +107,8 @@ fn the_taglines_are_matched_and_the_scripts_declined() {
             }
         }
         for l in lines.iter().filter(|l| l.status == Status::Matched) {
-            if !l.fit.as_ref().is_some_and(stroke_agrees) {
+            // a stroke that was never measured (0) does not pass here
+            if !l.fit.as_ref().is_some_and(|f| f.stroke > 0.0 && stroke_agrees(f)) {
                 failures.push(format!("{n}: {:?} is Matched with stroke {:?}", l.string, l.fit.as_ref().map(|f| f.stroke)));
             }
         }

@@ -125,6 +125,16 @@ pub fn line_ink(source: &Source, quad: [[f32; 2]; 4]) -> LineInk {
     let len2 = axis.iter().map(|a| a * a).sum::<f32>().max(1e-6);
     // and how far off that line the pixel is: a blend of the ink and the backdrop sits on it, a pixel of another
     // colour (a neighbouring element's, reaching into the grown box) does not
+    // colour (a neighbouring element's, reaching into the grown box) does not. Off it in linear light and in the
+    // encoded values both: an image blends its edges on the encoded values, and a half-covered pixel of blue ink
+    // on yellow sits a quarter of the line's length off the linear line while it is on the encoded one
+    let (be, ke) = (backdrop.map(|v| v as f32 / 255.0), colour.map(|v| v as f32 / 255.0));
+    let axis_e = [ke[0] - be[0], ke[1] - be[1], ke[2] - be[2]];
+    let len2_e = axis_e.iter().map(|a| a * a).sum::<f32>().max(1e-6);
+    let off_line = |l: [f32; 3], axis: [f32; 3], len2: f32| -> bool {
+        let t = (l[0] * axis[0] + l[1] * axis[1] + l[2] * axis[2]) / len2;
+        (0..3).map(|c| (l[c] - t * axis[c]).powi(2)).sum::<f32>() > OFF_LINE * OFF_LINE * len2
+    };
     let mut coverage = vec![0f32; (width * height) as usize];
     let mut foreign = vec![false; (width * height) as usize];
     for y in 0..height {
@@ -132,21 +142,21 @@ pub fn line_ink(source: &Source, quad: [[f32; 2]; 4]) -> LineInk {
             let p = px(left + x, top + y);
             let l = [srgb_to_linear(p[0]) - b[0], srgb_to_linear(p[1]) - b[1], srgb_to_linear(p[2]) - b[2]];
             let t = (l[0] * axis[0] + l[1] * axis[1] + l[2] * axis[2]) / len2;
-            let off2: f32 = (0..3).map(|c| (l[c] - t * axis[c]).powi(2)).sum();
             coverage[(y * width + x) as usize] = t.clamp(0.0, 1.0);
-            foreign[(y * width + x) as usize] = off2 > OFF_LINE * OFF_LINE * len2;
+            let le = [p[0] as f32 / 255.0 - be[0], p[1] as f32 / 255.0 - be[1], p[2] as f32 / 255.0 - be[2]];
+            foreign[(y * width + x) as usize] = off_line(l, axis, len2) && off_line(le, axis_e, len2_e);
         }
     }
     let mask: Vec<bool> = coverage.iter().map(|&c| c >= 0.5).collect();
-    // the spread: 90th percentile ΔE from their own median colour over the ink's flat patches, the mask pixels whose eight
+    // the spread: the range of colour (`colour_range`) over the ink's flat patches, the mask pixels whose eight
     // neighbours are all in the mask and within CORE_FLAT of the pixel itself. An edge pixel is a blend of ink and
     // backdrop by construction, and on a stroke of a pixel or three there is nowhere a pixel and its neighbours
     // agree: a light ink and a thin one look the same there, so with fewer than 8 flat pixels there is no evidence
     // of a gradient and the spread is 0. (Not coverage >= some level, which is measured against the one ink colour
     // and so can never see a second, lighter ink such as the 90 and 160 grey bars of a gradient; and not the mask's
-    // interior or its coverage ridge, which on 1-2 px strokes are still blends, 20-45 ΔE from the ink.) Their own
-    // median, not the ink colour: that is the furthest pixels' colour, and on large display letters with grain it is
-    // the darkest specks, 7-11 ΔE from a body that is one colour.
+    // interior or its coverage ridge, which on 1-2 px strokes are still blends, 20-45 ΔE from the ink.) A range of
+    // the flat pixels themselves, not their distance from the ink colour: that is the furthest pixels' colour, and
+    // on large display letters with grain it is the darkest specks, 7-11 ΔE from a body that is one colour.
     //
     // Only the characters' own pixels count: the box is grown round the quad, and a rule, a divider or a
     // neighbouring element of another colour inside it is neither ink nor gradient (`character_pixels`).
@@ -167,14 +177,7 @@ pub fn line_ink(source: &Source, quad: [[f32; 2]; 4]) -> LineInk {
             }
         }
     }
-    let centre = median_colour(&flats);
-    let mut spreads: Vec<f32> = flats.iter().map(|p| delta_e(*p, centre)).collect();
-    let spread = if spreads.len() < 8 {
-        0.0
-    } else {
-        spreads.sort_by(|a, b| a.partial_cmp(b).unwrap());
-        spreads[spreads.len() * 9 / 10]
-    };
+    let spread = colour_range(&flats);
     // pixels join into a segment at a lower coverage than the mask: a hairline serif or a thin join under 0.5 must
     // not cut a glyph in two (a fragment would read as an extra character); the segment's extent is still the mask's
     // what the spread has read, the line's ink is only what is on the ink's line: a pixel of another colour is no
@@ -190,6 +193,42 @@ pub fn line_ink(source: &Source, quad: [[f32; 2]; 4]) -> LineInk {
     let segments = segments_of(&mask, &linked, width, height);
     let ink_bounds = bounds_of(&mask, width, height);
     LineInk { left, top, width, height, coverage, mask, backdrop, colour, spread, segments, ink_bounds }
+}
+
+/// The spread of a set of colours as a range, in ΔE: the 90th minus the 10th percentile of their positions along
+/// their principal axis in Lab. A ramp of span D reads 0.8 D whichever end the ink colour was taken from, grain
+/// reads about 2.6 times its deviation, and two or three separate inks read the distance between the outer two.
+/// Fewer than 8 colours are no evidence of anything: 0.
+fn colour_range(colours: &[[u8; 3]]) -> f32 {
+    if colours.len() < 8 {
+        return 0.0;
+    }
+    let labs: Vec<[f32; 3]> = colours.iter().map(|c| lab(*c)).collect();
+    let n = labs.len() as f32;
+    let mean: [f32; 3] = std::array::from_fn(|c| labs.iter().map(|l| l[c]).sum::<f32>() / n);
+    let mut cov = [[0f32; 3]; 3];
+    for l in &labs {
+        for i in 0..3 {
+            for j in 0..3 {
+                cov[i][j] += (l[i] - mean[i]) * (l[j] - mean[j]) / n;
+            }
+        }
+    }
+    // the principal axis by power iteration, from the axis of largest variance
+    let start = (0..3).max_by(|&a, &b| cov[a][a].total_cmp(&cov[b][b])).unwrap_or(0);
+    let mut v = [0.1f32; 3];
+    v[start] = 1.0;
+    for _ in 0..32 {
+        let w: [f32; 3] = std::array::from_fn(|i| (0..3).map(|j| cov[i][j] * v[j]).sum());
+        let norm = w.iter().map(|x| x * x).sum::<f32>().sqrt();
+        if norm <= 1e-12 {
+            return 0.0;
+        }
+        v = w.map(|x| x / norm);
+    }
+    let mut along: Vec<f32> = labs.iter().map(|l| (0..3).map(|c| (l[c] - mean[c]) * v[c]).sum()).collect();
+    along.sort_by(f32::total_cmp);
+    along[along.len() * 9 / 10] - along[along.len() / 10]
 }
 
 /// A character's height, against the line's, that a component may have and count as one for the spread.
@@ -304,19 +343,20 @@ fn segments_of(mask: &[bool], linked: &[bool], width: u32, height: u32) -> Vec<(
     merged
 }
 
-/// A gap between two segments this many times the line's median gap is a word space.
+/// A gap between two segments this many times the line's median gap is a word space...
 pub const SPACE_GAP: f32 = 1.8;
-/// ...and at least this share of the ink's height: a letter gap in untracked text is a few pixels, and 1.8 times
-/// a median of two is not a space. A real word space is a space's advance (about a third of the cap) plus the
-/// two side bearings, so the floor never refuses one.
-const SPACE_FLOOR: f32 = 0.25;
+/// ...when it also exceeds the median by this share of the ink's height: a word space adds a space's advance
+/// (about a third of the cap) to a letter gap, while a narrow glyph in a wide cell (a tabular 1) leaves gaps of
+/// a quarter em either side of it, and a letter gap in untracked text is a few pixels, 1.8 times of which is
+/// nothing.
+const SPACE_EXCESS: f32 = 0.35;
 
 /// The string with the word spaces the ink shows and the reader dropped put back. Vision drops the space in
 /// widely tracked text ("ABRIGHTER", "LIFEIS"), and a fit with no space advance where the ink has a word gap
 /// pulls every glyph after it out of place. Only when the ink's segments number the string's non-space
 /// characters (so each gap is between two known characters): a space goes wherever the gap exceeds `SPACE_GAP`
-/// times the median gap and `SPACE_FLOOR` of the ink's height, and the string has none there already. Nothing
-/// is ever removed.
+/// times the median gap and the median plus `SPACE_EXCESS` of the ink's height, the string has none there
+/// already and the two characters are not both digits (a number is never split). Nothing is ever removed.
 pub fn repair_spaces(ink: &LineInk, string: &str) -> String {
     let chars: Vec<char> = string.chars().collect();
     let solid: Vec<usize> = (0..chars.len()).filter(|&i| !chars[i].is_whitespace()).collect();
@@ -328,13 +368,13 @@ pub fn repair_spaces(ink: &LineInk, string: &str) -> String {
     let mut sorted = gaps.clone();
     sorted.sort_by(f32::total_cmp);
     let median = sorted[sorted.len() / 2];
-    let wide = (median * SPACE_GAP).max((b - t) as f32 * SPACE_FLOOR);
+    let wide = (median * SPACE_GAP).max(median + (b - t) as f32 * SPACE_EXCESS);
     let mut out = String::with_capacity(string.len() + 4);
     for (i, &c) in chars.iter().enumerate() {
         out.push(c);
         // a gap after this solid character, before the next one, with nothing between them already
         if let Some(k) = solid.iter().position(|&s| s == i) {
-            if k + 1 < solid.len() && solid[k + 1] == i + 1 && gaps[k] > wide {
+            if k + 1 < solid.len() && solid[k + 1] == i + 1 && gaps[k] > wide && !(c.is_ascii_digit() && chars[i + 1].is_ascii_digit()) {
                 out.push(' ');
             }
         }
@@ -651,6 +691,63 @@ mod tests {
             let i = ((46 * 120 + x) * 4) as usize;
             assert_eq!(&out[i..i + 3], &[200, 150, 90], "the swash at x {x} is left as it was");
         }
+    }
+
+    /// Three wide letters (14 px by 50) whose grey runs from `from` to `to` across the line, column by column.
+    fn ramp(from: u8, to: u8) -> (Source, [[f32; 2]; 4]) {
+        let mut src = solid(160, 80, [250, 248, 244]);
+        let (x0, x1) = (20u32, 94u32);
+        for (l, w) in [(20u32, 14u32), (50, 14), (80, 14)] {
+            for x in l..l + w {
+                let v = (from as f32 + (to as f32 - from as f32) * (x - x0) as f32 / (x1 - x0) as f32).round() as u8;
+                paint(&mut src, x, 15, 1, 50, [v, v, v]);
+            }
+        }
+        (src, [[15.0, 12.0], [100.0, 12.0], [100.0, 68.0], [15.0, 68.0]])
+    }
+
+    #[test]
+    fn a_smooth_ramp_of_a_dozen_de_across_the_letters_is_a_gradient_and_one_of_four_is_not() {
+        // 40 to 75 grey is 14 ΔE of lightness; 40 to 50 is 4
+        assert!((12.0..16.0).contains(&delta_e([40; 3], [75; 3])), "{}", delta_e([40; 3], [75; 3]));
+        let (src, quad) = ramp(40, 75);
+        let ink = line_ink(&src, quad);
+        assert!(ink.spread > INK_SPREAD_MAX, "a 14 ΔE ramp reads {}", ink.spread);
+        assert_eq!(decline(&ink, "III", Class::Type, quad), Some(Reason::Gradient));
+        assert!(delta_e([40; 3], [50; 3]) < 5.0);
+        let (src, quad) = ramp(40, 50);
+        let ink = line_ink(&src, quad);
+        assert!(ink.spread < INK_SPREAD_MAX, "a 4 ΔE ramp reads {}", ink.spread);
+        assert_eq!(decline(&ink, "III", Class::Type, quad), None);
+    }
+
+    /// Bars 24 px tall: (left, width) each, black on white, and the quad round them.
+    fn glyph_bars(glyphs: &[(u32, u32)]) -> (Source, [[f32; 2]; 4]) {
+        let mut src = solid(260, 60, [255, 255, 255]);
+        for &(x, w) in glyphs {
+            paint(&mut src, x, 20, w, 24, [0, 0, 0]);
+        }
+        let right = glyphs.last().map_or(20, |&(x, w)| x + w) as f32;
+        (src, [[15.0, 18.0], [right + 5.0, 18.0], [right + 5.0, 46.0], [15.0, 46.0]])
+    }
+
+    #[test]
+    fn a_narrow_digit_in_a_tabular_cell_is_not_set_apart_and_a_dropped_word_space_still_is() {
+        // "ABCDE 20106" read without its space: letters and digits 12 px wide 4 px apart (a median gap of a tenth
+        // of an em), the tabular 1 a 3 px stem centred in a 12 px cell, so 9 px either side of it (a quarter em),
+        // and the word gap 20 px
+        let mut glyphs = Vec::new();
+        let mut x = 20;
+        for (w, gap) in [(12, 4), (12, 4), (12, 4), (12, 4), (12, 20), (12, 4), (12, 9), (3, 9), (12, 4), (12, 0)] {
+            glyphs.push((x, w));
+            x += w + gap;
+        }
+        let (src, quad) = glyph_bars(&glyphs);
+        let ink = line_ink(&src, quad);
+        assert_eq!(ink.segments.len(), 10);
+        assert_eq!(repair_spaces(&ink, "ABCDE20106"), "ABCDE 20106");
+        // the same gaps between letters are not word spaces either: a quarter em is under the excess
+        assert_eq!(repair_spaces(&ink, "ABCDEFGHIJ"), "ABCDE FGHIJ");
     }
 
     #[test]

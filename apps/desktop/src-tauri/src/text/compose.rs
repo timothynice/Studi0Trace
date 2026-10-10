@@ -2,7 +2,7 @@
 //! ink's colour, and an invisible <text> carrying the string for search and screen readers when the setting
 //! asks. Source-pixel coordinates; the frontend inserts the group before </svg>.
 use super::catalog::Catalog;
-use super::fit::path_data;
+use super::fit::{origins, path_data};
 use super::glyphs::Font;
 use super::{Status, TextPlan};
 use std::path::Path;
@@ -48,13 +48,15 @@ pub fn compose_group(plan: &TextPlan, hidden_text: bool, catalog: &Catalog, cach
         out.push_str(&format!("<path d=\"{d}\" fill=\"#{r:02x}{g:02x}{b:02x}\" data-line=\"{}\"/>", line.id));
         lines.push(line.id.clone());
         if hidden_text {
+            // one x per character, where its glyph is drawn (spaces at their computed place): a line laid out from
+            // its ink has nudges of ten pixels, which one start and a letter-spacing cannot place
+            let xs: Vec<String> = origins(&shaped, fit).into_iter().map(num).collect();
             out.push_str(&format!(
-                "<text x=\"{}\" y=\"{}\" font-family=\"{}\" font-size=\"{}\" letter-spacing=\"{}\" fill=\"none\" pointer-events=\"none\" data-line=\"{}\">{}</text>",
-                num(fit.x),
+                "<text x=\"{}\" y=\"{}\" font-family=\"{}\" font-size=\"{}\" fill=\"none\" pointer-events=\"none\" data-line=\"{}\">{}</text>",
+                xs.join(" "),
                 num(fit.baseline),
                 escape_text(&chosen.font.family),
                 num(fit.size),
-                num(fit.tracking),
                 line.id,
                 escape_text(&line.string)
             ));
