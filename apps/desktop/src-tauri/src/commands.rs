@@ -653,8 +653,12 @@ pub async fn text_plan(app: tauri::AppHandle, state: State<'_, AppState>, texts:
         let _ = emitter.emit("text-phase", serde_json::json!({ "id": id, "phase": p }));
     });
     let task = tauri::async_runtime::spawn({
-        let image_id = image_id.clone();
-        async move { text::plan(&image_id, source, deps, phase).await }
+        let (image_id, permits) = (image_id.clone(), texts.plan_permits.clone());
+        async move {
+            // held for the whole plan and dropped with the task, so an abort gives it back
+            let _permit = permits.acquire_owned().await.map_err(|_| redraw::error("cancelled"))?;
+            text::plan(&image_id, source, deps, phase).await
+        }
     });
     texts.plans.arm(&image_id, generation, redraw::abort_handle(&task));
     let mut planned = match task.await {

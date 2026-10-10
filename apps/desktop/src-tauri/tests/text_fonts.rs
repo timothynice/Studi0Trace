@@ -122,3 +122,87 @@ fn a_garbage_file_under_the_cache_name_is_replaced_by_the_fetched_font() {
     let names: Vec<_> = std::fs::read_dir(&dir.0).unwrap().map(|e| e.unwrap().file_name()).collect();
     assert_eq!(names.len(), 1, "{names:?}");
 }
+
+/// A mock that answers every connection by its path, each on a thread of its own, for as long as the test runs:
+/// a css2 request gets a stylesheet naming `/s/<family>.ttf` on the mock, a `.ttf` the fixture font after `delay`
+/// (so two fetches of one font are in flight together), anything else a 404. Returns the base and the request count.
+fn serve_by_path(ttf: Vec<u8>, delay: std::time::Duration) -> (String, Arc<Mutex<usize>>) {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let base = format!("http://{}", listener.local_addr().unwrap());
+    let count: Arc<Mutex<usize>> = Arc::default();
+    let (seen, own) = (count.clone(), base.clone());
+    std::thread::spawn(move || {
+        for s in listener.incoming() {
+            let Ok(mut s) = s else { return };
+            let (ttf, base, seen) = (ttf.clone(), own.clone(), seen.clone());
+            std::thread::spawn(move || {
+                let mut buf = vec![0u8; 8192];
+                let n = s.read(&mut buf).unwrap_or(0);
+                *seen.lock().unwrap() += 1;
+                let line = String::from_utf8_lossy(&buf[..n]).lines().next().unwrap_or("").to_string();
+                let path = line.split(' ').nth(1).unwrap_or("").to_string();
+                let (status, ctype, body) = if let Some(family) = path.strip_prefix("/css2?family=") {
+                    let family = family.split(':').next().unwrap_or("").replace('+', "");
+                    (200, "text/css", format!("@font-face {{ src: url({base}/s/{family}.ttf) format('truetype'); }}").into_bytes())
+                } else if path.ends_with(".ttf") {
+                    std::thread::sleep(delay);
+                    (200, "font/ttf", ttf)
+                } else {
+                    (404, "text/plain", b"no".to_vec())
+                };
+                let _ = write!(s, "HTTP/1.1 {status} OK\r\nContent-Type: {ctype}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len());
+                let _ = s.write_all(&body);
+            });
+        }
+    });
+    (base, count)
+}
+
+#[test]
+fn a_part_file_left_by_an_earlier_run_is_swept_and_the_cached_fonts_stay() {
+    let dir = Scratch::new("fonts-sweep");
+    std::fs::create_dir_all(&dir.0).unwrap();
+    let ttf = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/text/fonts/JosefinSans-Light.ttf")).unwrap();
+    std::fs::write(dir.0.join(cache_name(&font())), &ttf).unwrap();
+    std::fs::write(dir.0.join(format!("{}.4242.7.part", cache_name(&font()))), b"half a fo").unwrap();
+    std::fs::write(dir.0.join("Other-400.ttf.part"), b"older name").unwrap();
+    let _gf = GoogleFonts::new(dir.0.clone(), "http://127.0.0.1:9").unwrap();
+    let mut names: Vec<String> = std::fs::read_dir(&dir.0).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().to_string()).collect();
+    names.sort();
+    assert_eq!(names, [cache_name(&font())]);
+}
+
+#[test]
+fn two_plans_fetching_one_font_at_once_leave_one_valid_file_and_no_part() {
+    let dir = Scratch::new("fonts-race");
+    let ttf = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/text/fonts/JosefinSans-Light.ttf")).unwrap();
+    let (base, count) = serve_by_path(ttf.clone(), std::time::Duration::from_millis(150));
+    let gf = GoogleFonts::new(dir.0.clone(), &base).unwrap();
+    let (a, b) = tauri::async_runtime::block_on(async { futures_util::future::join(gf.ensure(&[font()]), gf.ensure(&[font()])).await });
+    assert!(!a.offline && a.missing.is_empty() && !b.offline && b.missing.is_empty(), "{a:?} {b:?}");
+    assert_eq!(*count.lock().unwrap(), 4, "both fetched: the race is real");
+    let names: Vec<String> = std::fs::read_dir(&dir.0).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().to_string()).collect();
+    assert_eq!(names, [cache_name(&font())]);
+    assert_eq!(std::fs::read(dir.0.join(cache_name(&font()))).unwrap(), ttf);
+}
+
+#[test]
+fn several_fonts_are_fetched_together_and_the_missing_ones_come_back_in_the_order_asked() {
+    let dir = Scratch::new("fonts-many");
+    let ttf = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/text/fonts/JosefinSans-Light.ttf")).unwrap();
+    let (base, _) = serve_by_path(ttf, std::time::Duration::from_millis(20));
+    let gf = GoogleFonts::new(dir.0.clone(), &base).unwrap();
+    let fonts: Vec<FontRef> = (0..8).map(|i| FontRef { family: format!("Fam{i}"), weight: 400, italic: false, source: Source::Google }).collect();
+    let out = tauri::async_runtime::block_on(gf.ensure(&fonts));
+    assert!(!out.offline && out.missing.is_empty(), "{out:?}");
+    for f in &fonts {
+        assert!(dir.0.join(cache_name(f)).exists());
+    }
+    // fonts the server cannot serve are missing, in the order they were asked for, the cached one is not asked
+    let (base, _) = serve(|_| vec![(404, "text/plain", b"no".to_vec()), (404, "text/plain", b"no".to_vec())]);
+    let gf = GoogleFonts::new(dir.0.clone(), &base).unwrap();
+    let missing: Vec<FontRef> = ["Zed", "Ay"].iter().map(|n| FontRef { family: n.to_string(), weight: 400, italic: false, source: Source::Google }).collect();
+    let out = tauri::async_runtime::block_on(gf.ensure(&[missing[0].clone(), fonts[0].clone(), missing[1].clone()]));
+    assert!(!out.offline);
+    assert_eq!(out.missing, missing);
+}

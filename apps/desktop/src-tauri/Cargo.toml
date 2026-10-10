@@ -38,7 +38,10 @@ sha2 = "0.10"
 reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider", "multipart", "stream"] }
 # the provider the updater installs; redraw/openai.rs installs it when it comes first
 rustls = { version = "0.23", default-features = false, features = ["std", "ring"] }
-futures-util = { version = "0.3", default-features = false }
+# `alloc` for the font downloads' bounded concurrency (text/fonts.rs, `buffer_unordered`)
+futures-util = { version = "0.3", default-features = false, features = ["alloc"] }
+# already in the tree through tauri: the semaphore that bounds how many text plans run at once (TextState)
+tokio = { version = "1", default-features = false, features = ["sync"] }
 base64 = "0.22"
 image = { version = "0.25", default-features = false, features = ["png"] }
 # Text re-setting (src/text/): shaping and outlines (rustybuzz re-exports the ttf-parser it is built on), the

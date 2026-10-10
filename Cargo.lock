@@ -4291,6 +4291,7 @@ dependencies = [
  "tauri-plugin-updater",
  "tauri-plugin-window-state",
  "tiny-skia 0.12.0",
+ "tokio",
 ]
 
 [[package]]

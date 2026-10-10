@@ -14,6 +14,15 @@ pub const BASE_ENV: &str = "STUDI0TRACE_GFONTS_BASE";
 const UA: &str = concat!("Studi0Trace/", env!("CARGO_PKG_VERSION"), " (+https://github.com/timothynice/Studi0Trace)");
 const TIMEOUT: Duration = Duration::from_secs(30);
 const MAX_FONT_BYTES: usize = 8 * 1024 * 1024;
+/// Fonts fetched at once by one `ensure`.
+const CONCURRENT_FETCHES: usize = 6;
+
+/// A `.part` name no other write in this process or another shares: two plans fetching one font each write their
+/// own and rename it into place, and the second rename replaces the first complete file with an identical one.
+fn part_name(name: &str) -> String {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    format!("{name}.{}.{}.part", std::process::id(), NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed))
+}
 
 /// `STUDI0TRACE_GFONTS_BASE` when it is an `https://` address or a loopback one; else Google.
 pub fn base_url() -> String {
@@ -51,6 +60,14 @@ fn transport(e: reqwest::Error) -> bool {
 impl GoogleFonts {
     pub fn new(dir: PathBuf, base: &str) -> Result<GoogleFonts, CommandError> {
         std::fs::create_dir_all(&dir).map_err(|e| CommandError::new(500, "io_error", format!("{}: {e}", dir.display())))?;
+        // what a run that died mid-write left behind; a cache is made once per app, before anything is fetched
+        if let Ok(entries) = std::fs::read_dir(&dir) {
+            for e in entries.flatten() {
+                if e.file_name().to_string_lossy().ends_with(".part") {
+                    let _ = std::fs::remove_file(e.path());
+                }
+            }
+        }
         if rustls::crypto::CryptoProvider::get_default().is_none() {
             let _ = rustls::crypto::ring::default_provider().install_default();
         }
@@ -82,13 +99,14 @@ impl GoogleFonts {
         if bytes.is_empty() || bytes.len() > MAX_FONT_BYTES {
             return Err(false);
         }
-        // a 200 whose body is not a font is not cached; the file is written beside its name and renamed into place,
-        // so a failed write never leaves a partial file under the cache name
+        // a 200 whose body is not a font is not cached; the file is written beside its name under a name of its own
+        // and renamed into place (an atomic replace), so a failed write never leaves a partial file under the cache
+        // name and two fetches of one font never write into one file
         if Font::from_bytes(bytes.to_vec(), 0).is_err() {
             return Err(false);
         }
         let name = cache_name(font);
-        let part = self.dir.join(format!("{name}.part"));
+        let part = self.dir.join(part_name(&name));
         let written = std::fs::write(&part, &bytes).and_then(|()| std::fs::rename(&part, self.dir.join(&name)));
         if written.is_err() {
             let _ = std::fs::remove_file(&part);
@@ -109,28 +127,52 @@ impl GoogleFonts {
         false
     }
 
-    /// Every font not yet in `dir` is fetched: the css2 stylesheet (non-browser UA → TTF `src`), then the file. A
-    /// font that cannot be fetched is `missing`; a transport failure sets `offline` and skips the rest. Never an error.
+    /// Every font not yet in `dir` is fetched, `CONCURRENT_FETCHES` at a time: the css2 stylesheet (non-browser UA →
+    /// TTF `src`), then the file. A font that cannot be fetched is `missing`; a transport failure sets `offline`,
+    /// stops the fetches still running and makes every font not in the cache missing. Never an error.
     pub async fn ensure(&self, fonts: &[FontRef]) -> Ensured {
-        let mut out = Ensured::default();
-        for font in fonts {
-            if self.cached(font) {
-                continue;
+        use futures_util::StreamExt;
+        let mut wanted: Vec<FontRef> = Vec::new();
+        for f in fonts {
+            if !wanted.contains(f) && !self.cached(f) {
+                wanted.push(f.clone());
             }
-            match self.fetch(font).await {
+        }
+        let mut out = Ensured::default();
+        // owned fonts: a future over a borrowed one is not `Send` for every lifetime, which a spawned plan needs
+        let mut fetches = futures_util::stream::iter(wanted)
+            .map(|f| async move {
+                let got = self.fetch(&f).await;
+                (f, got)
+            })
+            .buffer_unordered(CONCURRENT_FETCHES);
+        let mut missing: Vec<FontRef> = Vec::new();
+        while let Some((font, got)) = fetches.next().await {
+            match got {
                 Ok(()) => {}
                 Err(true) => {
                     out.offline = true;
-                    out.missing = Vec::new();
-                    for f in fonts {
-                        if !self.cached(f) && !out.missing.contains(f) {
-                            out.missing.push(f.clone());
-                        }
-                    }
-                    return out;
+                    break;
                 }
-                Err(false) => out.missing.push(font.clone()),
+                Err(false) => missing.push(font),
             }
+        }
+        // dropping the stream ends the fetches still running (a write and its rename have no await between them)
+        drop(fetches);
+        if out.offline {
+            for f in fonts {
+                if !self.cached(f) && !out.missing.contains(f) {
+                    out.missing.push(f.clone());
+                }
+            }
+        } else {
+            // in the order asked, whatever order the fetches finished in
+            out.missing = fonts.iter().filter(|f| missing.contains(f)).fold(Vec::new(), |mut v, f| {
+                if !v.contains(f) {
+                    v.push(f.clone());
+                }
+                v
+            });
         }
         out
     }

@@ -34,7 +34,13 @@ pub struct TextState {
     pub catalog: std::sync::Arc<std::sync::OnceLock<std::sync::Arc<text::catalog::Catalog>>>,
     pub fonts: Option<std::sync::Arc<text::fonts::GoogleFonts>>,
     pub cache_dir: std::path::PathBuf,
+    /// `PLANS_AT_ONCE` permits: a plan holds one for its whole run (`text_plan`), so opening a folder of images does
+    /// not fit every one's fonts at once. Its task owns the permit, so a cancelled plan gives it back.
+    pub plan_permits: std::sync::Arc<tokio::sync::Semaphore>,
 }
+
+/// Text plans that run at once; the rest wait for a permit.
+pub const PLANS_AT_ONCE: usize = 2;
 
 impl TextState {
     /// The catalogue, scanned on the first call. Blocks while it scans: call it from the blocking pool only.
@@ -105,7 +111,7 @@ pub fn run() {
             use tauri::Manager;
             let cache_dir = app.path().app_data_dir().map(|d| d.join("fonts")).unwrap_or_else(|_| std::env::temp_dir().join("studi0trace-fonts"));
             let fonts = text::fonts::GoogleFonts::new(cache_dir.clone(), &text::fonts::base_url()).ok().map(std::sync::Arc::new);
-            app.manage(TextState { plans: text::Plans::default(), catalog: Default::default(), fonts, cache_dir });
+            app.manage(TextState { plans: text::Plans::default(), catalog: Default::default(), fonts, cache_dir, plan_permits: std::sync::Arc::new(tokio::sync::Semaphore::new(PLANS_AT_ONCE)) });
             let (menu, handles) = menu::build(app.handle(), &settings::load(app.handle()).recent)?;
             app.set_menu(menu)?;
             app.manage(handles);
