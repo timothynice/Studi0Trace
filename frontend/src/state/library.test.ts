@@ -1310,6 +1310,21 @@ describe("library: traces by the painted set", () => {
     expect(calls).toHaveLength(2);
   });
 
+  it("a font pick recomposes only the traces that set its line; the others keep their vector as it is", async () => {
+    const T1b: TextLine = { ...T1, candidates: [candidate(FONT_M, "M0 20h10v10z", "a-t1", "2026"), candidate(FONT_L, "M0 20h20v10z", "a-t1", "2026")] };
+    const { calls, answer, item, lib } = await tracedOnBalanced(PLAN([T0, T1b]));
+    for (let i = 0; i < 4; i++) await answer(calls[i]);
+    expect(Object.keys(item().traces)).toHaveLength(4);
+    const before = item().traces;
+    await lib.setTextLine("a", "a-t1", { font: FONT_L });
+    const after = item().traces;
+    expect(after[`${P}|a-t0`]).toBe(before[`${P}|a-t0`]);
+    expect(after[`${P}|`]).toBe(before[`${P}|`]);
+    expect(after[`${P}|a-t0,a-t1`].svg).toContain("M0 20h20v10z");
+    expect(after[`${P}|a-t0,a-t1`].svg).not.toContain("M0 20h10v10z");
+    expect(after[`${P}|a-t1`].svg).toContain("M0 20h20v10z");
+  });
+
   it("a string edit recomposes every cached trace from its base", async () => {
     const { calls, answer, item, lib, platform } = await tracedOnBalanced();
     await answer(calls[0]);

@@ -301,10 +301,17 @@ export function createLibrary(platform: LibraryPlatform, catalog: Catalog, initi
   /**
    * Every trace composed again from its base, each with its own key's mask. Without a plan (after a Revert, whose
    * kept traces carry their glyphs while the plan is gone) a trace with lines painted out keeps the vector it has:
-   * its base alone would show the image with the text missing.
+   * its base alone would show the image with the text missing. With `only`, a line that alone changed, the traces
+   * whose mask does not hold it are left as they are (one parse per trace that sets it, not per trace kept).
    */
-  const recomposed = (traces: Record<string, TraceAnswer>, plan: TextPlan | null, hiddenText = settings.hiddenText) =>
-    Object.fromEntries(Object.entries(traces).map(([k, t]) => [k, !plan && maskOfKey(k).length ? t : { ...t, svg: composed(t.base, maskOfKey(k), plan, hiddenText) }]));
+  const recomposed = (traces: Record<string, TraceAnswer>, plan: TextPlan | null, hiddenText = settings.hiddenText, only?: string) =>
+    Object.fromEntries(
+      Object.entries(traces).map(([k, t]) => {
+        const mask = maskOfKey(k);
+        if ((only !== undefined && !mask.includes(only)) || (!plan && mask.length)) return [k, t];
+        return [k, { ...t, svg: composed(t.base, mask, plan, hiddenText) }];
+      }),
+    );
 
   /** What was exported stays exported only while its vector is unchanged. */
   const keptExport = (item: ImageItem, traces: Record<string, TraceAnswer>) =>
@@ -603,10 +610,11 @@ export function createLibrary(platform: LibraryPlatform, catalog: Catalog, initi
 
   /**
    * The image's plan is now `plan`: a line it matched that was not matched before is set in a font (the app never
-   * changes a line's `enabled` once the plan has landed, so the store does), every trace is composed again from
-   * its base, and a mask that moved shows its cached trace or is traced.
+   * changes a line's `enabled` once the plan has landed, so the store does), the traces are composed again from
+   * their bases (only those that set `changed` when that line alone changed, every one for a new plan), and a mask
+   * that moved shows its cached trace or is traced.
    */
-  const applyPlan = (id: string, plan: TextPlan) => {
+  const applyPlan = (id: string, plan: TextPlan, changed?: string) => {
     const item = find(id);
     if (!item) return;
     const t = textOf(item);
@@ -614,7 +622,7 @@ export function createLibrary(platform: LibraryPlatform, catalog: Catalog, initi
     const enabled = new Set(t.enabled);
     for (const l of matchedLines(plan)) if (!wasMatched.has(l.id)) enabled.add(l.id);
     const before = traceKey(item);
-    const traces = recomposed(item.traces, plan);
+    const traces = recomposed(item.traces, plan, settings.hiddenText, changed);
     patch(id, { traces, exported: keptExport(item, traces), text: { ...t, plan, enabled } });
     if (traceKey(find(id)!) !== before) showOrTrace(id);
   };
@@ -878,7 +886,7 @@ export function createLibrary(platform: LibraryPlatform, catalog: Catalog, initi
       // answer would take it back, and the app would answer it from a plan the frontend no longer shows
       if (known >= 0 && !editQueue.has(id)) {
         // a font the app has already fitted: chosen here, as the app would choose it, and composed at once
-        applyPlan(id, withChosen(textOf(item).plan!, lineId, known));
+        applyPlan(id, withChosen(textOf(item).plan!, lineId, known), lineId);
         const image = item.image;
         void enqueue(async () => {
           const answer = await platform.textSetLine!(id, lineId, change);
@@ -891,7 +899,7 @@ export function createLibrary(platform: LibraryPlatform, catalog: Catalog, initi
           const chosenFont = mine.chosen !== null ? mine.candidates[mine.chosen]?.font : undefined;
           const at = chosenFont ? theirs.candidates.findIndex((c) => sameFont(c.font, chosenFont)) : -1;
           const merged = at >= 0 ? { ...theirs, chosen: at, fit: theirs.candidates[at].fit, status: mine.status } : theirs;
-          applyPlan(id, { ...plan, lines: plan.lines.map((l) => (l.id === lineId ? merged : l)) });
+          applyPlan(id, { ...plan, lines: plan.lines.map((l) => (l.id === lineId ? merged : l)) }, lineId);
         }).catch(() => {});
         return;
       }
@@ -904,7 +912,8 @@ export function createLibrary(platform: LibraryPlatform, catalog: Catalog, initi
         const now = find(id);
         // a redraw used or a revert while the edit ran swapped the image: the answer is about bytes it no longer has
         if (!now || now.image !== before.image) return;
-        applyPlan(id, answer.plan);
+        // an edit changes its own line alone (the app answers the plan it keeps, with that line set again)
+        applyPlan(id, answer.plan, lineId);
         // what is painted out did not change, so the masks still wanted are prefetched again
         schedulePrefetch(id);
         runPrefetch();
