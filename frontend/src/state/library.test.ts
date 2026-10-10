@@ -1133,7 +1133,62 @@ describe("library: traces by the painted set", () => {
     expect(done.shown).toBe(`${P}|a-t0,a-t1`);
   });
 
-  it("a prefetch is aborted by a parameter change and never runs under Auto", async () => {
+  it("on Auto, the masks after the run are traced under the pick's params: a toggle and the prefetch, never an Auto run", async () => {
+    const p = maskPlatform(PLAN([T0, T1]));
+    const lib = createLibrary(p.platform, CATALOG, TEXT_ON);
+    const item = () => lib.selectedItem()!;
+    const L = paramsKey({ detail: 10, min_region: 16 });
+    const logo = { detail: 10, min_region: 16 };
+    lib.add([ok("a")]);
+    lib.generate("a");
+    await flush();
+    expect(p.calls[0].req).toMatchObject({ auto: true, mask: BOTH });
+    expect(traceKey(item())).toBe("auto|a-t0,a-t1");
+    // before the pick is known, another mask could only be an Auto run of its own
+    expect(traceKeyFor(item(), ["a-t0"])).toBe("auto|a-t0");
+    p.calls[0].resolve(
+      response(baseFor(BOTH), 900, {
+        auto: {
+          vexel: {
+            engine: "vexel",
+            pick: "logo",
+            reason: "",
+            candidates: [
+              { preset: "balanced", label: "Balanced", svg: baseFor(["balanced"]), elapsed_ms: 800, stats: {} },
+              { preset: "logo", label: "Logo & icon", svg: baseFor(BOTH), elapsed_ms: 900, stats: {} },
+            ],
+          },
+        },
+      }),
+    );
+    await flush();
+    expect(item().shown).toBe("auto|a-t0,a-t1");
+    expect(item().params).toEqual(logo);
+    expect(traceKeyFor(item(), ["a-t0"])).toBe(`${L}|a-t0`);
+    // the prefetch: the empty mask, then each all-but-one, under the pick's params
+    expect(p.calls[1].req).toMatchObject({ auto: false, mask: [], parameters: logo });
+    expect(item().job).toMatchObject({ key: `${L}|`, prefetch: true });
+    await p.answer(p.calls[1]);
+    expect(p.calls[2].req).toMatchObject({ auto: false, mask: ["a-t1"], parameters: logo });
+    // a toggle, no preset picked: one trace, of the pick's params and the new mask, not an Auto run
+    const before = p.calls.length;
+    lib.toggleTextLine("a", "a-t1", false);
+    expect(p.calls).toHaveLength(before + 1);
+    expect(p.calls[before].req).toMatchObject({ auto: false, mask: ["a-t0"], parameters: logo });
+    expect(currentJob(item())).toMatchObject({ key: `${L}|a-t0` });
+    await p.answer(p.calls[before]);
+    expect(item().shown).toBe(`${L}|a-t0`);
+    expect(item().preset).toBe("auto");
+    // the untouched image is cached under the pick's params, and the full mask is Auto's own answer
+    lib.toggleTextLine("a", "a-t0", false);
+    expect(item().shown).toBe(`${L}|`);
+    lib.toggleTextLine("a", "a-t0", true);
+    lib.toggleTextLine("a", "a-t1", true);
+    expect(item().shown).toBe("auto|a-t0,a-t1");
+    expect(p.calls.slice(before + 1).every((c) => !c.req.auto)).toBe(true);
+  });
+
+  it("a prefetch is aborted by a parameter change and never runs on Auto before the pick is known", async () => {
     // Auto: the full mask only
     const auto = maskPlatform(PLAN([T0, T1]));
     const onAuto = createLibrary(auto.platform, CATALOG, TEXT_ON);

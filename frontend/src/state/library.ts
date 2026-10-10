@@ -82,9 +82,17 @@ export const maskOf = (text: TextState): string[] => matchedLines(text.plan).fil
 /** Every matched line, sorted: the mask of the first trace. */
 export const fullMask = (plan: TextPlan): string[] => matchedLines(plan).map((l) => l.id).sort();
 
-/** The key a trace of `item`'s settings with `mask` painted out is kept under. */
-export function traceKeyFor(item: Pick<ImageItem, "preset" | "params">, mask: string[]): string {
-  return `${item.preset === "auto" ? "auto" : paramsKey(item.params)}|${mask.join(",")}`;
+/**
+ * The key a trace of `item`'s settings with `mask` painted out is kept under. On Auto, the full mask is Auto's own
+ * run (`auto|…`); every other mask is traced and kept under the pick's params once the pick is known (an Auto run
+ * leaves them in `item.params`), as Auto's candidates are, and is an Auto run of its own only before that.
+ */
+export function traceKeyFor(item: Pick<ImageItem, "preset" | "params"> & Partial<Pick<ImageItem, "auto" | "text">>, mask: string[]): string {
+  const m = mask.join(",");
+  if (item.preset !== "auto") return `${paramsKey(item.params)}|${m}`;
+  const plan = item.text?.plan ?? null;
+  const full = plan ? fullMask(plan).join(",") : "";
+  return `${m === full || !item.auto?.pick ? "auto" : paramsKey(item.params)}|${m}`;
 }
 
 /** The mask a trace key was traced with. */
@@ -181,12 +189,12 @@ export interface ExportMark {
 }
 
 /** The key of the trace the controls and the switches ask for now. */
-export function traceKey(item: Pick<ImageItem, "preset" | "params" | "text">): string {
+export function traceKey(item: Pick<ImageItem, "preset" | "params" | "text"> & Partial<Pick<ImageItem, "auto">>): string {
   return traceKeyFor(item, maskOf(textOf(item)));
 }
 
 /** The error to show: a failure belongs to the settings that failed, and says nothing about any others. */
-export function errorOf(item: Pick<ImageItem, "preset" | "params" | "text" | "error" | "errorKey">): ApiError | null {
+export function errorOf(item: Pick<ImageItem, "preset" | "params" | "text" | "error" | "errorKey"> & Partial<Pick<ImageItem, "auto">>): ApiError | null {
   return item.error && item.errorKey === traceKey(item) ? item.error : null;
 }
 
@@ -299,7 +307,8 @@ export function createLibrary(platform: LibraryPlatform, catalog: Catalog, initi
     item.exported !== null && traces[item.exported] && traces[item.exported].svg === item.traces[item.exported]?.svg ? item.exported : null;
 
   // Prefetching: the masks a switch may ask for, traced ahead one at a time across every image, only while no
-  // user job runs anywhere, never under Auto. `queue` holds what waits; `prefetching` the one running.
+  // user job runs anywhere; on Auto once its pick is known, under the pick's params (never an Auto run). `queue`
+  // holds what waits; `prefetching` the one running.
   interface Prefetch { id: string; key: string; mask: string[]; params: ParamValues }
   let queue: Prefetch[] = [];
   let prefetching: (Prefetch & { jobId: string }) | null = null;
@@ -308,13 +317,14 @@ export function createLibrary(platform: LibraryPlatform, catalog: Catalog, initi
   const schedulePrefetch = (id: string) => {
     const item = find(id);
     const plan = item ? textOf(item).plan : null;
-    if (!item || !plan || item.preset === "auto") return;
+    if (!item || !plan) return;
     const full = fullMask(plan);
     if (!full.length) return;
     const masks = [[], ...matchedLines(plan).map((l) => full.filter((m) => m !== l.id))];
     for (const mask of masks) {
       const key = traceKeyFor(item, mask);
-      if (item.traces[key] || item.job?.key === key || queue.some((q) => q.id === id && q.key === key)) continue;
+      // an Auto image whose pick is not known yet: its masks are Auto runs, which are never traced ahead
+      if (isAutoKey(key) || item.traces[key] || item.job?.key === key || queue.some((q) => q.id === id && q.key === key)) continue;
       queue.push({ id, key, mask, params: item.params });
     }
   };
@@ -326,7 +336,7 @@ export function createLibrary(platform: LibraryPlatform, catalog: Catalog, initi
       const next = queue.shift()!;
       const item = find(next.id);
       // gone, traced meanwhile, or the settings moved on since it was queued
-      if (!item || item.job || item.preset === "auto" || item.traces[next.key] || traceKeyFor(item, next.mask) !== next.key) continue;
+      if (!item || item.job || isAutoKey(next.key) || item.traces[next.key] || traceKeyFor(item, next.mask) !== next.key) continue;
       const job: Job = { id: newJobId(), key: next.key, startedAt: Date.now(), phase: "queued", mask: next.mask, prefetch: true };
       prefetching = { ...next, jobId: job.id };
       launch(next.id, job, next.params, false);
@@ -376,8 +386,6 @@ export function createLibrary(platform: LibraryPlatform, catalog: Catalog, initi
     const plan = textOf(item).plan;
     const traces = { ...item.traces, [job.key]: { ...answer, svg: composed(answer.base, job.mask, plan) } };
     const auto = res.auto?.[ENGINE] ?? null;
-    // the answer is always kept; it takes the screen and the controls only if the settings still are the ones it traced
-    const current = traceKey(item) === job.key;
     let params = item.params;
     if (auto) {
       for (const c of auto.candidates) {
@@ -385,11 +393,17 @@ export function createLibrary(platform: LibraryPlatform, catalog: Catalog, initi
         if (preset && c.svg) traces[traceKeyFor({ preset: null, params: resolve(preset.params) }, job.mask)] = { svg: composed(c.svg, job.mask, plan), base: c.svg, elapsedMs: c.elapsed_ms ?? 0, stats: c.stats ?? {} };
       }
       const pick = auto.pick ? presetById.get(auto.pick) : undefined;
-      if (pick && current) params = resolve(pick.params);
+      if (pick) {
+        // Auto's answer is its pick's trace: known under the pick's key too, which the other masks are keyed by
+        traces[traceKeyFor({ preset: null, params: resolve(pick.params) }, job.mask)] ??= traces[job.key];
+        // an image still on Auto takes its pick's values, whatever it shows: the masks it traces next are keyed by them
+        if (item.preset === "auto") params = resolve(pick.params);
+      }
     }
-    // settings that moved on while it ran show their own trace if one is known (a candidate, say), else stay as they are
-    const moved = traceKey({ ...item, params });
-    const now = current ? job.key : traces[moved] ? moved : item.shown;
+    // the answer is always kept; it takes the screen only if the settings still are the ones it traced, and settings
+    // that moved on while it ran show their own trace if one is known (a candidate, say), else stay as they are
+    const want = traceKey({ ...item, params, auto: auto ?? item.auto });
+    const now = traces[want] ? want : item.shown;
     patch(id, { job: null, ...(job.prefetch ? {} : { error: null, errorKey: null }), traces, shown: now, auto: auto ?? item.auto, params });
     if (!job.prefetch) schedulePrefetch(id);
     runPrefetch();
