@@ -145,6 +145,7 @@ pub enum Phase {
 pub fn error(code: &'static str) -> CommandError {
     match code {
         "text_unavailable" => CommandError::new(501, code, "Text recognition needs macOS 10.15 or later."),
+        "text_failed" => CommandError::new(500, code, "Text recognition failed."),
         "bad_font" => CommandError::new(422, code, "The font file could not be read."),
         _ => crate::redraw::error(code),
     }
@@ -152,3 +153,13 @@ pub fn error(code: &'static str) -> CommandError {
 
 pub use plan::{plan, repainted, set_line, Deps, LineChange, Planned};
 pub use plans::{bytes_hash, Entry, Plans};
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn a_failed_recognition_is_not_reported_as_an_old_macos() {
+        let failed = super::error("text_failed");
+        assert_eq!((failed.status, failed.code(), failed.message()), (500, Some("text_failed"), "Text recognition failed."));
+        assert_eq!(super::error("text_unavailable").code(), Some("text_unavailable"));
+    }
+}

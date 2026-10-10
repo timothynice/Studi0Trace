@@ -30,6 +30,7 @@ export const fontLabel = (f: FontRef) => `${f.family} ${f.weight}${f.italic ? " 
 const OWN: Record<string, string> = {
   no_key: "Add your OpenAI API key in Settings ▸ Text to read text with AI.",
   text_unavailable: "Text recognition needs macOS 10.15 or later.",
+  text_failed: "Text recognition failed.",
 };
 
 export function textErrorText(code: string): string {

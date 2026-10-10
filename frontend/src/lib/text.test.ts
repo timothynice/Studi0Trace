@@ -22,6 +22,7 @@ describe("text copy", () => {
     expect(textErrorText("no_key")).toBe("Add your OpenAI API key in Settings ▸ Text to read text with AI.");
     expect(textErrorText("quota")).toBe("Your OpenAI account is out of credit or rate limited.");
     expect(textErrorText("text_unavailable")).toBe("Text recognition needs macOS 10.15 or later.");
+    expect(textErrorText("text_failed")).toBe("Text recognition failed.");
     expect(textErrorText("whatever")).toBe("Reading the text failed.");
   });
 });
