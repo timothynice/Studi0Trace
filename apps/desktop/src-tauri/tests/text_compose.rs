@@ -540,4 +540,57 @@ mod round1 {
         assert_eq!(planned.plan.lines[0].string, "EST. 2026");
         let _ = std::fs::remove_dir_all(&dir);
     }
+
+    /// A Google Fonts stand-in on loopback serving `ttf` for every family, each connection on its own thread;
+    /// returns its base and how many requests it answered.
+    fn google_mock(ttf: Vec<u8>) -> (String, Arc<Mutex<usize>>) {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let count: Arc<Mutex<usize>> = Arc::default();
+        let (seen, own) = (count.clone(), base.clone());
+        std::thread::spawn(move || {
+            for s in listener.incoming() {
+                let Ok(mut s) = s else { return };
+                let (ttf, base, seen) = (ttf.clone(), own.clone(), seen.clone());
+                std::thread::spawn(move || {
+                    let mut buf = vec![0u8; 8192];
+                    let n = s.read(&mut buf).unwrap_or(0);
+                    *seen.lock().unwrap() += 1;
+                    let path = String::from_utf8_lossy(&buf[..n]).split(' ').nth(1).unwrap_or("").to_string();
+                    let (ctype, body) = if path.starts_with("/css2") {
+                        ("text/css", format!("@font-face {{ src: url({base}/s/f.ttf) format('truetype'); }}").into_bytes())
+                    } else {
+                        ("font/ttf", ttf)
+                    };
+                    let _ = write!(s, "HTTP/1.1 200 OK\r\nContent-Type: {ctype}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len());
+                    let _ = s.write_all(&body);
+                });
+            }
+        });
+        (base, count)
+    }
+
+    #[test]
+    fn a_string_edit_of_a_line_declined_for_want_of_fonts_downloads_its_shortlist_first() {
+        let dir = cache(&[]);
+        let img = image("montserrat-est-30-t0-white.png");
+        // no fetcher: the shortlist's only font is never downloaded and the line is declined for want of fonts
+        let d = deps(Arc::new(FixtureFinder(vec![line_box(&img, 14.0, 58.0)])), None, index(&[("Montserrat", 400)]), &dir);
+        let planned = run_plan(&img, &d);
+        let line = &planned.plan.lines[0];
+        assert!(line.status == Status::Declined(studi0trace_desktop::text::Reason::Fonts) && line.candidates.is_empty(), "{line:?}");
+        // the edit, with a fetcher: the shortlist is downloaded before the fit, and the line matches
+        let ttf = std::fs::read(Path::new(FONTS).join("Montserrat-Regular.ttf")).unwrap();
+        let (base, count) = google_mock(ttf);
+        let gf = studi0trace_desktop::text::fonts::GoogleFonts::new(dir.clone(), &base).unwrap();
+        let online = Deps { fonts: Some(Arc::new(gf)), ..d.clone() };
+        let edited = edit(&img, &planned, "img-t0", LineChange { string: Some("EST. 2027".into()), ..Default::default() }, &online);
+        assert_eq!(*count.lock().unwrap(), 2, "the stylesheet and the file");
+        assert!(dir.join(cache_name(&font("Montserrat", 400))).exists());
+        let line = &edited.plan.lines[0];
+        assert!(line.status == Status::Matched && line.enabled && line.string == "EST. 2027", "{line:?}");
+        assert!(!edited.plan.fonts_offline && edited.painted.is_some());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

@@ -425,12 +425,31 @@ pub async fn set_line(source: Arc<Image>, planned: &Planned, line_id: &str, chan
     let mut plan = planned.plan.clone();
     let inks = planned.inks.clone();
     let at = plan.lines.iter().position(|l| l.id == line_id).ok_or_else(|| CommandError::new(404, "no_line", "There is no such line of text."))?;
+    let mut offline: Option<bool> = None;
     if let Some(f) = &change.font {
         if f.source == Source::Google {
             if let Some(gf) = deps.fonts.clone() {
-                plan.fonts_offline = gf.ensure(std::slice::from_ref(f)).await.offline;
+                offline = Some(gf.ensure(std::slice::from_ref(f)).await.offline);
             }
         }
+    }
+    // a new string for a line that has no candidates (declined before any was fitted) is fitted against the
+    // shortlist of its ink: computed here and its Google fonts downloaded first, since the fit downloads nothing
+    let new_string = change.string.as_deref().map(|s| compose::clean_text(s).trim().to_string()).filter(|s| !s.is_empty() && *s != plan.lines[at].string);
+    let fresh = match new_string {
+        Some(string) if plan.lines[at].candidates.is_empty() => {
+            let (catalog, ink) = (deps.catalog.clone(), inks[at].clone());
+            let list = crate::redraw::blocking(move || Ok(fresh_list(&catalog, &ink, &string))).await?;
+            if let Some(gf) = deps.fonts.clone() {
+                let google: Vec<FontRef> = list.iter().filter(|f| f.source == Source::Google).cloned().collect();
+                offline = Some(offline.unwrap_or(false) | gf.ensure(&google).await.offline);
+            }
+            Some(list)
+        }
+        _ => None,
+    };
+    if let Some(o) = offline {
+        plan.fonts_offline = o;
     }
     let catalog = deps.catalog.clone();
     let cache_dir = deps.cache_dir.clone();
@@ -458,13 +477,7 @@ pub async fn set_line(source: Arc<Image>, planned: &Planned, line_id: &str, chan
             }
             // a line that has none (it was declined before any was fitted) starts from the shortlist
             if fonts.is_empty() {
-                let stem = catalog::measured_stem(ink);
-                fonts = catalog.shortlist(&line.string, &catalog::measured_widths(ink, &line.string), stem, SHORTLIST);
-                for f in catalog.floor(stem) {
-                    if !fonts.iter().any(|s| s.family == f.family) {
-                        fonts.push(f);
-                    }
-                }
+                fonts = fresh.unwrap_or_else(|| fresh_list(&catalog, ink, &line.string));
             }
             let any_located = fonts.iter().any(|f| catalog.locate(f, &cache_dir).is_some());
             let mut fitted = fit_candidates(&line.string, ink, &fonts, EAGER_FAMILIES, &catalog, &cache_dir, false);
@@ -534,6 +547,19 @@ pub fn repainted(before: &Planned, after: &Planned) -> bool {
         (Some(a), Some(b)) => !(Arc::ptr_eq(a, b) || a == b),
         _ => true,
     }
+}
+
+/// The fonts a line with no candidates is fitted against: the shortlist of its ink and string, then the plain sans
+/// faces it does not already hold (as a plan lists them for a line without hints).
+fn fresh_list(catalog: &catalog::Catalog, ink: &ink::LineInk, string: &str) -> Vec<FontRef> {
+    let stem = catalog::measured_stem(ink);
+    let mut fonts = catalog.shortlist(string, &catalog::measured_widths(ink, string), stem, SHORTLIST);
+    for f in catalog.floor(stem) {
+        if !fonts.iter().any(|s| s.family == f.family) {
+            fonts.push(f);
+        }
+    }
+    fonts
 }
 
 fn refit_one(string: &str, ink: &ink::LineInk, font: &FontRef, catalog: &catalog::Catalog, cache_dir: &Path) -> Option<Fit> {
