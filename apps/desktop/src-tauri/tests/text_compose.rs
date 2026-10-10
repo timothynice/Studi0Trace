@@ -462,4 +462,26 @@ mod round1 {
         assert!(repainted(&restrung, &off));
         let _ = std::fs::remove_dir_all(&dir);
     }
+
+    struct Panicking;
+    impl Reader for Panicking {
+        fn read<'a>(&'a self, _: &'a Img, _: &'a [LineBox]) -> ReadFuture<'a> {
+            panic!("an image with no text must never reach the AI reader");
+        }
+    }
+
+    #[test]
+    fn an_image_in_which_vision_found_no_text_is_never_handed_to_the_ai_reader() {
+        let dir = cache(&[]);
+        let img = image("montserrat-est-30-t0-white.png");
+        let d = deps(Arc::new(FixtureFinder(Vec::new())), Some(Arc::new(Panicking)), index(&[("Montserrat", 400)]), &dir);
+        let phases: Arc<Mutex<Vec<Phase>>> = Arc::default();
+        let seen = phases.clone();
+        let planned = tauri::async_runtime::block_on(plan("img", img, d, Arc::new(move |p| seen.lock().unwrap().push(p)))).unwrap();
+        assert!(planned.plan.lines.is_empty());
+        assert_eq!(planned.plan.reader, studi0trace_desktop::text::ReaderKind::Vision);
+        assert!(planned.plan.ai_error.is_none());
+        assert!(!phases.lock().unwrap().contains(&Phase::Reading));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

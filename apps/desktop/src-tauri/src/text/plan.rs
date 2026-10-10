@@ -278,7 +278,8 @@ async fn run(image_id: &str, source: Arc<Image>, deps: Deps, phase: &Arc<dyn Fn(
     let mut reader_kind = ReaderKind::Vision;
     let mut ai_error = None;
     let mut readings = reader::vision_readings(&lines);
-    if let Some(reader) = deps.reader.clone() {
+    // the reader cannot add a line, so an image in which Vision found none is never uploaded
+    if let Some(reader) = deps.reader.clone().filter(|_| !lines.is_empty()) {
         phase(Phase::Reading);
         match reader.read(&flat, &lines).await {
             Ok(r) if r.len() == lines.len() => {
