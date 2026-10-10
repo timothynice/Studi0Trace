@@ -1,4 +1,3 @@
-import { Type } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { declineText, fitPercent, fontLabel, TEXT_PHASE_TEXT, textErrorText } from "@/lib/text";
@@ -8,10 +7,10 @@ import { Switch } from "./Switch";
 
 export interface TextSectionProps {
   item: ImageItem;
-  /** Settings ▸ Text ▸ Recognise text. */
-  enabled: boolean;
+  /** Settings ▸ Text ▸ Recognise text; when it is off the section says so and lists nothing. */
+  settingOn: boolean;
   onChange: (lineId: string, change: TextLineChange) => void;
-  /** A line's switch; frontend-only (Task 5 of the text-toggles plan gives it its real behaviour). */
+  /** A line's switch: set in its font, or traced as shapes. */
   onToggle: (lineId: string, on: boolean) => void;
   onHover: (lineId: string | null) => void;
   onCancel: () => void;
@@ -122,7 +121,8 @@ function LineRow({ line, n, on, onChange, onToggle, onHover, searchFonts }: { li
             if (e.key === "Escape") setDraft(line.string);
           }}
         />
-        <Switch aria-label={`Re-set line ${n} in a font`} checked={on} onCheckedChange={(on) => onToggle(on)} />
+        {/* a declined line has no font to set until one is chosen: its switch would add nothing */}
+        <Switch aria-label={`Re-set line ${n} in a font`} checked={on} disabled={line.chosen === null} onCheckedChange={(on) => onToggle(on)} />
       </div>
       <FontPicker line={line} onPick={(font) => onChange({ font })} searchFonts={searchFonts} />
       <div className="flex items-center justify-between text-[11px] text-muted-foreground">
@@ -138,22 +138,23 @@ function LineRow({ line, n, on, onChange, onToggle, onHover, searchFonts }: { li
   );
 }
 
-/** The inspector's Text: the lines found in the image, each with its string, its font, how well it fits and whether it is re-set. */
-export function TextSection({ item, enabled, onChange, onToggle, onHover, onCancel, onRetry, searchFonts }: TextSectionProps) {
-  if (!enabled) return null;
+/** The inspector's Text body (under its section header): the lines found in the image, each with its string, its font, how well it fits and whether it is re-set. */
+export function TextSection({ item, settingOn, onChange, onToggle, onHover, onCancel, onRetry, searchFonts }: TextSectionProps) {
+  if (!settingOn) return <p className="text-[12px] text-muted-foreground">Off in Settings</p>;
   const t = textOf(item);
   const count = t.plan?.lines.length ?? 0;
   // a redraw's Revert restores traces that carry text paths while the plan is gone
   const staleGroup = !t.plan && !t.phase && !!shownAnswer(item)?.svg.includes("data-line");
   return (
-    <section aria-labelledby="text-section-title" className="space-y-2">
-      <div className="flex items-center justify-between">
-        <h4 id="text-section-title" className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-          <Type className="h-3.5 w-3.5" aria-hidden="true" />
-          Text{t.plan ? ` · ${count} ${count === 1 ? "line" : "lines"}` : ""}
-        </h4>
-        {t.plan && <span className="text-[11px] text-muted-foreground">{t.plan.reader === "ai" ? "AI" : "On-device"}</span>}
-      </div>
+    <div className="space-y-2">
+      {t.plan && (
+        <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+          <span>
+            {count} {count === 1 ? "line" : "lines"}
+          </span>
+          <span>{t.plan.reader === "ai" ? "AI" : "On-device"}</span>
+        </div>
+      )}
       {t.phase && (
         <div className="space-y-1.5">
           <p className="flex items-start gap-2 text-[12px] leading-snug text-muted-foreground" aria-live="polite">
@@ -194,6 +195,6 @@ export function TextSection({ item, enabled, onChange, onToggle, onHover, onCanc
           ))}
         </div>
       )}
-    </section>
+    </div>
   );
 }

@@ -219,7 +219,7 @@ function Workspace({ catalog, settings, onSettingsChange }: { catalog: Catalog; 
   useEffect(() => platform.onDragState(setDragging), []);
   useWindowDrop(platform.kind === "web", openFiles, setDragging);
 
-  const layers = useLayerInspector(answer?.svg, item?.image.id, useMemo(() => state.items.map((i) => i.image.id), [state.items]));
+  const layers = useLayerInspector(answer?.svg, item?.image.id, useMemo(() => state.items.map((i) => i.image.id), [state.items]), answer?.base);
 
   const job = item ? currentJob(item) : null;
   const candidates = catalog.presets.filter((p) => p.auto_candidate).length;
@@ -432,20 +432,6 @@ function Workspace({ catalog, settings, onSettingsChange }: { catalog: Catalog; 
         lib.cancel(item.image.id);
         lib.cancelText(item.image.id);
       }}
-      text={
-        CAN_TEXT ? (
-          <TextSection
-            item={item}
-            enabled={settings.recogniseText}
-            onChange={(lineId, change) => void lib.setTextLine(item.image.id, lineId, change).catch(failText)}
-            onToggle={(lineId, on) => lib.toggleTextLine(item.image.id, lineId, on)}
-            onHover={setTextHover}
-            onCancel={() => lib.cancelText(item.image.id)}
-            onRetry={() => lib.retryText(item.image.id)}
-            searchFonts={searchFonts}
-          />
-        ) : undefined
-      }
       redraw={
         CAN_REDRAW ? (
           <RedrawSection
@@ -472,7 +458,31 @@ function Workspace({ catalog, settings, onSettingsChange }: { catalog: Catalog; 
           <Sidebar
             tab={layers.state.open ? "inspect" : "images"}
             onTab={(t) => layers.patch({ open: t === "inspect" })}
-            inspect={<Inspector doc={layers.doc ?? null} bytes={layers.exportSvg?.length ?? 0} elapsedMs={answer?.elapsedMs} edited={layers.dropped.size > 0} state={layers.liveState} onChange={layers.patch} onToggle={layers.toggle} />}
+            inspect={
+              <Inspector
+                doc={layers.doc ?? null}
+                bytes={layers.exportSvg?.length ?? 0}
+                elapsedMs={answer?.elapsedMs}
+                edited={layers.dropped.size > 0}
+                state={layers.liveState}
+                onChange={layers.patch}
+                onToggle={layers.toggle}
+                text={
+                  CAN_TEXT && item ? (
+                    <TextSection
+                      item={item}
+                      settingOn={settings.recogniseText}
+                      onChange={(lineId, change) => void lib.setTextLine(item.image.id, lineId, change).catch(failText)}
+                      onToggle={(lineId, on) => lib.toggleTextLine(item.image.id, lineId, on)}
+                      onHover={setTextHover}
+                      onCancel={() => lib.cancelText(item.image.id)}
+                      onRetry={() => lib.retryText(item.image.id)}
+                      searchFonts={searchFonts}
+                    />
+                  ) : undefined
+                }
+              />
+            }
             items={state.items}
             failed={state.failed}
             selected={state.selected}

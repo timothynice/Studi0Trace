@@ -48,5 +48,45 @@ test("the display rail toggles anchors and outlines, and is off until there is a
   rerender(<Inspector doc={null} bytes={0} state={state()} onChange={onChange} onToggle={() => {}} />);
   expect(screen.getByRole("button", { name: "Anchor points" })).toBeDisabled();
   expect(screen.getByText("Trace this image to inspect it.")).toBeInTheDocument();
-  expect(screen.queryByText("Layers")).toBeNull();
+  expect(screen.queryByRole("button", { name: "Layers" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Clean up" })).toBeNull();
+});
+
+test("Text, Layers and Clean up are three disclosure sections, open to begin with", () => {
+  render(<Inspector doc={doc} bytes={512} text={<p>the text body</p>} state={state()} onChange={() => {}} onToggle={() => {}} />);
+  for (const name of ["Text", "Layers", "Clean up"]) expect(screen.getByRole("button", { name })).toHaveAttribute("aria-expanded", "true");
+  expect(screen.getByText("the text body")).toBeInTheDocument();
+  expect(screen.getByText("Rect 1")).toBeInTheDocument();
+  expect(screen.getByLabelText("Drop shapes smaller than")).toBeInTheDocument();
+});
+
+test("each header opens and closes its own body and reports the sections", () => {
+  const onChange = vi.fn();
+  const closed = { text: false, layers: false, cleanup: false };
+  const { rerender } = render(<Inspector doc={doc} bytes={512} text={<p>the text body</p>} state={state()} onChange={onChange} onToggle={() => {}} />);
+  fireEvent.click(screen.getByRole("button", { name: "Text" }));
+  expect(onChange).toHaveBeenLastCalledWith({ sections: { text: false, layers: true, cleanup: true } });
+  fireEvent.click(screen.getByRole("button", { name: "Layers" }));
+  expect(onChange).toHaveBeenLastCalledWith({ sections: { text: true, layers: false, cleanup: true } });
+  fireEvent.click(screen.getByRole("button", { name: "Clean up" }));
+  expect(onChange).toHaveBeenLastCalledWith({ sections: { text: true, layers: true, cleanup: false } });
+  rerender(<Inspector doc={doc} bytes={512} text={<p>the text body</p>} state={state({ sections: closed })} onChange={onChange} onToggle={() => {}} />);
+  expect(screen.getByRole("button", { name: "Layers" })).toHaveAttribute("aria-expanded", "false");
+  expect(screen.queryByText("the text body")).toBeNull();
+  expect(screen.queryByText("Rect 1")).toBeNull();
+  expect(screen.queryByLabelText("Drop shapes smaller than")).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Text" }));
+  expect(onChange).toHaveBeenLastCalledWith({ sections: { text: true, layers: false, cleanup: false } });
+});
+
+test("the Text section shows before a trace, when there is only a plan to show", () => {
+  render(<Inspector doc={null} bytes={0} text={<p>the text body</p>} state={state()} onChange={() => {}} onToggle={() => {}} />);
+  expect(screen.getByRole("button", { name: "Text" })).toBeInTheDocument();
+  expect(screen.getByText("the text body")).toBeInTheDocument();
+  expect(screen.getByText("Trace this image to inspect it.")).toBeInTheDocument();
+});
+
+test("without a text body there is no Text section", () => {
+  render(<Inspector doc={doc} bytes={512} state={state()} onChange={() => {}} onToggle={() => {}} />);
+  expect(screen.queryByRole("button", { name: "Text" })).toBeNull();
 });

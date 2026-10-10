@@ -5,26 +5,28 @@ import { parseSvg } from "@/lib/svgdoc";
 
 const NONE: ReadonlySet<number> = new Set();
 
-/** What belongs to one image: its speck threshold, and the hidden shapes and highlight of the one SVG they were made on. */
+/** What belongs to one image: its speck threshold, and the hidden shapes and highlight of the one trace they were made on. */
 interface Entry {
   minArea: number;
-  /** The SVG `hidden` and `highlight` index into; they are ignored for any other, since a trace renumbers the shapes. */
-  svg: string | undefined;
+  /** The trace `hidden` and `highlight` index into (its base SVG, or the SVG itself when there is none); they are ignored for any other, since a trace renumbers the shapes. */
+  base: string | undefined;
   hidden: ReadonlySet<number>;
   highlight: number | null;
 }
 
-type Shared = Pick<InspectorState, "open" | "points" | "outlines">;
+type Shared = Pick<InspectorState, "open" | "points" | "outlines" | "sections">;
 
 /**
  * The layer inspector's state for one image's SVG: shapes hidden by hand or by size, and the SVG to export without them.
  * The speck threshold is the image's, so a live re-trace does not bring the specks back into an export; the hidden
  * shapes and the highlight are the SVG's. The panel and the display toggles are the window's. `state.hidden` is the
  * hand-hidden set alone; `liveState.hidden` adds what the threshold drops. `knownIds` are the images in the library:
- * an image that has gone loses its entry.
+ * an image that has gone loses its entry. `base` is the SVG as the engine traced it: the shapes are numbered on it
+ * (the lines set in fonts take the indices after every traced shape), so hiding a shape survives a line's switch,
+ * which changes `svg` and not `base`. It defaults to `svg`. The sections' open state is the window's too.
  */
-export function useLayerInspector(svg: string | undefined, imageId = "", knownIds?: readonly string[]) {
-  const [shared, setShared] = useState<Shared>({ open: EMPTY_INSPECTOR.open, points: EMPTY_INSPECTOR.points, outlines: EMPTY_INSPECTOR.outlines });
+export function useLayerInspector(svg: string | undefined, imageId = "", knownIds?: readonly string[], base: string | undefined = svg) {
+  const [shared, setShared] = useState<Shared>({ open: EMPTY_INSPECTOR.open, points: EMPTY_INSPECTOR.points, outlines: EMPTY_INSPECTOR.outlines, sections: EMPTY_INSPECTOR.sections });
   const [entries, setEntries] = useState<Record<string, Entry>>({});
   const known = knownIds?.join("\u0000");
   useEffect(() => {
@@ -33,7 +35,7 @@ export function useLayerInspector(svg: string | undefined, imageId = "", knownId
     setEntries((prev) => (Object.keys(prev).every((id) => ids.has(id)) ? prev : Object.fromEntries(Object.entries(prev).filter(([id]) => ids.has(id)))));
   }, [known]);
   const entry = entries[imageId];
-  const own = entry && entry.svg === svg;
+  const own = entry && entry.base === base;
   const hidden = own ? entry.hidden : NONE;
   const highlight = own ? entry.highlight : null;
   const minArea = entry?.minArea ?? 0;
@@ -41,18 +43,18 @@ export function useLayerInspector(svg: string | undefined, imageId = "", knownId
 
   const patch = useCallback(
     (p: Partial<InspectorState>) => {
-      const { open, points, outlines, hidden: h, highlight: hl, minArea: m } = p;
-      if (open !== undefined || points !== undefined || outlines !== undefined) {
-        setShared((prev) => ({ open: open ?? prev.open, points: points ?? prev.points, outlines: outlines ?? prev.outlines }));
+      const { open, points, outlines, sections, hidden: h, highlight: hl, minArea: m } = p;
+      if (open !== undefined || points !== undefined || outlines !== undefined || sections !== undefined) {
+        setShared((prev) => ({ open: open ?? prev.open, points: points ?? prev.points, outlines: outlines ?? prev.outlines, sections: sections ?? prev.sections }));
       }
       if (h === undefined && hl === undefined && m === undefined) return;
       setEntries((prev) => {
         const cur = prev[imageId];
-        const mine = cur && cur.svg === svg;
-        return { ...prev, [imageId]: { minArea: m ?? cur?.minArea ?? 0, svg, hidden: h ?? (mine ? cur.hidden : NONE), highlight: hl !== undefined ? hl : mine ? cur.highlight : null } };
+        const mine = cur && cur.base === base;
+        return { ...prev, [imageId]: { minArea: m ?? cur?.minArea ?? 0, base, hidden: h ?? (mine ? cur.hidden : NONE), highlight: hl !== undefined ? hl : mine ? cur.highlight : null } };
       });
     },
-    [svg, imageId],
+    [base, imageId],
   );
 
   /** Hide or show one shape by hand; the threshold's drops are not touched. */
@@ -60,22 +62,22 @@ export function useLayerInspector(svg: string | undefined, imageId = "", knownId
     (index: number) =>
       setEntries((prev) => {
         const cur = prev[imageId];
-        const mine = cur && cur.svg === svg;
+        const mine = cur && cur.base === base;
         const next = new Set(mine ? cur.hidden : NONE);
         if (!next.delete(index)) next.add(index);
-        return { ...prev, [imageId]: { minArea: cur?.minArea ?? 0, svg, hidden: next, highlight: mine ? cur.highlight : null } };
+        return { ...prev, [imageId]: { minArea: cur?.minArea ?? 0, base, hidden: next, highlight: mine ? cur.highlight : null } };
       }),
-    [svg, imageId],
+    [base, imageId],
   );
 
-  /** Any image's SVG as its own inspector state would export it: for Export All, and for exporting an image that is not selected. */
+  /** Any image's SVG as its own inspector state would export it: for Export All, and for exporting an image that is not selected. `ofBase` is the trace's base, `markup` itself when it has none. */
   const exportSvgFor = useCallback(
-    (id: string, markup: string): string => {
+    (id: string, markup: string, ofBase: string = markup): string => {
       const e = entries[id];
       if (!e) return markup;
       const parsed = parseSvg(markup);
       if (!parsed) return markup;
-      const out = new Set(e.svg === markup ? e.hidden : NONE);
+      const out = new Set(e.base === ofBase ? e.hidden : NONE);
       for (const i of tinyShapes(parsed, e.minArea)) out.add(i);
       return out.size ? parsed.render(out) : markup;
     },

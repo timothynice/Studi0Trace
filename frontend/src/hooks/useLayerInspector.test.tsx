@@ -28,6 +28,39 @@ describe("useLayerInspector", () => {
     expect(result.current.state.minArea).toBe(1);
   });
 
+  it("keeps the hidden shapes through a change of the composed SVG over the same base (a line toggled), not through another base", () => {
+    const { result, rerender } = renderHook(({ svg, base }) => useLayerInspector(svg, "a", undefined, base), { initialProps: { svg: A, base: A } });
+    act(() => result.current.patch({ hidden: new Set([1]), highlight: 0 }));
+    const withText = A.replace("</svg>", '<path d="M0 0h1" fill="#000"/></svg>');
+    rerender({ svg: withText, base: A });
+    expect([...result.current.state.hidden]).toEqual([1]);
+    expect(result.current.state.highlight).toBe(0);
+    expect(result.current.exportSvg).not.toContain("#0f0");
+    act(() => result.current.toggle(0));
+    expect([...result.current.state.hidden].sort()).toEqual([0, 1]);
+    rerender({ svg: A, base: A });
+    expect([...result.current.state.hidden].sort()).toEqual([0, 1]);
+    rerender({ svg: A2, base: A2 });
+    expect(result.current.state.hidden.size).toBe(0);
+  });
+
+  it("exportSvgFor honours the hidden shapes for the same base under a different composed SVG", () => {
+    const { result } = renderHook(() => useLayerInspector(A, "a"));
+    act(() => result.current.toggle(1));
+    const withText = A.replace("</svg>", '<path d="M0 0h1" fill="#000"/></svg>');
+    expect(result.current.exportSvgFor("a", withText, A)).not.toContain("#0f0");
+    expect(result.current.exportSvgFor("a", withText, A2)).toContain("#0f0");
+  });
+
+  it("holds the sections' open state in the window's shared state, all open to begin with", () => {
+    const { result, rerender } = renderHook(({ svg, id }) => useLayerInspector(svg, id), { initialProps: { svg: A, id: "a" } });
+    expect(result.current.state.sections).toEqual({ text: true, layers: true, cleanup: true });
+    act(() => result.current.patch({ sections: { text: false, layers: true, cleanup: true } }));
+    rerender({ svg: B, id: "b" });
+    expect(result.current.state.sections.text).toBe(false);
+    expect(result.current.liveState.sections.text).toBe(false);
+  });
+
   it("holds the threshold per image: another image starts at off and the first keeps its own", () => {
     const { result, rerender } = renderHook(({ svg, id }) => useLayerInspector(svg, id), { initialProps: { svg: A, id: "a" } });
     act(() => result.current.patch({ minArea: 1 }));

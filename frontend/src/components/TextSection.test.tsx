@@ -10,13 +10,13 @@ const line = (over: Partial<TextLine> = {}): TextLine => ({ id: "a-t0", quad: [[
 const item = (plan: TextPlan | null, phase: "finding" | null = null, error: null | { code: string } = null): ImageItem =>
   ({ image: { id: "a", name: "a.png", path: null, width: 100, height: 50, format: "PNG", previewUrl: "" }, preset: "auto", params: {}, traces: {}, shown: null, exported: null, job: null, error: null, errorKey: null, auto: null, text: { plan, phase, error: error as never, asked: true, enabled: new Set((plan?.lines ?? []).filter((l) => l.enabled).map((l) => l.id)) } }) as ImageItem;
 const plan = (lines: TextLine[], reader: "vision" | "ai" = "vision"): TextPlan => ({ image: "a", reader, lines, aiError: null, fontsOffline: false });
-const props = () => ({ enabled: true, onChange: vi.fn(), onToggle: vi.fn(), onHover: vi.fn(), onCancel: vi.fn(), onRetry: vi.fn(), searchFonts: vi.fn(async () => []) });
+const props = () => ({ settingOn: true, onChange: vi.fn(), onToggle: vi.fn(), onHover: vi.fn(), onCancel: vi.fn(), onRetry: vi.fn(), searchFonts: vi.fn(async () => []) });
 
 describe("TextSection", () => {
   it("lists a matched line with its string, font, fit and switch", () => {
     const p = props();
     render(<TextSection item={item(plan([line()]))} {...p} />);
-    expect(screen.getByRole("heading", { name: /Text/ })).toHaveTextContent("1 line");
+    expect(screen.getByText("1 line")).toBeInTheDocument();
     expect(screen.getByText("On-device")).toBeInTheDocument();
     expect(screen.getByDisplayValue("EST. 2026")).toBeInTheDocument();
     expect(screen.getByText("Fit 94 %")).toBeInTheDocument();
@@ -43,6 +43,25 @@ describe("TextSection", () => {
     expect(screen.getByRole("switch", { name: /Re-set/ })).not.toBeChecked();
   });
 
+  it("a declined line's switch is disabled: it has no font to set until one is chosen", () => {
+    const p = props();
+    const declined = line({ status: { kind: "declined", reason: "script" }, enabled: false, chosen: null, fit: null });
+    const { rerender } = render(<TextSection item={item(plan([declined]))} {...p} />);
+    const sw = screen.getByRole("switch", { name: /Re-set/ });
+    expect(sw).toBeDisabled();
+    fireEvent.click(sw);
+    expect(p.onToggle).not.toHaveBeenCalled();
+    rerender(<TextSection item={item(plan([{ ...declined, chosen: 0 }]))} {...p} />);
+    expect(screen.getByRole("switch", { name: /Re-set/ })).toBeEnabled();
+  });
+
+  it("says Off in Settings, and lists nothing, when Recognise text is off", () => {
+    render(<TextSection item={item(plan([line()]))} {...props()} settingOn={false} />);
+    expect(screen.getByText("Off in Settings")).toBeInTheDocument();
+    expect(screen.queryByRole("switch")).toBeNull();
+    expect(screen.queryByDisplayValue("EST. 2026")).toBeNull();
+  });
+
   it("hovering a row reports the line, leaving reports null", () => {
     const p = props();
     render(<TextSection item={item(plan([line()]))} {...p} />);
@@ -53,7 +72,7 @@ describe("TextSection", () => {
     expect(p.onHover).toHaveBeenCalledWith(null);
   });
 
-  it("shows the phase while reading, the empty state, the AI reader and its error, and nothing when off", () => {
+  it("shows the phase while reading, the empty state, the AI reader and its error", () => {
     const p = props();
     const { rerender } = render(<TextSection item={item(null, "finding")} {...p} />);
     expect(screen.getByText("Finding text")).toBeInTheDocument();
@@ -64,8 +83,6 @@ describe("TextSection", () => {
     rerender(<TextSection item={item({ ...plan([line()], "ai"), aiError: "quota" })} {...p} />);
     expect(screen.getByText("AI")).toBeInTheDocument();
     expect(screen.getByRole("alert")).toHaveTextContent("out of credit");
-    rerender(<TextSection item={item(plan([line()]))} {...p} enabled={false} />);
-    expect(screen.queryByRole("heading", { name: /Text/ })).toBeNull();
   });
 
   it("searches fonts from the picker and picks a result", async () => {
