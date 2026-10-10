@@ -145,7 +145,7 @@ test("shapes inside clipPath, mask, pattern, symbol and marker are not painted",
   expect(svgStats(svg)).toEqual({ shapes: 1, nodes: 0 });
 });
 
-test("text-line shapes take the indices after every traced shape, so hiding survives a toggle", () => {
+test("text-line shapes take the indices after every traced shape, so hiding survives a font pick or a string edit over the same base", () => {
   const markup = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><rect width="4" height="4" fill="#111111"/><path d="M0 0h2v2z" fill="#000000" data-line="a" data-label="Hi"/><rect x="5" width="4" height="4" fill="#222222"/></svg>`;
   const doc = parseSvg(markup)!;
   expect(doc.shapes.map((s) => [s.tag, s.fill, s.line])).toEqual([

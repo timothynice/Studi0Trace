@@ -28,7 +28,7 @@ describe("useLayerInspector", () => {
     expect(result.current.state.minArea).toBe(1);
   });
 
-  it("keeps the hidden shapes through a change of the composed SVG over the same base (a line toggled), not through another base", () => {
+  it("keeps the hidden shapes through a change of the composed SVG over the same base (a font pick or a string edit), not through another base (a toggle shows another trace)", () => {
     const { result, rerender } = renderHook(({ svg, base }) => useLayerInspector(svg, "a", undefined, base), { initialProps: { svg: A, base: A } });
     act(() => result.current.patch({ hidden: new Set([1]), highlight: 0 }));
     const withText = A.replace("</svg>", '<path d="M0 0h1" fill="#000"/></svg>');

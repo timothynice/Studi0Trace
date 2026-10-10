@@ -76,9 +76,14 @@ fidelity bench. Read `README.md` first — it has the run/test/API reference.
   `composeSvg(base, {plan, enabled, hiddenText})`), inserting each enabled line's path before the first traced shape
   that overlaps it and is painted in one of the line's `occluders` (`ink.rs`: the colours of what lay over the letters
   in the source, so the gold script "Awaits" stays over ADVENTURE), else at the end, and a placed line is an occluder
-  for the lines after it. `enabled` and a font pick are frontend state, so toggling or switching font is a recompose;
-  traces are cached by `paramsKey|mask` (`state/library.ts`): the full mask first, then the empty one, then every
-  "all but one" mask in the background while no user job runs. Progress is the `text-phase` event (`{id, phase}`);
+  for the lines after it. `enabled` and a font pick are frontend state: a font pick is a recompose (of the traces
+  whose mask sets that line), and a toggle shows another cached trace or traces that mask. Traces are cached by
+  `paramsKey|mask` (`state/library.ts`; on Auto the full mask is `auto|mask` and, once the pick is known, every other
+  mask is keyed and traced under the pick's params): the full mask first, then the empty one, then every "all but
+  one" mask (only the empty one above `PREFETCH_MAX_LINES` = 8 matched lines) in the background, for the selected
+  image only, while no user job runs, 1 s after settings land on a cached trace; at most 24 masked traces per
+  settings key per image (least recently shown go), and Rust keeps at most 16 painted masks per image (LRU, the
+  full mask kept). Progress is the `text-phase` event (`{id, phase}`);
   `plans.rs` keeps a plan per image by the SHA-256 of its bytes with generations (a cancel, a newer plan or a close
   refuses a late result; an edit is stored only while the bytes are the same, `put_if`), at most two plans run at
   once, and an edit (`set_line`: a string refits every candidate, a known font only moves `chosen`, a new font is

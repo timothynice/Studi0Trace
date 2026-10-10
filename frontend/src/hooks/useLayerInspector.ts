@@ -22,8 +22,9 @@ type Shared = Pick<InspectorState, "open" | "points" | "outlines" | "sections">;
  * shapes and the highlight are the SVG's. The panel and the display toggles are the window's. `state.hidden` is the
  * hand-hidden set alone; `liveState.hidden` adds what the threshold drops. `knownIds` are the images in the library:
  * an image that has gone loses its entry. `base` is the SVG as the engine traced it: the shapes are numbered on it
- * (the lines set in fonts take the indices after every traced shape), so hiding a shape survives a line's switch,
- * which changes `svg` and not `base`. It defaults to `svg`. The sections' open state is the window's too.
+ * (the lines set in fonts take the indices after every traced shape), so hiding a shape survives a font pick or a
+ * string edit, which recompose the same base; a line's toggle switches traces (another base, numbered afresh), and
+ * the hidden set starts empty there. It defaults to `svg`. The sections' open state is the window's too.
  */
 export function useLayerInspector(svg: string | undefined, imageId = "", knownIds?: readonly string[], base: string | undefined = svg) {
   const [shared, setShared] = useState<Shared>({ open: EMPTY_INSPECTOR.open, points: EMPTY_INSPECTOR.points, outlines: EMPTY_INSPECTOR.outlines, sections: EMPTY_INSPECTOR.sections });
