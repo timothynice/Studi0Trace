@@ -1003,4 +1003,28 @@ describe("library: text", () => {
     await flush();
     expect(platform.vectorize.mock.calls.length).toBe(before);
   });
+
+  it("an edit answered after a redraw was used is dropped", async () => {
+    const { platform } = textPlatform();
+    const lib = createLibrary(platform, CATALOG, { ...DEFAULT_SETTINGS, recogniseText: true, traceOnOpen: false });
+    lib.add([ok("a")]);
+    lib.generate("a");
+    await flush();
+    let release: () => void = () => {};
+    platform.textSetLine.mockImplementationOnce((async () => {
+      await new Promise<void>((r) => (release = r));
+      return { plan: PLAN([{ ...LINE, string: "LATE" }]), textGroup: GROUP, repainted: true };
+    }) as never);
+    const edit = lib.setTextLine("a", "a-t0", { string: "LATE" });
+    await flush();
+    await lib.redraw("a");
+    await lib.acceptRedraw("a");
+    const calls = platform.vectorize.mock.calls.length;
+    release();
+    await edit;
+    await flush();
+    const item = lib.selectedItem()!;
+    expect(textOf(item).plan).toBeNull();
+    expect(platform.vectorize.mock.calls.length).toBe(calls);
+  });
 });

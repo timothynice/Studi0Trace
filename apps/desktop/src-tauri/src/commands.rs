@@ -94,23 +94,32 @@ pub async fn vectorize(app: tauri::AppHandle, state: State<'_, AppState>, image_
     // the group rides on the answer; the hash of the bytes is taken off the async runtime
     let recognise = settings::load(&app).recognise_text;
     let (handle, id) = (app.clone(), image_id.clone());
-    let (bytes, group) = redraw::blocking(move || {
+    let (bytes, text) = redraw::blocking(move || {
         if recognise {
             let texts = handle.state::<TextState>();
-            if let Some((painted, group)) = texts.plans.for_trace(&id, &text::bytes_hash(&original)) {
-                return Ok((painted, Some(group)));
+            let hash = text::bytes_hash(&original);
+            if let Some((painted, group)) = texts.plans.for_trace(&id, &hash) {
+                return Ok((painted.clone(), Some((hash, painted, group))));
             }
         }
         Ok((original, None))
     })
     .await?;
     let (emitter, job_id) = (app.clone(), job.clone());
-    let rx = state.queue.submit(JobSpec { id: job, image_id, bytes, parameters, auto, test: None }, move || {
+    let rx = state.queue.submit(JobSpec { id: job, image_id: image_id.clone(), bytes, parameters, auto, test: None }, move || {
         let _ = emitter.emit("trace-phase", serde_json::json!({ "job": job_id, "phase": "tracing" }));
     });
-    let mut answer = tauri::async_runtime::spawn_blocking(move || rx.recv().unwrap_or_else(|_| Err(CommandError::cancelled())))
-        .await
-        .unwrap_or_else(|e| Err(CommandError::crashed(e)))?;
+    // the group is read again once the trace is done: a string or font edit made while it ran changed the group and
+    // not the painted bytes, and the trace must land with the edited text (`Plans::group_for`)
+    let handle = app.clone();
+    let (answer, group) = tauri::async_runtime::spawn_blocking(move || {
+        let answer = rx.recv().unwrap_or_else(|_| Err(CommandError::cancelled()));
+        let group = text.map(|(hash, painted, group)| handle.state::<TextState>().plans.group_for(&image_id, &hash, &painted).unwrap_or(group));
+        (answer, group)
+    })
+    .await
+    .unwrap_or_else(|e| (Err(CommandError::crashed(e)), None));
+    let mut answer = answer?;
     if let Value::Object(map) = &mut answer {
         map.insert("text_group".into(), group.map(Value::String).unwrap_or(Value::Null));
     }
@@ -674,7 +683,8 @@ pub fn text_cancel(texts: State<'_, TextState>, image_id: String) -> bool {
 #[tauri::command]
 pub async fn text_set_line(app: tauri::AppHandle, state: State<'_, AppState>, texts: State<'_, TextState>, image_id: String, line_id: String, change: LineChange) -> Result<LineAnswer, CommandError> {
     let bytes = state.images.bytes(&image_id).ok_or_else(CommandError::expired)?;
-    let hash = text::bytes_hash(&bytes);
+    let hashed = bytes.clone();
+    let hash = redraw::blocking(move || Ok(text::bytes_hash(&hashed))).await?;
     let planned = texts.plans.get(&image_id, &hash).ok_or_else(|| CommandError::new(409, "no_plan", "The text of this image has not been read yet."))?;
     let settings = settings::load(&app);
     let (parts, hidden_text) = (TextParts::of(&texts), settings.hidden_text);
@@ -682,7 +692,9 @@ pub async fn text_set_line(app: tauri::AppHandle, state: State<'_, AppState>, te
     let source = Arc::new(source);
     let next = text::set_line(source, &planned, &line_id, change, deps).await?;
     let repainted = text::repainted(&planned, &next);
-    let kept = texts.plans.put(&image_id, hash, next);
+    // stored only while the image still has these bytes: a redraw used, a revert or a close while the edit ran
+    // leaves nothing behind, and the edit is answered as expired
+    let kept = texts.plans.put_if(&image_id, hash, next).ok_or_else(CommandError::expired)?;
     Ok(LineAnswer { plan: kept.plan.clone(), text_group: kept.group.clone(), repainted })
 }
 

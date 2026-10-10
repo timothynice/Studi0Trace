@@ -53,6 +53,16 @@ impl Plans {
         p
     }
 
+    /// Stores an edit of the kept plan, only while the image's entry is still there for `expected_hash`: None (and
+    /// nothing stored) when the image was closed, or its bytes swapped by a redraw or a revert, while the edit ran.
+    pub fn put_if(&self, image: &str, expected_hash: [u8; 32], planned: Planned) -> Option<Arc<Planned>> {
+        let mut state = self.lock();
+        let entry = state.entries.get_mut(image).filter(|e| e.hash == expected_hash)?;
+        let p = Arc::new(planned);
+        entry.planned = p.clone();
+        Some(p)
+    }
+
     /// Stores the plan `generation` made, and ends it, when it is still the image's current one; None (and
     /// nothing stored) when a cancel, a newer request or the image's closing came first.
     pub fn put_if_current(&self, image: &str, generation: u64, hash: [u8; 32], planned: Planned) -> Option<Arc<Planned>> {
@@ -94,6 +104,18 @@ impl Plans {
         let state = self.lock();
         let e = state.entries.get(image).filter(|e| &e.hash == hash)?;
         e.planned.painted.as_ref().map(|p| (p.clone(), e.planned.group.clone()))
+    }
+
+    /// The group a finished trace carries: the kept plan's group now, while its painted bytes are still `painted`,
+    /// the ones the trace was given. A string or font edit made while the trace ran changes the group and never the
+    /// painted bytes (`text::repainted`), so the trace lands with the edited text; an edit that repainted, or a plan
+    /// forgotten meanwhile, answers None, and the trace keeps the group it was submitted with, which matches what
+    /// it traced (the frontend drops a trace an edit repainted under).
+    pub fn group_for(&self, image: &str, hash: &[u8; 32], painted: &Arc<Vec<u8>>) -> Option<String> {
+        let state = self.lock();
+        let e = state.entries.get(image).filter(|e| &e.hash == hash)?;
+        let now = e.planned.painted.as_ref()?;
+        (Arc::ptr_eq(now, painted) || now == painted).then(|| e.planned.group.clone())
     }
 
     /// A new plan of `image`: the one running is aborted. Answers this plan's generation.

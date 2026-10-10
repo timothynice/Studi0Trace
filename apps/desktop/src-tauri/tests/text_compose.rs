@@ -484,4 +484,40 @@ mod round1 {
         assert!(!phases.lock().unwrap().contains(&Phase::Reading));
         let _ = std::fs::remove_dir_all(&dir);
     }
+
+    fn planned_with(painted: Option<Vec<u8>>, group: &str) -> studi0trace_desktop::text::Planned {
+        let p = sample_plan(&font("Montserrat", 400), true, Status::Matched);
+        studi0trace_desktop::text::Planned { plan: p, inks: Vec::new(), painted: painted.map(Arc::new), group: group.into() }
+    }
+
+    #[test]
+    fn an_edit_is_stored_only_while_the_image_keeps_the_bytes_it_was_made_for() {
+        let plans = Plans::default();
+        let (hash, other) = (bytes_hash(b"one"), bytes_hash(b"two"));
+        assert!(plans.put_if("img", hash, planned_with(None, "<g id=\"text\"></g>")).is_none(), "no entry: nothing stored");
+        assert!(plans.get("img", &hash).is_none());
+        plans.put("img", hash, planned_with(None, "a"));
+        assert!(plans.put_if("img", other, planned_with(None, "b")).is_none(), "the bytes were swapped while the edit ran");
+        assert_eq!(plans.get("img", &hash).unwrap().group, "a");
+        let kept = plans.put_if("img", hash, planned_with(None, "c")).unwrap();
+        assert!(Arc::ptr_eq(&plans.get("img", &hash).unwrap(), &kept));
+        plans.forget("img");
+        assert!(plans.put_if("img", hash, planned_with(None, "d")).is_none(), "closed while the edit ran");
+    }
+
+    #[test]
+    fn a_finished_trace_takes_the_group_of_an_edit_that_kept_its_painted_bytes() {
+        let plans = Plans::default();
+        let hash = bytes_hash(b"one");
+        let submitted = plans.put("img", hash, planned_with(Some(vec![1, 2, 3]), "old")).painted.clone().unwrap();
+        // a string edit: a new group, the same painted bytes (encoded again, so another allocation)
+        plans.put_if("img", hash, planned_with(Some(vec![1, 2, 3]), "new")).unwrap();
+        assert_eq!(plans.group_for("img", &hash, &submitted).as_deref(), Some("new"));
+        // an edit that repainted: the trace keeps what it was submitted with
+        plans.put_if("img", hash, planned_with(Some(vec![9]), "other")).unwrap();
+        assert!(plans.group_for("img", &hash, &submitted).is_none());
+        plans.put_if("img", hash, planned_with(None, "none")).unwrap();
+        assert!(plans.group_for("img", &hash, &submitted).is_none());
+        assert!(plans.group_for("img", &bytes_hash(b"two"), &submitted).is_none(), "other bytes");
+    }
 }

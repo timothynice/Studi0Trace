@@ -603,10 +603,12 @@ export function createLibrary(platform: LibraryPlatform, catalog: Catalog, initi
     async setTextLine(id, lineId, change) {
       if (!platform.textSetLine) return;
       const run = async () => {
-        if (!find(id)) return;
+        const before = find(id);
+        if (!before) return;
         const answer = await platform.textSetLine!(id, lineId, change);
         const now = find(id);
-        if (!now) return;
+        // a redraw used or a revert while the edit ran swapped the image: the answer is about bytes it no longer has
+        if (!now || now.image !== before.image) return;
         if (answer.repainted) {
           // what is painted out changed (a line switched on or off, a font picked for a declined or Off line): every
           // trace of this image holds the old pixels under the new glyphs, and is traced again
