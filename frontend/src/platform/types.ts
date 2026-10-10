@@ -57,6 +57,8 @@ export interface TextFit {
   tracking: number;
   nudges: number[];
   iou: number;
+  /** The drawn stroke's width over the ink's: 1 is the ink's weight, 0 unmeasured. */
+  stroke: number;
 }
 export interface TextCandidate {
   font: FontRef;

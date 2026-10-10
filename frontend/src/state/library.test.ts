@@ -777,7 +777,7 @@ describe("library: AI redraw", () => {
 });
 
 const PLAN = (lines: TextLine[]): TextPlan => ({ image: "a", reader: "vision", lines, aiError: null, fontsOffline: false });
-const LINE: TextLine = { id: "a-t0", quad: [[0, 0], [10, 0], [10, 5], [0, 5]], string: "EST", class: "type", colour: [0, 0, 0], status: { kind: "matched" }, candidates: [{ font: { family: "Montserrat", weight: 400, italic: false, source: "google" }, iou: 0.9 }], chosen: 0, enabled: true, fit: { size: 10, baseline: 5, x: 0, tracking: 0, nudges: [], iou: 0.9 } };
+const LINE: TextLine = { id: "a-t0", quad: [[0, 0], [10, 0], [10, 5], [0, 5]], string: "EST", class: "type", colour: [0, 0, 0], status: { kind: "matched" }, candidates: [{ font: { family: "Montserrat", weight: 400, italic: false, source: "google" }, iou: 0.9 }], chosen: 0, enabled: true, fit: { size: 10, baseline: 5, x: 0, tracking: 0, nudges: [], iou: 0.9, stroke: 1 } };
 const GROUP = '<g id="text"><path d="M0 0h1" fill="#000" data-line="a-t0"/></g>';
 
 /** A platform whose traces answer at once, with the text calls and the redraw calls left to each test. */
