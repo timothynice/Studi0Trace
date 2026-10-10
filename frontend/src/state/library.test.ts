@@ -5,7 +5,7 @@ import { paramsKey } from "@/lib/schema";
 import type { Drift, OpenOutcome, Phase, Platform, RedrawPhase, RedrawResult, TextLine, TextLineChange, TextPlan, TraceRequest } from "@/platform/types";
 import { DEFAULT_SETTINGS } from "@/platform/types";
 import { composeSvg } from "@/lib/textsvg";
-import { createLibrary, currentJob, DEBOUNCE_MS, errorOf, fullMask, maskOf, needsUpdate, NO_REDRAW, shownAnswer, textOf, traceKey, traceKeyFor, unexportedCount, userJob, type Catalog, type LibraryPlatform } from "./library";
+import { createLibrary, currentJob, DEBOUNCE_MS, errorOf, fullMask, maskOf, MASKED_TRACES_MAX, PREFETCH_MAX_LINES, PREFETCH_SETTLE_MS, needsUpdate, NO_REDRAW, shownAnswer, textOf, traceKey, traceKeyFor, unexportedCount, userJob, type Catalog, type LibraryPlatform } from "./library";
 
 const ENGINE: EngineDescription = {
   id: "vexel",
@@ -1325,6 +1325,40 @@ describe("library: traces by the painted set", () => {
     expect(after[`${P}|a-t1`].svg).toContain("M0 20h20v10z");
   });
 
+  it("keeps at most MASKED_TRACES_MAX masked traces per settings key, dropping the least recently shown", async () => {
+    const ids = [0, 1, 2, 3, 4, 5].map((n) => `a-t${n}`);
+    const lines = ids.map((id, n): TextLine => ({ ...T1, id, quad: [[0, n * 5], [30, n * 5], [30, n * 5 + 4], [0, n * 5 + 4]], candidates: [candidate(FONT_M, `M0 ${n * 5}h10v4z`, id, "2026")] }));
+    const { calls, answer, item, lib } = await tracedOnBalanced(PLAN(lines));
+    const answered = new Set<Call>();
+    const drain = async () => {
+      for (let c = calls.find((x) => !answered.has(x)); c; c = calls.find((x) => !answered.has(x))) {
+        answered.add(c);
+        if (!c.signal.aborted) await answer(c);
+      }
+    };
+    await drain();
+    // every subset of the six lines, one switch at a time (a Gray code), each shown in turn
+    const gray = (i: number) => i ^ (i >> 1);
+    const shownKeys: string[] = [];
+    for (let i = 1; i < 64; i++) {
+      const bit = Math.log2(gray(i) ^ gray(i - 1));
+      lib.toggleTextLine("a", ids[bit], !((gray(i) >> bit) & 1));
+      await drain();
+      shownKeys.push(item().shown!);
+    }
+    const masked = Object.keys(item().traces).filter((k) => k.startsWith(`${P}|`) && k !== `${P}|`);
+    expect(masked.length).toBeLessThanOrEqual(MASKED_TRACES_MAX);
+    expect(masked.length).toBeGreaterThan(MASKED_TRACES_MAX - 4);
+    // never the full mask, the untouched image, or the trace on screen
+    expect(item().traces[`${P}|${ids.join(",")}`]).toBeDefined();
+    expect(item().traces[`${P}|`]).toBeDefined();
+    expect(item().traces[item().shown!]).toBeDefined();
+    // the least recently shown went (the second subset shown, two lines off), the last ones shown are all kept
+    expect(shownKeys[1]).toBe(`${P}|a-t2,a-t3,a-t4,a-t5`);
+    expect(item().traces[shownKeys[1]]).toBeUndefined();
+    for (const k of shownKeys.slice(-12)) expect(item().traces[k]).toBeDefined();
+  });
+
   it("a string edit recomposes every cached trace from its base", async () => {
     const { calls, answer, item, lib, platform } = await tracedOnBalanced();
     await answer(calls[0]);
@@ -1451,24 +1485,48 @@ describe("library: traces by the painted set", () => {
     expect(shownAnswer(item())!.svg).toBe(svg);
   });
 
-  it("another image's prefetch is aborted only when a user job starts, and resumes after it", async () => {
+  it("prefetches for the selected image only: another selected stops it, and it resumes when selected again", async () => {
     const { calls, answer, lib } = await tracedOnBalanced();
     await answer(calls[0]);
     expect(calls[1].req).toMatchObject({ imageId: "a", mask: [] });
-    lib.add([ok("b")]);
-    lib.pickPreset("b", PRESETS[1]);
-    lib.setParam("b", "detail", 9); // nothing traces: a's prefetch runs on
-    expect(calls[1].signal.aborted).toBe(false);
-    lib.generate("b");
+    lib.add([ok("b")]); // b is selected: a's prefetch stops and waits
     expect(calls[1].signal.aborted).toBe(true);
+    await flush();
+    expect(calls).toHaveLength(2);
+    lib.pickPreset("b", PRESETS[1]);
+    lib.generate("b");
     await flush();
     expect(calls[2].req).toMatchObject({ imageId: "b", mask: BOTH });
     await answer(calls[2]);
-    // a's aborted prefetch went back to the head of the queue
-    expect(calls[3].req).toMatchObject({ imageId: "a", mask: [] });
+    // b's own prefetch runs, not a's
+    expect(calls[3].req).toMatchObject({ imageId: "b", mask: [] });
+    lib.select("a");
+    expect(calls[3].signal.aborted).toBe(true);
+    await flush();
+    // a's stopped prefetch was at the head of the queue
+    expect(calls[4].req).toMatchObject({ imageId: "a", mask: [] });
+    await answer(calls[4]);
+    expect(calls[5].req).toMatchObject({ imageId: "a", mask: ["a-t1"] });
+    lib.select("b");
+    await flush();
+    expect(calls[5].signal.aborted).toBe(true);
+    expect(calls[6].req).toMatchObject({ imageId: "b", mask: [] });
   });
 
-  it("the prefetch queue is rebuilt after a string edit and after settings that land on a cached trace", async () => {
+  it("prefetches only the untouched image when the plan has more than PREFETCH_MAX_LINES matched lines", async () => {
+    const many = Array.from({ length: PREFETCH_MAX_LINES + 1 }, (_, n): TextLine => ({ ...T1, id: `a-t${n}`, quad: [[0, n * 3], [30, n * 3], [30, n * 3 + 2], [0, n * 3 + 2]], candidates: [candidate(FONT_M, `M0 ${n * 3}h10v2z`, `a-t${n}`, "2026")] }));
+    const { calls, answer } = await tracedOnBalanced(PLAN(many));
+    await answer(calls[0]);
+    expect(calls[1].req.mask).toEqual([]);
+    await answer(calls[1]);
+    expect(calls).toHaveLength(2);
+    // at the cap, every "all but one" too
+    const { calls: c8, answer: a8 } = await tracedOnBalanced(PLAN(many.slice(0, PREFETCH_MAX_LINES)));
+    for (let i = 0; i < 2; i++) await a8(c8[i]);
+    expect(c8[2].req.mask).toHaveLength(PREFETCH_MAX_LINES - 1);
+  });
+
+  it("the prefetch queue is rebuilt after a string edit, and after settings that land on a cached trace once they rest", async () => {
     const { calls, answer, lib } = await tracedOnBalanced();
     await answer(calls[0]);
     expect(calls[1].req.mask).toEqual([]);
@@ -1481,6 +1539,15 @@ describe("library: traces by the painted set", () => {
     await flush();
     expect(calls).toHaveLength(3);
     lib.setParam("a", "detail", 6); // back to the traced settings
+    await flush();
+    // a slider's ticks across the cached settings start nothing until they rest
+    vi.advanceTimersByTime(PREFETCH_SETTLE_MS / 2);
+    lib.setParam("a", "detail", 7);
+    lib.setParam("a", "detail", 6);
+    vi.advanceTimersByTime(PREFETCH_SETTLE_MS - 1);
+    await flush();
+    expect(calls).toHaveLength(3);
+    vi.advanceTimersByTime(1);
     await flush();
     expect(calls[3].req).toMatchObject({ mask: [], parameters: { detail: 6, min_region: 8 } });
   });

@@ -12,6 +12,13 @@ export const ENGINE = "vexel";
 export const LIVE_MS = 2000;
 /** How long a control must rest before a live update traces. */
 export const DEBOUNCE_MS = 250;
+/** Per image and settings key, the most traces of a masked image kept (the full mask, the untouched image and the one
+ *  on screen are always kept, and are not counted out of it first: the least recently shown go). */
+export const MASKED_TRACES_MAX = 24;
+/** A plan with more matched lines than this prefetches the untouched image only, not each "all but one". */
+export const PREFETCH_MAX_LINES = 8;
+/** How long the settings must rest on a cached trace before the background traces start again for them. */
+export const PREFETCH_SETTLE_MS = 1000;
 
 export interface TraceAnswer {
   /** What is shown and exported: `base` with the lines of the trace's own mask set in their fonts (`composeSvg`). */
@@ -249,9 +256,28 @@ export function createLibrary(platform: LibraryPlatform, catalog: Catalog, initi
   const timers = new Map<string, ReturnType<typeof setTimeout>>();
 
   const emit = () => listeners.forEach((l) => l());
+  /** When each trace was last on screen (or traced), per image: what `capped` keeps by. */
+  const seen = new Map<string, Map<string, number>>();
+  let tick = 0;
+  const touch = (id: string, key: string) => {
+    let s = seen.get(id);
+    if (!s) seen.set(id, (s = new Map()));
+    s.set(key, (tick += 1));
+  };
   const set = (next: LibraryState) => {
+    const before = new Map(state.items.map((i) => [i.image.id, i.shown]));
+    const moved = next.selected !== state.selected;
     state = next;
+    for (const i of next.items) {
+      const was = before.get(i.image.id);
+      if (was === i.shown) continue;
+      // the trace that leaves the screen was shown until now, the one that takes it from now
+      if (was) touch(i.image.id, was);
+      if (i.shown) touch(i.image.id, i.shown);
+    }
     emit();
+    // the background traces are the selected image's
+    if (moved) selectionMoved();
   };
   const find = (id: string) => state.items.find((i) => i.image.id === id);
   const patch = (id: string, change: Partial<ImageItem> | ((item: ImageItem) => Partial<ImageItem>)) =>
@@ -313,25 +339,62 @@ export function createLibrary(platform: LibraryPlatform, catalog: Catalog, initi
       }),
     );
 
+  /**
+   * `traces` with at most `MASKED_TRACES_MAX` traces of a masked image per settings key: past it, the least recently
+   * shown are dropped, never the full mask's, the untouched image's, `shown` or the one last exported.
+   */
+  const capped = (id: string, item: ImageItem, traces: Record<string, TraceAnswer>, shown: string | null): Record<string, TraceAnswer> => {
+    const plan = textOf(item).plan;
+    const full = plan ? fullMask(plan).join(",") : "";
+    const bySettings = new Map<string, string[]>();
+    for (const k of Object.keys(traces)) {
+      const cut = k.lastIndexOf("|");
+      if (cut === k.length - 1) continue; // the untouched image
+      const s = k.slice(0, cut);
+      bySettings.set(s, [...(bySettings.get(s) ?? []), k]);
+    }
+    const when = seen.get(id);
+    let out = traces;
+    for (const keys of bySettings.values()) {
+      if (keys.length <= MASKED_TRACES_MAX) continue;
+      const spare = keys.filter((k) => k.slice(k.lastIndexOf("|") + 1) !== full && k !== shown && k !== item.exported);
+      // the oldest first; never seen, in the order they were kept
+      spare.sort((a, b) => (when?.get(a) ?? 0) - (when?.get(b) ?? 0));
+      const drop = spare.slice(0, keys.length - MASKED_TRACES_MAX);
+      if (!drop.length) continue;
+      if (out === traces) out = { ...traces };
+      for (const k of drop) {
+        delete out[k];
+        when?.delete(k);
+      }
+    }
+    return out;
+  };
+
   /** What was exported stays exported only while its vector is unchanged. */
   const keptExport = (item: ImageItem, traces: Record<string, TraceAnswer>) =>
     item.exported !== null && traces[item.exported] && traces[item.exported].svg === item.traces[item.exported]?.svg ? item.exported : null;
 
-  // Prefetching: the masks a switch may ask for, traced ahead one at a time across every image, only while no
-  // user job runs anywhere; on Auto once its pick is known, under the pick's params (never an Auto run). `queue`
-  // holds what waits; `prefetching` the one running.
+  // Prefetching: the masks a switch may ask for, traced ahead one at a time for the selected image only, only while
+  // no user job runs anywhere; on Auto once its pick is known, under the pick's params (never an Auto run). `queue`
+  // holds what waits (other images' entries wait there until they are selected again); `prefetching` the one running;
+  // `holding` the rest after settings landed on a cached trace (a slider's ticks do not start and kill workers).
   interface Prefetch { id: string; key: string; mask: string[]; params: ParamValues }
   let queue: Prefetch[] = [];
   let prefetching: (Prefetch & { jobId: string }) | null = null;
+  let holding: ReturnType<typeof setTimeout> | null = null;
 
-  /** After a user trace: the untouched image, then each matched line's "all but this one", in plan order, that are not cached. */
+  /**
+   * After a user trace: the untouched image, then each matched line's "all but this one", in plan order, that are not
+   * cached; the untouched image only when the plan has more than `PREFETCH_MAX_LINES` matched lines.
+   */
   const schedulePrefetch = (id: string) => {
     const item = find(id);
     const plan = item ? textOf(item).plan : null;
     if (!item || !plan) return;
     const full = fullMask(plan);
     if (!full.length) return;
-    const masks = [[], ...matchedLines(plan).map((l) => full.filter((m) => m !== l.id))];
+    const masks = [[], ...(full.length <= PREFETCH_MAX_LINES ? matchedLines(plan).map((l) => full.filter((m) => m !== l.id)) : [])];
     for (const mask of masks) {
       const key = traceKeyFor(item, mask);
       // an Auto image whose pick is not known yet: its masks are Auto runs, which are never traced ahead
@@ -340,19 +403,47 @@ export function createLibrary(platform: LibraryPlatform, catalog: Catalog, initi
     }
   };
 
-  /** Starts the next prefetch, when none runs and no image has a user job. */
+  /** Starts the selected image's next prefetch, when none runs, none is held and no image has a user job. */
   const runPrefetch = () => {
-    if (prefetching || state.items.some((i) => userJob(i))) return;
-    while (queue.length) {
+    if (prefetching || holding || state.items.some((i) => userJob(i))) return;
+    const waiting: Prefetch[] = [];
+    let start: Prefetch | null = null;
+    while (queue.length && !start) {
       const next = queue.shift()!;
       const item = find(next.id);
       // gone, traced meanwhile, or the settings moved on since it was queued
-      if (!item || item.job || isAutoKey(next.key) || item.traces[next.key] || traceKeyFor(item, next.mask) !== next.key) continue;
-      const job: Job = { id: newJobId(), key: next.key, startedAt: Date.now(), phase: "queued", mask: next.mask, prefetch: true };
-      prefetching = { ...next, jobId: job.id };
-      launch(next.id, job, next.params, false);
-      return;
+      if (!item || isAutoKey(next.key) || item.traces[next.key] || traceKeyFor(item, next.mask) !== next.key) continue;
+      // another image's waits for it to be selected again
+      if (next.id !== state.selected || item.job) waiting.push(next);
+      else start = next;
     }
+    queue = [...waiting, ...queue];
+    if (!start) return;
+    const job: Job = { id: newJobId(), key: start.key, startedAt: Date.now(), phase: "queued", mask: start.mask, prefetch: true };
+    prefetching = { ...start, jobId: job.id };
+    launch(start.id, job, start.params, false);
+  };
+
+  /** The background traces start again only once the settings have rested `PREFETCH_SETTLE_MS`. */
+  const holdPrefetch = () => {
+    if (holding) clearTimeout(holding);
+    holding = setTimeout(() => {
+      holding = null;
+      runPrefetch();
+    }, PREFETCH_SETTLE_MS);
+  };
+
+  /** The selection moved: a prefetch of an image no longer selected stops and waits at the head of the queue. */
+  const selectionMoved = () => {
+    const running = prefetching;
+    if (running && running.id !== state.selected) {
+      prefetching = null;
+      controllers.get(running.jobId)?.abort();
+      controllers.delete(running.jobId);
+      if (find(running.id)?.job?.id === running.jobId) patch(running.id, { job: null });
+      queue.unshift({ id: running.id, key: running.key, mask: running.mask, params: running.params });
+    }
+    queueMicrotask(runPrefetch);
   };
 
   /**
@@ -415,7 +506,9 @@ export function createLibrary(platform: LibraryPlatform, catalog: Catalog, initi
     // that moved on while it ran show their own trace if one is known (a candidate, say), else stay as they are
     const want = traceKey({ ...item, params, auto: auto ?? item.auto });
     const now = traces[want] ? want : item.shown;
-    patch(id, { job: null, ...(job.prefetch ? {} : { error: null, errorKey: null }), traces, shown: now, auto: auto ?? item.auto, params });
+    // a trace just made counts as just seen: it is not the first to go
+    touch(id, job.key);
+    patch(id, { job: null, ...(job.prefetch ? {} : { error: null, errorKey: null }), traces: capped(id, item, traces, now), shown: now, auto: auto ?? item.auto, params });
     if (!job.prefetch) schedulePrefetch(id);
     runPrefetch();
   };
@@ -574,9 +667,9 @@ export function createLibrary(platform: LibraryPlatform, catalog: Catalog, initi
     if (item.traces[key]) {
       // a job for other settings runs on: its answer is kept as any other, and it takes nothing from the screen
       patch(id, { shown: key });
-      // the settings changed, so the background work stopped: it starts again for these
+      // the settings changed, so the background work stopped: it starts again for these once they rest
       schedulePrefetch(id);
-      runPrefetch();
+      holdPrefetch();
       return;
     }
     const last = item.shown ? item.traces[item.shown] : undefined;
@@ -673,6 +766,7 @@ export function createLibrary(platform: LibraryPlatform, catalog: Catalog, initi
       abortRedraw(id);
       abortText(id);
       roughAsked.delete(id);
+      seen.delete(id);
       platform.closeImage(id);
       set({ ...state, selected: selectAfterRemoving(id), items: state.items.filter((i) => i.image.id !== id) });
     },
@@ -685,6 +779,7 @@ export function createLibrary(platform: LibraryPlatform, catalog: Catalog, initi
         abortRedraw(item.image.id);
         abortText(item.image.id);
         roughAsked.delete(item.image.id);
+        seen.delete(item.image.id);
         platform.closeImage(item.image.id);
       }
       set({ items: [], failed: [], selected: null });
