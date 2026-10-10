@@ -97,4 +97,18 @@ describe("composeSvg", () => {
     expect(compose(b, plan(declined))).toBe(b);
     expect(compose("<svg>", p)).toBe("<svg>");
   });
+
+  it("puts a lower line beneath an earlier one that lies over it in the source", () => {
+    const upper = line("A", box, [], [10, 20, 30]);
+    const lower = line("B", [[10, 25], [30, 25], [30, 35], [10, 35]], [[10, 20, 30]]);
+    const ids = children(compose(base(BACKDROP), plan(upper, lower))).map((k) => k.getAttribute("data-line") ?? "rect");
+    expect(ids).toEqual(["rect", "B", "A"]);
+  });
+
+  it("orders two lines under the same shape S with A over B as B, A, S", () => {
+    const a = line("A", box, [GOLD_RGB], [10, 20, 30]);
+    const b = line("B", [[10, 25], [30, 25], [30, 35], [10, 35]], [GOLD_RGB, [10, 20, 30]]);
+    const ids = children(compose(base(BACKDROP + GOLD), plan(a, b))).map((k) => k.getAttribute("data-line") ?? k.getAttribute("fill"));
+    expect(ids).toEqual(["#ffffff", "B", "A", "#d49c17"]);
+  });
 });

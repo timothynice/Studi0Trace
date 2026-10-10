@@ -313,8 +313,8 @@ export function parseSvg(markup: string): SvgDoc | null {
 }
 
 /** The shapes of a document with the matrix of the group each sits in, in index order: every traced shape in document
- *  order, then every shape of a set line of text (`data-line`) in document order, so a line toggled on or off moves no
- *  other shape's index. A shape may sit in a group that carries a transform: Vexel draws a small input traced at twice
+ *  order, then every shape of a set line of text (`data-line`) in document order, so a line toggled on or off moves only the
+ *  indices of the text lines after it, never a traced shape's. A shape may sit in a group that carries a transform: Vexel draws a small input traced at twice
  *  its size inside <g transform="scale(0.5)">. */
 function orderedElements(root: Element): [Element, Matrix][] {
   const found: [Element, Matrix][] = [];

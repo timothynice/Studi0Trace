@@ -21,6 +21,10 @@ function quadBox(quad: [number, number][]): [number, number, number, number] {
   return [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)];
 }
 
+function overlaps(a: [number, number, number, number], b: [number, number, number, number]): boolean {
+  return a[0] < b[2] && a[2] > b[0] && a[1] < b[3] && a[3] > b[1];
+}
+
 /** The index in `doc.shapes` before which `line` goes — the first traced shape that overlaps it and is painted in one of
  *  its occluders' colours, which is what lay over the line in the source — or null to append. */
 export function insertionIndex(doc: SvgDoc, line: TextLine): number | null {
@@ -47,6 +51,8 @@ export function composeSvg(base: string, { plan, enabled, hiddenText }: ComposeI
   // an upsampled trace draws inside a scaled group: the line's coordinates are the image's, so it goes on top of it
   const scaled = doc.shapes.some((s) => dom.elements[s.index]?.parentElement !== dom.root);
   const document = dom.root.ownerDocument;
+  // the lines inserted so far: a line may lie under one set before it, as the source stacks them
+  const placed: { el: Element; box: [number, number, number, number]; rgb: [number, number, number] }[] = [];
   for (const line of lines) {
     const candidate = line.candidates[line.chosen as number];
     const path = document.createElementNS(SVG_NS, "path");
@@ -62,8 +68,15 @@ export function composeSvg(base: string, { plan, enabled, hiddenText }: ComposeI
       }
     }
     const at = scaled ? null : insertionIndex(doc, line);
-    const before = at === null ? null : dom.elements[at];
+    let before: Element | null = at === null ? null : dom.elements[at];
+    const box = quadBox(line.quad);
+    if (!scaled) {
+      const over = placed.find((p) => overlaps(p.box, box) && line.occluders.some((o) => deltaE(p.rgb, o) <= OCCLUDER_DE));
+      // whichever of the two comes first in the document is the one the line goes beneath
+      if (over && (!before || (before.compareDocumentPosition(over.el) & Node.DOCUMENT_POSITION_PRECEDING))) before = over.el;
+    }
     for (const el of made) dom.root.insertBefore(el, before);
+    placed.push({ el: path, box, rgb: line.colour });
   }
   return new XMLSerializer().serializeToString(dom.root.ownerDocument);
 }
