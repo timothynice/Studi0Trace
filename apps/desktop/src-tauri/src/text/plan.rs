@@ -28,9 +28,10 @@ const MAX_HINTS: usize = 3;
 /// Previous lines' winning families that lead the next line's list.
 const MAX_WINNERS: usize = EAGER_FAMILIES;
 
-/// What a plan needs, owned: the finder, the optional AI reader, the catalogue, the Google fetcher and its cache
-/// folder, and the hidden-text setting. Everything in it lives in the app state (or a test),
-/// so a plan runs as a `'static` task and its pixel work goes to the blocking pool.
+/// What a plan needs, owned: the finder, the optional AI reader, the catalogue, and the Google fetcher and its cache
+/// folder. Everything in it lives in the app state (or a test), so a plan runs as a `'static` task and its pixel work
+/// goes to the blocking pool. (Every candidate carries its hidden text; the frontend leaves it out while the setting is
+/// off, `composeSvg`.)
 #[derive(Clone)]
 pub struct Deps {
     pub finder: Arc<dyn reader::Finder>,
@@ -38,10 +39,6 @@ pub struct Deps {
     pub catalog: Arc<catalog::Catalog>,
     pub fonts: Option<Arc<fonts::GoogleFonts>>,
     pub cache_dir: PathBuf,
-    /// The setting as it stood when the plan was asked, for the plan's own use. Every candidate carries its hidden
-    /// text: the frontend leaves it out while the setting is off (`composeSvg`), so turning it on or off reaches
-    /// every cached plan and every trace without planning again.
-    pub hidden_text: bool,
 }
 
 pub struct Planned {
@@ -449,7 +446,7 @@ pub async fn set_line(_source: Arc<Image>, planned: &Planned, line_id: &str, cha
         let line = &mut plan.lines[at];
         let id = line.id.clone();
         let enabled = line.enabled;
-        let was_chosen = matches!(line.status, Status::Matched | Status::Off);
+        let was_chosen = line.status == Status::Matched;
         let mut restring = false;
         if let Some(s) = change.string {
             let s = compose::clean_text(&s).trim().to_string();

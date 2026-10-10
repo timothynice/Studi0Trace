@@ -68,7 +68,7 @@ fn the_taglines_are_matched_and_the_scripts_declined() {
             continue;
         };
         let source = Arc::new(Source::decode(&bytes).unwrap());
-        let deps = Deps { finder: Arc::new(Vision), reader: None, catalog: catalog.clone(), fonts: Some(fonts.clone()), cache_dir: cache.clone(), hidden_text: true };
+        let deps = Deps { finder: Arc::new(Vision), reader: None, catalog: catalog.clone(), fonts: Some(fonts.clone()), cache_dir: cache.clone() };
         let t0 = std::time::Instant::now();
         let planned = tauri::async_runtime::block_on(plan(n, source.clone(), deps, Arc::new(|_| {}))).unwrap();
         let secs = t0.elapsed().as_secs_f32();

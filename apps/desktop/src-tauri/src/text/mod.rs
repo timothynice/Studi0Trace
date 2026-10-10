@@ -77,7 +77,6 @@ pub enum Reason {
 pub enum Status {
     Matched,
     Declined(Reason),
-    Off,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

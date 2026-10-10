@@ -566,8 +566,8 @@ impl TextParts {
     }
 
     /// Blocks while the catalogue is first scanned.
-    fn deps(self, hidden_text: bool, reader: Option<Arc<dyn text::reader::Reader>>) -> text::Deps {
-        text::Deps { finder: Arc::new(text::vision::Vision), reader, catalog: crate::catalog_of(&self.catalog), fonts: self.fonts, cache_dir: self.cache_dir, hidden_text }
+    fn deps(self, reader: Option<Arc<dyn text::reader::Reader>>) -> text::Deps {
+        text::Deps { finder: Arc::new(text::vision::Vision), reader, catalog: crate::catalog_of(&self.catalog), fonts: self.fonts, cache_dir: self.cache_dir }
     }
 }
 
@@ -611,8 +611,8 @@ pub async fn text_plan(app: tauri::AppHandle, state: State<'_, AppState>, texts:
     } else {
         None
     };
-    let (parts, hidden_text) = (TextParts::of(&texts), settings.hidden_text);
-    let prepared = redraw::blocking(move || Ok((Source::decode(&bytes)?, parts.deps(hidden_text, reader)))).await;
+    let parts = TextParts::of(&texts);
+    let prepared = redraw::blocking(move || Ok((Source::decode(&bytes)?, parts.deps(reader)))).await;
     let (source, deps) = match prepared {
         Ok((source, deps)) => (Arc::new(source), deps),
         Err(e) => {
@@ -660,14 +660,13 @@ pub fn text_cancel(texts: State<'_, TextState>, image_id: String) -> bool {
 }
 
 #[tauri::command]
-pub async fn text_set_line(app: tauri::AppHandle, state: State<'_, AppState>, texts: State<'_, TextState>, image_id: String, line_id: String, change: LineChange) -> Result<LineAnswer, CommandError> {
+pub async fn text_set_line(state: State<'_, AppState>, texts: State<'_, TextState>, image_id: String, line_id: String, change: LineChange) -> Result<LineAnswer, CommandError> {
     let bytes = state.images.bytes(&image_id).ok_or_else(CommandError::expired)?;
     let hashed = bytes.clone();
     let hash = redraw::blocking(move || Ok(text::bytes_hash(&hashed))).await?;
     let planned = texts.plans.get(&image_id, &hash).ok_or_else(|| CommandError::new(409, "no_plan", "The text of this image has not been read yet."))?;
-    let settings = settings::load(&app);
-    let (parts, hidden_text) = (TextParts::of(&texts), settings.hidden_text);
-    let (source, deps) = redraw::blocking(move || Ok((Source::decode(&bytes)?, parts.deps(hidden_text, None)))).await?;
+    let parts = TextParts::of(&texts);
+    let (source, deps) = redraw::blocking(move || Ok((Source::decode(&bytes)?, parts.deps(None)))).await?;
     let source = Arc::new(source);
     let next = text::set_line(source, &planned, &line_id, change, deps).await?;
     // stored only while the image still has these bytes: a redraw used, a revert or a close while the edit ran

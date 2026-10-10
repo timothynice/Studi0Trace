@@ -54,7 +54,7 @@ fn plans_the_example_images() {
     for n in ["1", "2", "3"] {
         let Ok(bytes) = std::fs::read(dir.join(format!("{n}.png"))) else { continue };
         let source = Arc::new(Source::decode(&bytes).unwrap());
-        let deps = Deps { finder: Arc::new(Vision), reader: None, catalog: catalog.clone(), fonts: Some(fonts.clone()), cache_dir: cache.clone(), hidden_text: true };
+        let deps = Deps { finder: Arc::new(Vision), reader: None, catalog: catalog.clone(), fonts: Some(fonts.clone()), cache_dir: cache.clone() };
         let t0 = std::time::Instant::now();
         let planned = tauri::async_runtime::block_on(plan(n, source.clone(), deps, Arc::new(|p| eprintln!("  {p:?}")))).unwrap();
         eprintln!("{n}: {} lines in {:.1}s", planned.plan.lines.len(), t0.elapsed().as_secs_f32());
@@ -84,7 +84,7 @@ fn plans_the_example_images() {
             let ids: Vec<String> = cur.plan.lines.iter().filter(|l| l.status != studi0trace_desktop::text::Status::Matched && !l.candidates.is_empty()).map(|l| l.id.clone()).collect();
             for id in ids {
                 let font = cur.plan.lines.iter().find(|l| l.id == id).and_then(|l| l.candidates.first()).map(|c| c.font.clone()).unwrap();
-                let d = Deps { finder: Arc::new(Vision), reader: None, catalog: catalog.clone(), fonts: Some(fonts.clone()), cache_dir: cache.clone(), hidden_text: false };
+                let d = Deps { finder: Arc::new(Vision), reader: None, catalog: catalog.clone(), fonts: Some(fonts.clone()), cache_dir: cache.clone() };
                 cur = tauri::async_runtime::block_on(set_line(source.clone(), &cur, &id, LineChange { font: Some(font), ..Default::default() }, d)).unwrap();
             }
             for l in &cur.plan.lines {

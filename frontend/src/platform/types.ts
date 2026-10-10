@@ -51,7 +51,7 @@ export interface FontRef {
 }
 export type TextClass = "type" | "script" | "custom";
 export type DeclineReason = "script" | "custom" | "gradient" | "mismatch" | "no_fit" | "rotated" | "fonts";
-export type TextStatus = { kind: "matched" } | { kind: "declined"; reason: DeclineReason } | { kind: "off" };
+export type TextStatus = { kind: "matched" } | { kind: "declined"; reason: DeclineReason };
 export interface TextFit {
   size: number;
   baseline: number;

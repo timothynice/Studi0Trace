@@ -117,7 +117,7 @@ fn plans_a_fixture_line_end_to_end_and_an_edit_refits_its_candidates() {
     let finder = Arc::new(FixtureFinder(vec![LineBox { quad: [[20.0, 14.0], [w - 20.0, 14.0], [w - 20.0, 58.0_f32.min(h)], [20.0, 58.0_f32.min(h)]], string: "EST. 2026".into(), confidence: 0.9 }]));
     let phases: Arc<Mutex<Vec<Phase>>> = Arc::default();
     let seen = phases.clone();
-    let deps = Deps { finder, reader: None, catalog: Arc::new(catalog()), fonts: None, cache_dir: dir.clone(), hidden_text: true };
+    let deps = Deps { finder, reader: None, catalog: Arc::new(catalog()), fonts: None, cache_dir: dir.clone() };
     let planned = tauri::async_runtime::block_on(plan("img", img.clone(), deps.clone(), Arc::new(move |p| seen.lock().unwrap().push(p)))).unwrap();
     assert_eq!(*phases.lock().unwrap(), vec![Phase::Finding, Phase::Matching, Phase::Done]);
     let line = &planned.plan.lines[0];
@@ -154,7 +154,7 @@ fn an_unknown_line_is_a_404_a_known_font_is_chosen_and_plans_are_kept_by_hash() 
     let img = Arc::new(Img::decode(&bytes).unwrap());
     let (w, h) = (img.width as f32, img.height as f32);
     let finder = Arc::new(FixtureFinder(vec![LineBox { quad: [[20.0, 14.0], [w - 20.0, 14.0], [w - 20.0, 58.0_f32.min(h)], [20.0, 58.0_f32.min(h)]], string: "EST. 2026".into(), confidence: 0.9 }]));
-    let deps = Deps { finder, reader: None, catalog: Arc::new(catalog()), fonts: None, cache_dir: dir.clone(), hidden_text: false };
+    let deps = Deps { finder, reader: None, catalog: Arc::new(catalog()), fonts: None, cache_dir: dir.clone() };
     let planned = tauri::async_runtime::block_on(plan("img", img.clone(), deps.clone(), Arc::new(|_| {}))).unwrap();
     assert!(planned.plan.lines[0].candidates.iter().all(|c| c.text.contains("<text")), "the hidden text is always written: the frontend leaves it out when the setting is off");
     let err = tauri::async_runtime::block_on(set_line(img.clone(), &planned, "img-t9", LineChange::default(), deps.clone())).err().unwrap();
@@ -229,7 +229,7 @@ mod round1 {
     }
 
     fn deps(finder: Arc<dyn Finder>, reader: Option<Arc<dyn Reader>>, catalog: Catalog, dir: &Path) -> Deps {
-        Deps { finder, reader, catalog: Arc::new(catalog), fonts: None, cache_dir: dir.to_path_buf(), hidden_text: false }
+        Deps { finder, reader, catalog: Arc::new(catalog), fonts: None, cache_dir: dir.to_path_buf() }
     }
 
     fn run_plan(img: &Arc<Img>, deps: &Deps) -> studi0trace_desktop::text::Planned {
