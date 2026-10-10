@@ -138,15 +138,15 @@ gained the line id) is allowed `too_many_arguments`; `vexel-rs` has its own pre-
 
 **Trace times** (Rust engine, balanced, the cost of the prefetch; a trace of the painted image is the cheaper one
 since the text is no longer in it): image 1 original 9.3 s (first run), full mask 3.7 s; image 2 original 30.3 s, full
-mask 15.6 s. So on image 1 (2 lines) the full, empty and two all-but-one masks are about 4 + 9 + 2 x ~6 s of
-background tracing after the first result; image 2's 14 all-but-one masks are not prefetched quickly (about 15-30 s each),
-which is why the prefetch yields to any user job and stops on an edit.
+mask 15.6 s. Image 1 (2 lines) needs the full, empty and two all-but-one masks after its first result; image 2's 14
+all-but-one masks at 15-30 s each take minutes, which is why the prefetch yields to any user job and stops on an edit.
 
 **Deviations.** Hidden shapes (Layers) do not survive a line toggle, because the base trace changes with the mask and
 shape indices with it. A line whose status is declined has its switch disabled (it has no candidate to set). With
 Recognise text off the Text section shows its header with "Off in Settings". The spec's gate assertion (the path
 inserted before the "Awaits" shapes) is the occluder-colour assertion above plus the by-eye render, since the gate
-has no trace. The occluder check is on a declined line; no matched line of the three images has occluders.
+has no trace. The assertion is on a declined line; the only matched line of the three images with occluders is image 3's HORIZON (two
+warm colours, the sun's), whose layering was not looked at.
 
 **Not verified.** The running app. The dev app was built and launched (`npm run dev`, debug build, no panic in its
 output) but this environment grants no accessibility or screen-recording access, so no window could be seen or
