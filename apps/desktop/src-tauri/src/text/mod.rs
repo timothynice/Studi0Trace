@@ -97,6 +97,15 @@ pub struct Fit {
 pub struct Candidate {
     pub font: FontRef,
     pub iou: f32,
+    /// The candidate's own fit (the quick one for a screened candidate, the full one for a refined one).
+    pub fit: Fit,
+    /// The drawn stroke's width over the ink's, as `fit.stroke`.
+    #[serde(default)]
+    pub stroke: f32,
+    /// The glyph outlines under `fit` as an SVG path `d`, in source pixels (`compose::candidate_path`).
+    pub path: String,
+    /// The hidden `<text>` element carrying the string under `fit` (`compose::candidate_text`).
+    pub text: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -112,6 +121,9 @@ pub struct TextLine {
     pub chosen: Option<usize>,
     pub enabled: bool,
     pub fit: Option<Fit>,
+    /// The colours of what lay over the letters in the source (`ink::LineInk::occluders`), usually none.
+    #[serde(default)]
+    pub occluders: Vec<[u8; 3]>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

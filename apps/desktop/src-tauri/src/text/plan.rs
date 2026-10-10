@@ -96,10 +96,18 @@ fn stroke_error(fit: &Fit) -> f32 {
 /// and the tie goes to the best IoU less `STROKE_CHARGE` per unit of |ln stroke|: a 500 drawn 30 % heavier than
 /// the ink pays 0.066 and loses to a 300 of the ink's weight 0.05 below it, while two faces whose strokes are
 /// both within a few per cent of the ink's stay ordered by their IoU. None when no fit is acceptable.
-fn pick(fitted: &[(Candidate, Fit)]) -> Option<usize> {
-    let best = fitted.iter().filter(|(_, f)| acceptable(f)).map(|(_, f)| f.iou).fold(f32::MIN, f32::max);
+fn pick(fitted: &[Candidate]) -> Option<usize> {
+    let best = fitted.iter().filter(|c| acceptable(&c.fit)).map(|c| c.fit.iou).fold(f32::MIN, f32::max);
     let merit = |f: &Fit| f.iou - STROKE_CHARGE * stroke_error(f);
-    (0..fitted.len()).filter(|&i| acceptable(&fitted[i].1) && fitted[i].1.iou >= best - TIE_IOU).max_by(|&a, &b| merit(&fitted[a].1).total_cmp(&merit(&fitted[b].1)).then(b.cmp(&a)))
+    (0..fitted.len()).filter(|&i| acceptable(&fitted[i].fit) && fitted[i].fit.iou >= best - TIE_IOU).max_by(|&a, &b| merit(&fitted[a].fit).total_cmp(&merit(&fitted[b].fit)).then(b.cmp(&a)))
+}
+
+/// The one place a `Candidate` is built, so none forgets a field: the font's fit under `shaped` (the string shaped in
+/// that font), its outline and its hidden `<text>`.
+fn candidate(font: FontRef, fit: Fit, string: &str, line_id: &str, shaped: &glyphs::Shaped) -> Candidate {
+    let path = compose::candidate_path(shaped, &fit);
+    let text = compose::candidate_text(line_id, string, &font.family, shaped, &fit);
+    Candidate { font, iou: fit.iou, stroke: fit.stroke, fit, path, text }
 }
 
 /// `fonts` fitted in order, best first: in full (`fit::fit_line`) when `full`, else screened (`fit_line_quick`).
@@ -108,9 +116,9 @@ fn pick(fitted: &[(Candidate, Fit)]) -> Option<usize> {
 /// while no fit of the ink's weight reaches `FIT_SURE`, stopping as soon as one does (a fit of the wrong weight
 /// does not stop it). A font that is never fitted is not a candidate; one that cannot be located or loaded is
 /// left out.
-fn fit_candidates(string: &str, ink: &ink::LineInk, fonts: &[FontRef], eager: usize, catalog: &catalog::Catalog, cache_dir: &Path, full: bool) -> Vec<(Candidate, Fit)> {
+fn fit_candidates(string: &str, line_id: &str, ink: &ink::LineInk, fonts: &[FontRef], eager: usize, catalog: &catalog::Catalog, cache_dir: &Path, full: bool) -> Vec<Candidate> {
     let caps = all_caps(string);
-    let mut out: Vec<(Candidate, Fit)> = Vec::new();
+    let mut out: Vec<Candidate> = Vec::new();
     let mut best = 0.0f32;
     for (n, f) in fonts.iter().enumerate() {
         if n >= eager && best >= FIT_SURE {
@@ -124,34 +132,34 @@ fn fit_candidates(string: &str, ink: &ink::LineInk, fonts: &[FontRef], eager: us
             if stroke_agrees(&fit) {
                 best = best.max(fit.iou);
             }
-            out.push((Candidate { font: f.clone(), iou: fit.iou }, fit));
+            out.push(candidate(f.clone(), fit, string, line_id, &shaped));
         }
     }
     sort_best_first(&mut out);
     out
 }
 
-fn sort_best_first(fitted: &mut [(Candidate, Fit)]) {
-    fitted.sort_by(|a, b| b.0.iou.total_cmp(&a.0.iou));
+fn sort_best_first(fitted: &mut [Candidate]) {
+    fitted.sort_by(|a, b| b.iou.total_cmp(&a.iou));
 }
 
 /// The screened candidates in the order they are worth a full fit: those of the ink's weight first, each group by
 /// its IoU less the stroke's charge (`pick`'s merit).
-fn by_promise(fitted: &mut [(Candidate, Fit)]) {
+fn by_promise(fitted: &mut [Candidate]) {
     let merit = |f: &Fit| f.iou - STROKE_CHARGE * stroke_error(f);
-    fitted.sort_by(|a, b| stroke_agrees(&b.1).cmp(&stroke_agrees(&a.1)).then(merit(&b.1).total_cmp(&merit(&a.1))));
+    fitted.sort_by(|a, b| stroke_agrees(&b.fit).cmp(&stroke_agrees(&a.fit)).then(merit(&b.fit).total_cmp(&merit(&a.fit))));
 }
 
 /// The `REFINED` most promising screened candidates fitted in full (a screen is a tenth of a full fit, so every font
 /// is screened and only these few are fitted), first and best first, then the rest as screened. Returns the list
 /// and how many at its head are full fits.
-fn refine(string: &str, ink: &ink::LineInk, mut fitted: Vec<(Candidate, Fit)>, catalog: &catalog::Catalog, cache_dir: &Path) -> (Vec<(Candidate, Fit)>, usize) {
+fn refine(string: &str, line_id: &str, ink: &ink::LineInk, mut fitted: Vec<Candidate>, catalog: &catalog::Catalog, cache_dir: &Path) -> (Vec<Candidate>, usize) {
     by_promise(&mut fitted);
     let rest = fitted.split_off(fitted.len().min(REFINED));
-    let fonts: Vec<FontRef> = fitted.iter().map(|(c, _)| c.font.clone()).collect();
-    let mut full = fit_candidates(string, ink, &fonts, fonts.len(), catalog, cache_dir, true);
+    let fonts: Vec<FontRef> = fitted.iter().map(|c| c.font.clone()).collect();
+    let mut full = fit_candidates(string, line_id, ink, &fonts, fonts.len(), catalog, cache_dir, true);
     let n = full.len();
-    let mut rest: Vec<(Candidate, Fit)> = rest.into_iter().filter(|(c, _)| !full.iter().any(|(f, _)| f.font == c.font)).collect();
+    let mut rest: Vec<Candidate> = rest.into_iter().filter(|c| !full.iter().any(|f| f.font == c.font)).collect();
     sort_best_first(&mut rest);
     full.extend(rest);
     (full, n)
@@ -161,12 +169,12 @@ fn refine(string: &str, ink: &ink::LineInk, mut fitted: Vec<(Candidate, Fit)>, c
 /// and its 200 and 300 when the ink's stroke is under `HAIRLINE` of its height (the weight the stem picked is a
 /// guess, a face at the wrong weight scores below a worse face at the right one, and a light source is where IoU
 /// most often prefers the heavier face). Those already fitted are left out.
-fn weight_neighbours(ink: &ink::LineInk, fitted: &[(Candidate, Fit)], catalog: &catalog::Catalog) -> Vec<FontRef> {
+fn weight_neighbours(ink: &ink::LineInk, fitted: &[Candidate], catalog: &catalog::Catalog) -> Vec<FontRef> {
     let hairline = match (fit::ink_stroke(ink), ink.ink_bounds) {
         (Some(w), Some((_, t, _, b))) if b > t => w / ((b - t) as f32) < HAIRLINE,
         _ => false,
     };
-    let mut ranked: Vec<&Candidate> = fitted.iter().map(|(c, _)| c).collect();
+    let mut ranked: Vec<&Candidate> = fitted.iter().collect();
     ranked.sort_by(|a, b| b.iou.total_cmp(&a.iou));
     let mut families: Vec<&Candidate> = Vec::new();
     for c in ranked {
@@ -178,7 +186,7 @@ fn weight_neighbours(ink: &ink::LineInk, fitted: &[(Candidate, Fit)], catalog: &
     for best in families {
         for weight in catalog.weights_of(&best.font.family, best.font.source) {
             let f = FontRef { weight, ..best.font.clone() };
-            if ((weight as i32 - best.font.weight as i32).abs() == 100 || (hairline && (weight == 200 || weight == 300))) && !fitted.iter().any(|(c, _)| c.font == f) && !out.contains(&f) {
+            if ((weight as i32 - best.font.weight as i32).abs() == 100 || (hairline && (weight == 200 || weight == 300))) && !fitted.iter().any(|c| c.font == f) && !out.contains(&f) {
                 out.push(f);
             }
         }
@@ -188,11 +196,11 @@ fn weight_neighbours(ink: &ink::LineInk, fitted: &[(Candidate, Fit)], catalog: &
 
 /// The best families' other weights, screened where they are already on this Mac or in the cache (a refit runs
 /// off the runtime and downloads nothing).
-fn with_weight_neighbours(string: &str, ink: &ink::LineInk, fitted: &mut Vec<(Candidate, Fit)>, catalog: &catalog::Catalog, cache_dir: &Path) {
+fn with_weight_neighbours(string: &str, line_id: &str, ink: &ink::LineInk, fitted: &mut Vec<Candidate>, catalog: &catalog::Catalog, cache_dir: &Path) {
     let more = weight_neighbours(ink, fitted, catalog);
     if !more.is_empty() {
         let n = more.len();
-        fitted.extend(fit_candidates(string, ink, &more, n, catalog, cache_dir, false));
+        fitted.extend(fit_candidates(string, line_id, ink, &more, n, catalog, cache_dir, false));
         sort_best_first(fitted);
     }
 }
@@ -200,7 +208,7 @@ fn with_weight_neighbours(string: &str, ink: &ink::LineInk, fitted: &mut Vec<(Ca
 /// The line's result from its candidates, the first `full` of them fitted in full: the `pick` among those, moved to
 /// the front of the list (the rest stay in order). A `forced` font (the user's choice) that was fitted is chosen
 /// and the line matched and enabled whatever its score.
-fn finish_line(line: &mut TextLine, mut fitted: Vec<(Candidate, Fit)>, full: usize, any_located: bool, forced: Option<&FontRef>) {
+fn finish_line(line: &mut TextLine, mut fitted: Vec<Candidate>, full: usize, any_located: bool, forced: Option<&FontRef>) {
     if fitted.is_empty() {
         line.status = Status::Declined(if any_located { Reason::NoFit } else { Reason::Fonts });
         line.candidates.clear();
@@ -209,14 +217,14 @@ fn finish_line(line: &mut TextLine, mut fitted: Vec<(Candidate, Fit)>, full: usi
         line.enabled = false;
         return;
     }
-    let at = forced.and_then(|f| fitted.iter().position(|(c, _)| c.font == *f));
+    let at = forced.and_then(|f| fitted.iter().position(|c| c.font == *f));
     let pick = at.or_else(|| pick(&fitted[..full.min(fitted.len())]));
     if let Some(p) = pick {
         let chosen = fitted.remove(p);
         fitted.insert(0, chosen);
     }
-    let fit = fitted[0].1.clone();
-    line.candidates = fitted.into_iter().map(|(c, _)| c).collect();
+    let fit = fitted[0].fit.clone();
+    line.candidates = fitted;
     if pick.is_some() {
         line.status = Status::Matched;
         line.chosen = Some(0);
@@ -312,7 +320,7 @@ async fn run(image_id: &str, source: Arc<Image>, deps: Deps, phase: &Arc<dyn Fn(
                 let ink = ink::line_ink(&src, line.quad);
                 // the word spaces the ink shows and the reader dropped
                 let string = ink::repair_spaces(&ink, &reading.string);
-                let mut tl = TextLine { id: format!("{image}-t{n}"), quad: line.quad, string: string.clone(), class: reading.class, colour: ink.colour, status: Status::Matched, candidates: Vec::new(), chosen: None, enabled: true, fit: None };
+                let mut tl = TextLine { id: format!("{image}-t{n}"), quad: line.quad, string: string.clone(), class: reading.class, colour: ink.colour, status: Status::Matched, candidates: Vec::new(), chosen: None, enabled: true, fit: None, occluders: ink.occluders.clone() };
                 let mut hints: Vec<FontRef> = Vec::new();
                 let mut shortlist: Vec<FontRef> = Vec::new();
                 match ink::decline(&ink, &string, reading.class, line.quad) {
@@ -377,12 +385,12 @@ async fn run(image_id: &str, source: Arc<Image>, deps: Deps, phase: &Arc<dyn Fn(
         fonts.extend(hints.iter().filter(|f| !winners.contains(f)).cloned());
         let hinted = fonts.len() - lead;
         fonts.extend(shortlist.iter().filter(|f| !winners.contains(f)).cloned());
-        let (catalog, cache_dir, ink, string) = (deps.catalog.clone(), deps.cache_dir.clone(), inks[i].clone(), text_lines[i].string.clone());
+        let (catalog, cache_dir, ink, string, id) = (deps.catalog.clone(), deps.cache_dir.clone(), inks[i].clone(), text_lines[i].string.clone(), text_lines[i].id.clone());
         // every font screened (the winners and the shortlist's head share the four-family budget; the hints are on top
         // of it), the best families' other weights downloaded and screened, and the most promising fitted in full
         let (mut fitted, any_located) = crate::redraw::blocking(move || {
             let any_located = fonts.iter().any(|f| catalog.locate(f, &cache_dir).is_some());
-            Ok((fit_candidates(&string, &ink, &fonts, hinted + EAGER_FAMILIES, &catalog, &cache_dir, false), any_located))
+            Ok((fit_candidates(&string, &id, &ink, &fonts, hinted + EAGER_FAMILIES, &catalog, &cache_dir, false), any_located))
         })
         .await?;
         let more = weight_neighbours(&inks[i], &fitted, &deps.catalog);
@@ -391,12 +399,12 @@ async fn run(image_id: &str, source: Arc<Image>, deps: Deps, phase: &Arc<dyn Fn(
                 let google: Vec<FontRef> = more.iter().filter(|f| f.source == Source::Google).cloned().collect();
                 fonts_offline |= gf.ensure(&google).await.offline;
             }
-            let (catalog, cache_dir, ink, string) = (deps.catalog.clone(), deps.cache_dir.clone(), inks[i].clone(), text_lines[i].string.clone());
+            let (catalog, cache_dir, ink, string, id) = (deps.catalog.clone(), deps.cache_dir.clone(), inks[i].clone(), text_lines[i].string.clone(), text_lines[i].id.clone());
             let n = more.len();
-            fitted.extend(crate::redraw::blocking(move || Ok(fit_candidates(&string, &ink, &more, n, &catalog, &cache_dir, false))).await?);
+            fitted.extend(crate::redraw::blocking(move || Ok(fit_candidates(&string, &id, &ink, &more, n, &catalog, &cache_dir, false))).await?);
         }
-        let (catalog, cache_dir, ink, string) = (deps.catalog.clone(), deps.cache_dir.clone(), inks[i].clone(), text_lines[i].string.clone());
-        let (fitted, full) = crate::redraw::blocking(move || Ok(refine(&string, &ink, fitted, &catalog, &cache_dir))).await?;
+        let (catalog, cache_dir, ink, string, id) = (deps.catalog.clone(), deps.cache_dir.clone(), inks[i].clone(), text_lines[i].string.clone(), text_lines[i].id.clone());
+        let (fitted, full) = crate::redraw::blocking(move || Ok(refine(&string, &id, &ink, fitted, &catalog, &cache_dir))).await?;
         let line = &mut text_lines[i];
         finish_line(line, fitted, full, any_located, None);
         if line.status == Status::Matched {
@@ -457,6 +465,7 @@ pub async fn set_line(source: Arc<Image>, planned: &Planned, line_id: &str, chan
     crate::redraw::blocking(move || {
         let ink = &inks[at];
         let line = &mut plan.lines[at];
+        let id = line.id.clone();
         let was_off = line.status == Status::Off;
         let was_chosen = matches!(line.status, Status::Matched | Status::Off);
         let mut restring = false;
@@ -481,16 +490,16 @@ pub async fn set_line(source: Arc<Image>, planned: &Planned, line_id: &str, chan
                 fonts = fresh.unwrap_or_else(|| fresh_list(&catalog, ink, &line.string));
             }
             let any_located = fonts.iter().any(|f| catalog.locate(f, &cache_dir).is_some());
-            let mut fitted = fit_candidates(&line.string, ink, &fonts, EAGER_FAMILIES, &catalog, &cache_dir, false);
-            with_weight_neighbours(&line.string, ink, &mut fitted, &catalog, &cache_dir);
+            let mut fitted = fit_candidates(&line.string, &id, ink, &fonts, EAGER_FAMILIES, &catalog, &cache_dir, false);
+            with_weight_neighbours(&line.string, &id, ink, &mut fitted, &catalog, &cache_dir);
             // the font the line stands on is fitted in full whatever its promise
-            if let Some(k) = keep.as_ref().and_then(|k| fitted.iter().position(|(c, _)| c.font == *k)) {
+            if let Some(k) = keep.as_ref().and_then(|k| fitted.iter().position(|c| c.font == *k)) {
                 let kept = fitted.remove(k);
-                if let Some(fit) = refit_one(&line.string, ink, &kept.0.font, &catalog, &cache_dir) {
-                    fitted.push((Candidate { font: kept.0.font, iou: fit.iou }, fit));
+                if let Some(c) = refit_one(&line.string, &id, ink, &kept.font, &catalog, &cache_dir) {
+                    fitted.push(c);
                 }
             }
-            let (fitted, full) = refine(&line.string, ink, fitted, &catalog, &cache_dir);
+            let (fitted, full) = refine(&line.string, &id, ink, fitted, &catalog, &cache_dir);
             finish_line(line, fitted, full, any_located, keep.as_ref());
             // a line the user switched off stays off, unless this call asks for a font or for it on
             if was_off && change.enabled != Some(true) && change.font.is_none() && line.status == Status::Matched {
@@ -499,12 +508,12 @@ pub async fn set_line(source: Arc<Image>, planned: &Planned, line_id: &str, chan
             }
         } else if let Some(f) = &change.font {
             // the string stands: only the asked-for font is fitted, the others keep their scores
-            if let Some(fit) = refit_one(&line.string, ink, f, &catalog, &cache_dir) {
+            if let Some(c) = refit_one(&line.string, &id, ink, f, &catalog, &cache_dir) {
                 line.candidates.retain(|c| c.font != *f);
-                line.candidates.push(Candidate { font: f.clone(), iou: fit.iou });
+                line.fit = Some(c.fit.clone());
+                line.candidates.push(c);
                 line.candidates.sort_by(|a, b| b.iou.total_cmp(&a.iou));
                 line.chosen = line.candidates.iter().position(|c| c.font == *f);
-                line.fit = Some(fit);
                 line.status = Status::Matched;
                 line.enabled = true;
             }
@@ -518,9 +527,10 @@ pub async fn set_line(source: Arc<Image>, planned: &Planned, line_id: &str, chan
                 (true, None) => {
                     // forcing a declined line on: its best candidate, if it has one
                     if let Some(first) = line.candidates.first().map(|c| c.font.clone()) {
-                        if let Some(fit) = refit_one(&line.string, ink, &first, &catalog, &cache_dir) {
+                        if let Some(c) = refit_one(&line.string, &id, ink, &first, &catalog, &cache_dir) {
                             line.chosen = Some(0);
-                            line.fit = Some(fit);
+                            line.fit = Some(c.fit.clone());
+                            line.candidates[0] = c;
                             line.status = Status::Matched;
                             line.enabled = true;
                         }
@@ -587,8 +597,8 @@ fn fresh_list(catalog: &catalog::Catalog, ink: &ink::LineInk, string: &str) -> V
     fonts
 }
 
-fn refit_one(string: &str, ink: &ink::LineInk, font: &FontRef, catalog: &catalog::Catalog, cache_dir: &Path) -> Option<Fit> {
-    fit_candidates(string, ink, std::slice::from_ref(font), 1, catalog, cache_dir, true).into_iter().next().map(|(_, f)| f)
+fn refit_one(string: &str, line_id: &str, ink: &ink::LineInk, font: &FontRef, catalog: &catalog::Catalog, cache_dir: &Path) -> Option<Candidate> {
+    fit_candidates(string, line_id, ink, std::slice::from_ref(font), 1, catalog, cache_dir, true).into_iter().next()
 }
 
 
@@ -596,18 +606,18 @@ fn refit_one(string: &str, ink: &ink::LineInk, font: &FontRef, catalog: &catalog
 mod tests {
     use super::*;
 
-    fn fitted(family: &str, weight: u16, iou: f32, stroke: f32) -> (Candidate, Fit) {
+    fn fitted(family: &str, weight: u16, iou: f32, stroke: f32) -> Candidate {
         let font = FontRef { family: family.into(), weight, italic: false, source: Source::Google };
-        (Candidate { font, iou }, Fit { size: 20.0, baseline: 30.0, x: 0.0, tracking: 0.0, nudges: Vec::new(), iou, stroke })
+        Candidate { font, iou, stroke, fit: Fit { size: 20.0, baseline: 30.0, x: 0.0, tracking: 0.0, nudges: Vec::new(), iou, stroke }, path: String::new(), text: String::new() }
     }
 
     #[test]
     fn a_fit_of_the_wrong_weight_is_not_acceptable_whatever_its_iou() {
-        assert!(acceptable(&fitted("A", 400, 0.7, 1.2).1));
-        assert!(!acceptable(&fitted("A", 400, 0.9, 1.5).1), "50 % heavier than the ink");
-        assert!(!acceptable(&fitted("A", 400, 0.9, 0.6).1), "40 % lighter");
-        assert!(!acceptable(&fitted("A", 400, FIT_ACCEPT - 0.01, 1.0).1));
-        assert!(acceptable(&fitted("A", 400, 0.7, 0.0).1), "an unmeasured stroke is not held against a fit");
+        assert!(acceptable(&fitted("A", 400, 0.7, 1.2).fit));
+        assert!(!acceptable(&fitted("A", 400, 0.9, 1.5).fit), "50 % heavier than the ink");
+        assert!(!acceptable(&fitted("A", 400, 0.9, 0.6).fit), "40 % lighter");
+        assert!(!acceptable(&fitted("A", 400, FIT_ACCEPT - 0.01, 1.0).fit));
+        assert!(acceptable(&fitted("A", 400, 0.7, 0.0).fit), "an unmeasured stroke is not held against a fit");
     }
 
     #[test]
@@ -627,7 +637,7 @@ mod tests {
 
     #[test]
     fn the_chosen_candidate_leads_the_list_and_the_line_is_declined_when_none_is_acceptable() {
-        let mut line = TextLine { id: "i-t0".into(), quad: [[0.0; 2]; 4], string: "AB".into(), class: Class::Type, colour: [0; 3], status: Status::Matched, candidates: Vec::new(), chosen: None, enabled: true, fit: None };
+        let mut line = TextLine { id: "i-t0".into(), quad: [[0.0; 2]; 4], string: "AB".into(), class: Class::Type, colour: [0; 3], status: Status::Matched, candidates: Vec::new(), chosen: None, enabled: true, fit: None, occluders: Vec::new() };
         finish_line(&mut line, vec![fitted("K", 500, 0.80, 1.30), fitted("K", 300, 0.76, 1.02)], 2, true, None);
         assert_eq!((line.status, line.chosen, line.candidates[0].font.weight), (Status::Matched, Some(0), 300));
         assert_eq!(line.fit.as_ref().unwrap().stroke, 1.02);
@@ -661,7 +671,7 @@ mod tests {
                 }
             }
             let mask = coverage.iter().map(|c| *c >= 0.5).collect();
-            ink::LineInk { left: 0, top: 0, width: w, height: h, coverage, mask, backdrop: [255; 3], colour: [0; 3], spread: 0.0, segments: vec![(10, 14), (25, 29)], ink_bounds: Some((10, 5, 29, 35)) }
+            ink::LineInk { left: 0, top: 0, width: w, height: h, coverage, mask, backdrop: [255; 3], colour: [0; 3], spread: 0.0, segments: vec![(10, 14), (25, 29)], ink_bounds: Some((10, 5, 29, 35)), occluders: Vec::new() }
         };
         let list = vec![fitted("K", 500, 0.7, 1.3)];
         let weights = |stroke: f32| -> Vec<u16> { weight_neighbours(&ink_of(stroke), &list, &cat).iter().map(|f| f.weight).collect() };

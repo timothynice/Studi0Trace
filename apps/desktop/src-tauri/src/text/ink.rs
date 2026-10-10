@@ -28,7 +28,17 @@ pub struct LineInk {
     pub spread: f32,
     pub segments: Vec<(u32, u32)>,
     pub ink_bounds: Option<(u32, u32, u32, u32)>,
+    /// The colours of what lay over the letters: the pixels inside the characters' boxes that the off-colour rule
+    /// kept out of the ink, in 8-connected blobs of at least `OCCLUDER_MIN_PX`, each blob's median colour, those
+    /// within `OCCLUDER_MERGE` ΔE of one already listed merged into it. Usually empty.
+    pub occluders: Vec<[u8; 3]>,
 }
+
+/// A blob of foreign pixels inside the characters' boxes under this many is noise (an anti-aliased fringe), not
+/// something that lay over the letters.
+pub const OCCLUDER_MIN_PX: usize = 12;
+/// Occluder colours this close (ΔE) are one.
+const OCCLUDER_MERGE: f32 = 6.0;
 
 fn srgb_to_linear(v: u8) -> f32 {
     let c = v as f32 / 255.0;
@@ -77,7 +87,7 @@ pub fn quad_angle_deg(quad: [[f32; 2]; 4]) -> f32 {
 }
 
 pub fn line_ink(source: &Source, quad: [[f32; 2]; 4]) -> LineInk {
-    let empty = LineInk { left: 0, top: 0, width: 0, height: 0, coverage: Vec::new(), mask: Vec::new(), backdrop: [0, 0, 0], colour: [0, 0, 0], spread: 0.0, segments: Vec::new(), ink_bounds: None };
+    let empty = LineInk { left: 0, top: 0, width: 0, height: 0, coverage: Vec::new(), mask: Vec::new(), backdrop: [0, 0, 0], colour: [0, 0, 0], spread: 0.0, segments: Vec::new(), ink_bounds: None, occluders: Vec::new() };
     if source.width == 0 || source.height == 0 || source.rgba.len() != source.width as usize * source.height as usize * 4 {
         return empty;
     }
@@ -192,7 +202,65 @@ pub fn line_ink(source: &Source, quad: [[f32; 2]; 4]) -> LineInk {
     let linked: Vec<bool> = coverage.iter().map(|&c| c >= SEGMENT_COVERAGE).collect();
     let segments = segments_of(&mask, &linked, width, height);
     let ink_bounds = bounds_of(&mask, width, height);
-    LineInk { left, top, width, height, coverage, mask, backdrop, colour, spread, segments, ink_bounds }
+    let occluders = occluders_of(&foreign, &segments, ink_bounds, width, height, |x, y| px(left + x, top + y));
+    LineInk { left, top, width, height, coverage, mask, backdrop, colour, spread, segments, ink_bounds, occluders }
+}
+
+/// The colours that lay over the letters: `foreign` pixels (off the backdrop-to-ink line) inside a character's box,
+/// each segment's x range by the ink's y range, grown 1 px, grouped into 8-connected blobs. A blob of at least
+/// `OCCLUDER_MIN_PX` gives its median colour; a colour within `OCCLUDER_MERGE` ΔE of one already listed is
+/// dropped (the first is kept). In blob order.
+fn occluders_of(foreign: &[bool], segments: &[(u32, u32)], ink_bounds: Option<(u32, u32, u32, u32)>, width: u32, height: u32, px: impl Fn(u32, u32) -> [u8; 3]) -> Vec<[u8; 3]> {
+    let Some((_, top, _, bottom)) = ink_bounds else { return Vec::new() };
+    let (y0, y1) = (top.saturating_sub(1), (bottom + 1).min(height));
+    let inside = |x: u32, y: u32| y >= y0 && y < y1 && segments.iter().any(|&(lo, hi)| x + 1 >= lo && x < hi + 1);
+    let in_box: Vec<bool> = (0..foreign.len()).map(|i| foreign[i] && inside((i as u32) % width, (i as u32) / width)).collect();
+    let mut out: Vec<[u8; 3]> = Vec::new();
+    for blob in blobs(&in_box, width, height) {
+        if blob.len() < OCCLUDER_MIN_PX {
+            continue;
+        }
+        let colours: Vec<[u8; 3]> = blob.iter().map(|&i| px((i as u32) % width, (i as u32) / width)).collect();
+        let c = median_colour(&colours);
+        if !out.iter().any(|&o| delta_e(o, c) < OCCLUDER_MERGE) {
+            out.push(c);
+        }
+    }
+    out
+}
+
+/// The 8-connected components of `set`, each as its pixel indices, in raster order of their first pixel.
+fn blobs(set: &[bool], width: u32, height: u32) -> Vec<Vec<usize>> {
+    let mut seen = vec![false; set.len()];
+    let mut out = Vec::new();
+    let mut stack = Vec::new();
+    for start in 0..set.len() {
+        if !set[start] || seen[start] {
+            continue;
+        }
+        let mut blob = Vec::new();
+        stack.push(start);
+        seen[start] = true;
+        while let Some(i) = stack.pop() {
+            blob.push(i);
+            let (x, y) = ((i as u32) % width, (i as u32) / width);
+            for dy in -1i64..=1 {
+                for dx in -1i64..=1 {
+                    let (nx, ny) = (x as i64 + dx, y as i64 + dy);
+                    if nx < 0 || ny < 0 || nx >= width as i64 || ny >= height as i64 {
+                        continue;
+                    }
+                    let j = (ny as u32 * width + nx as u32) as usize;
+                    if set[j] && !seen[j] {
+                        seen[j] = true;
+                        stack.push(j);
+                    }
+                }
+            }
+        }
+        out.push(blob);
+    }
+    out
 }
 
 /// The spread of a set of colours as a range, in ΔE: the 90th minus the 10th percentile of their positions along
@@ -298,35 +366,13 @@ fn bounds_of(mask: &[bool], width: u32, height: u32) -> Option<(u32, u32, u32, u
 /// Connected components (8-connected) of `linked` as the x ranges of their `mask` pixels, merged where the ranges
 /// overlap. A component with no mask pixel is not a segment.
 fn segments_of(mask: &[bool], linked: &[bool], width: u32, height: u32) -> Vec<(u32, u32)> {
-    let mut seen = vec![false; linked.len()];
     let mut ranges: Vec<(u32, u32)> = Vec::new();
-    let mut stack = Vec::new();
-    for start in 0..linked.len() {
-        if !linked[start] || seen[start] {
-            continue;
-        }
+    for blob in blobs(linked, width, height) {
         let (mut lo, mut hi) = (u32::MAX, 0u32);
-        stack.push(start);
-        seen[start] = true;
-        while let Some(i) = stack.pop() {
-            let (x, y) = ((i as u32) % width, (i as u32) / width);
-            if mask[i] {
-                lo = lo.min(x);
-                hi = hi.max(x + 1);
-            }
-            for dy in -1i64..=1 {
-                for dx in -1i64..=1 {
-                    let (nx, ny) = (x as i64 + dx, y as i64 + dy);
-                    if nx < 0 || ny < 0 || nx >= width as i64 || ny >= height as i64 {
-                        continue;
-                    }
-                    let j = (ny as u32 * width + nx as u32) as usize;
-                    if linked[j] && !seen[j] {
-                        seen[j] = true;
-                        stack.push(j);
-                    }
-                }
-            }
+        for i in blob.into_iter().filter(|&i| mask[i]) {
+            let x = (i as u32) % width;
+            lo = lo.min(x);
+            hi = hi.max(x + 1);
         }
         if lo < hi {
             ranges.push((lo, hi));
@@ -500,6 +546,21 @@ mod tests {
         paint(&mut src, 60, 28, 6, 16, [0, 0, 0]);
         paint(&mut src, 60, 20, 6, 4, [0, 0, 0]);
         (src, [[15.0, 18.0], [75.0, 18.0], [75.0, 46.0], [15.0, 46.0]])
+    }
+
+    #[test]
+    fn a_bar_of_another_colour_across_the_letters_is_an_occluder_and_a_plain_line_has_none() {
+        let (src, quad) = three_letters();
+        assert!(line_ink(&src, quad).occluders.is_empty());
+        // a gold bar 4 px tall across the middle of the three bars
+        let mut g = src.clone();
+        paint(&mut g, 18, 30, 52, 4, [212, 160, 23]);
+        let ink = line_ink(&g, quad);
+        assert_eq!(ink.occluders.len(), 1, "{:?}", ink.occluders);
+        let [r, gg, b] = ink.occluders[0];
+        assert!(delta_e([r, gg, b], [212, 160, 23]) < 6.0);
+        // the bar's pixels are not ink: the segments are still three
+        assert_eq!(ink.segments.len(), 3);
     }
 
     #[test]

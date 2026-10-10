@@ -22,7 +22,7 @@ fn plan(font: &FontRef, enabled: bool, status: Status) -> TextPlan {
     TextPlan {
         image: "img".into(),
         reader: ReaderKind::Vision,
-        lines: vec![TextLine { id: "img-t0".into(), quad: [[8.0, 20.0], [220.0, 20.0], [220.0, 70.0], [8.0, 70.0]], string: "EST. 2026".into(), class: Class::Type, colour: [24, 28, 44], status, candidates: vec![Candidate { font: font.clone(), iou: 0.95 }], chosen: Some(0), enabled, fit: Some(fit) }],
+        lines: vec![TextLine { id: "img-t0".into(), quad: [[8.0, 20.0], [220.0, 20.0], [220.0, 70.0], [8.0, 70.0]], string: "EST. 2026".into(), class: Class::Type, colour: [24, 28, 44], status, candidates: vec![Candidate { font: font.clone(), iou: 0.95, stroke: 1.0, fit: fit.clone(), path: String::new(), text: String::new() }], chosen: Some(0), enabled, fit: Some(fit), occluders: Vec::new() }],
         ai_error: None,
         fonts_offline: false,
     }
@@ -59,6 +59,11 @@ fn one_path_per_line_in_the_ink_colour_with_hidden_text_when_asked() {
     assert_eq!(xs.len(), 9);
     let want = format!("<text x=\"{}\" y=\"60\" font-family=\"Montserrat\" font-size=\"40\" fill=\"none\" pointer-events=\"none\" data-line=\"img-t0\">EST. 2026</text>", xs.join(" "));
     assert!(with.contains(&want), "{with}\nwanted {want}");
+    // the per-candidate helpers write exactly what the group does
+    let fit = plan(&font, true, Status::Matched).lines[0].fit.clone().unwrap();
+    assert_eq!(studi0trace_desktop::text::compose::candidate_text("img-t0", "EST. 2026", "Montserrat", &shaped, &fit), want);
+    let d = studi0trace_desktop::text::compose::candidate_path(&shaped, &fit);
+    assert!(with.contains(&format!("<path d=\"{d}\" fill=\"#181c2c\" data-line=\"img-t0\"/>")), "{with}");
     let without = text_group(&plan(&font, true, Status::Matched), false, &cat, &dir);
     assert!(!without.contains("<text"));
     assert_eq!(text_group(&plan(&font, false, Status::Off), true, &cat, &dir), "<g id=\"text\"></g>");
@@ -115,6 +120,16 @@ fn plans_a_fixture_line_end_to_end_and_an_edit_recomposes() {
     assert_eq!(line.status, Status::Matched, "{:?}", line);
     assert_eq!(line.candidates[0].font, font);
     assert!(line.fit.as_ref().unwrap().iou > 0.85);
+    // every candidate carries its own fit, outline and hidden text, and the group's path is the chosen one's
+    assert!(!line.candidates.is_empty());
+    for c in &line.candidates {
+        assert!(c.path.starts_with('M'), "{}", c.path);
+        assert!(c.text.contains(">EST. 2026</text>") && c.text.contains("data-line=\"img-t0\""), "{}", c.text);
+        assert_eq!(c.fit.iou, c.iou);
+    }
+    assert!(planned.group.contains(&format!("<path d=\"{}\"", line.candidates[line.chosen.unwrap()].path)));
+    assert_eq!(line.candidates[line.chosen.unwrap()].fit, *line.fit.as_ref().unwrap());
+    assert!(line.occluders.is_empty());
     assert!(planned.painted.is_some() && planned.group.contains("<path "));
     // painted out: the ink pixels are gone
     let painted = Img::decode(planned.painted.as_ref().unwrap()).unwrap();

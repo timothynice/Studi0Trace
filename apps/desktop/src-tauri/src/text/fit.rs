@@ -473,7 +473,7 @@ fn reduced(ink: &LineInk, f: u32) -> LineInk {
     let up = |v: u32| (ink.left + v).div_ceil(f) - left;
     let segments = ink.segments.iter().map(|&(l, r)| (down(l), up(r))).collect();
     let ink_bounds = ink.ink_bounds.map(|(l, t, r, b)| (down(l), (ink.top + t) / f - top, up(r), (ink.top + b).div_ceil(f) - top));
-    LineInk { left, top, width, height, coverage, mask, backdrop: ink.backdrop, colour: ink.colour, spread: ink.spread, segments, ink_bounds }
+    LineInk { left, top, width, height, coverage, mask, backdrop: ink.backdrop, colour: ink.colour, spread: ink.spread, segments, ink_bounds, occluders: Vec::new() }
 }
 
 fn enlarged(fit: Fit, f: u32) -> Fit {
@@ -655,7 +655,7 @@ mod tests {
 
     #[test]
     fn a_linear_half_is_an_encoded_four_fifths_and_the_ends_stay() {
-        let ink = LineInk { left: 0, top: 0, width: 3, height: 1, coverage: vec![0.0, 0.79, 1.0], mask: vec![false, true, true], backdrop: [255; 3], colour: [0; 3], spread: 0.0, segments: Vec::new(), ink_bounds: None };
+        let ink = LineInk { left: 0, top: 0, width: 3, height: 1, coverage: vec![0.0, 0.79, 1.0], mask: vec![false, true, true], backdrop: [255; 3], colour: [0; 3], spread: 0.0, segments: Vec::new(), ink_bounds: None, occluders: Vec::new() };
         let c = encoded_coverage(&ink);
         // black on white: linear light 0.79 of the way to black is the encoded mid-grey, 0.5 covered
         assert!((c[1] - 0.5).abs() < 0.02, "{}", c[1]);
@@ -714,7 +714,7 @@ mod tests {
         use super::super::glyphs::Font;
         let font = Font::load(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/text/fonts").join(file), 0).unwrap();
         let shaped = font.shape(string);
-        let page = LineInk { left: 0, top: 0, width: w, height: h, coverage: Vec::new(), mask: Vec::new(), backdrop: [255; 3], colour: [0; 3], spread: 0.0, segments: Vec::new(), ink_bounds: None };
+        let page = LineInk { left: 0, top: 0, width: w, height: h, coverage: Vec::new(), mask: Vec::new(), backdrop: [255; 3], colour: [0; 3], spread: 0.0, segments: Vec::new(), ink_bounds: None, occluders: Vec::new() };
         let cov = render_coverage(&shaped, truth, &page);
         let rgba: Vec<u8> = cov.iter().flat_map(|c| { let v = (255.0 * (1.0 - c)).round() as u8; [v, v, v, 255] }).collect();
         let src = crate::redraw::Source { rgba, width: w, height: h };
@@ -817,7 +817,7 @@ mod tests {
                 coverage[y * 8 + x] = 1.0;
             }
         }
-        let ink = LineInk { left: 10, top: 6, width: 8, height: 4, coverage, mask: Vec::new(), backdrop: [255; 3], colour: [0; 3], spread: 0.0, segments: vec![(2, 6)], ink_bounds: Some((2, 0, 6, 4)) };
+        let ink = LineInk { left: 10, top: 6, width: 8, height: 4, coverage, mask: Vec::new(), backdrop: [255; 3], colour: [0; 3], spread: 0.0, segments: vec![(2, 6)], ink_bounds: Some((2, 0, 6, 4)), occluders: Vec::new() };
         let small = reduced(&ink, 2);
         assert_eq!((small.left, small.top, small.width, small.height), (5, 3, 4, 2));
         // source columns 12..16 are reduced columns 6..8, the box's 1..3
