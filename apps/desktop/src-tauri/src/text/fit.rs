@@ -223,18 +223,19 @@ fn descend(shaped: &Shaped, ink: &LineInk, goal: &Goal, fit: &mut Fit, steps: &[
     fit.iou = score(shaped, fit, ink, goal, false);
 }
 
-/// Per-glyph nudges, 0.25 px steps up to NUDGE_MAX, kept only where the whole line's IoU rises. The first glyph is
-/// never nudged: it is where `x` is, so a shift of the whole line stays in `x` and the nudges are what is left.
+/// Per-glyph nudges, 0.25 px steps up to NUDGE_MAX either side of where the glyph is (the tracking model's place,
+/// or the ink layout's), kept only where the whole line's IoU rises. The first glyph is never nudged: it is where `x` is, so a shift of the whole line stays in `x` and the nudges are what is left.
 fn nudge(shaped: &Shaped, ink: &LineInk, goal: &Goal, fit: &mut Fit) {
     for i in 1..shaped.glyphs.len() {
         if shaped.glyphs[i].path.is_none() {
             continue;
         }
         let mut best = fit.clone();
+        let base = fit.nudges[i];
         let mut d = -NUDGE_MAX;
         while d <= NUDGE_MAX + 1e-6 {
             let mut trial = fit.clone();
-            trial.nudges[i] = d;
+            trial.nudges[i] = base + d;
             trial.iou = score(shaped, &trial, ink, goal, false);
             if trial.iou > best.iou + NUDGE_GAIN {
                 best = trial;
@@ -243,6 +244,78 @@ fn nudge(shaped: &Shaped, ink: &LineInk, goal: &Goal, fit: &mut Fit) {
         }
         *fit = best;
     }
+}
+
+/// Each glyph's ink segment, when the ink's segments number the string's outlined, non-space glyphs one to one
+/// (in order); None otherwise (letters that touch, a stray mark), and the tracking model alone lays the line out.
+fn glyph_segments(shaped: &Shaped, ink: &LineInk) -> Option<Vec<Option<(u32, u32)>>> {
+    let solid = shaped.glyphs.iter().filter(|g| g.path.is_some() && !g.ch.is_whitespace()).count();
+    if solid == 0 || solid != ink.segments.len() {
+        return None;
+    }
+    let mut next = ink.segments.iter();
+    Some(shaped.glyphs.iter().map(|g| if g.path.is_some() && !g.ch.is_whitespace() { next.next().copied() } else { None }).collect())
+}
+
+/// The fit that puts each glyph's outline centred on its ink segment at `size`, shifted by `dx`: AI-made logos
+/// space letters unevenly and their word gaps are wider than their letter gaps, which one tracking value cannot
+/// model and ±2 px nudges cannot absorb. The centre, not the left edge, is matched, so a candidate a little
+/// heavier or lighter than the ink still sits on it. It is written in the tracking model's terms: `x` and
+/// `tracking` are the least-squares line through the glyphs' places (so `tracking` is the mean gap) and each
+/// glyph's nudge is what is left.
+fn ink_layout(shaped: &Shaped, ink: &LineInk, segs: &[Option<(u32, u32)>], size: f32, baseline: f32, dx: f32) -> Fit {
+    let n = shaped.glyphs.len();
+    // each placed glyph: (index, origin the ink asks for, origin the tracking model puts it at with x = tracking = 0)
+    let mut placed: Vec<(f32, f32, f32)> = Vec::new();
+    let mut run = 0f32;
+    for (i, g) in shaped.glyphs.iter().enumerate() {
+        let model = run + g.x_offset * size;
+        if let (Some((l, r)), Some(path)) = (segs[i], &g.path) {
+            let b = path.bounds();
+            let centre = ink.left as f32 + (l + r) as f32 / 2.0 + dx;
+            placed.push((i as f32, centre - (b.left() + b.right()) / 2.0 * size, model));
+        }
+        run += g.advance * size;
+    }
+    let m = placed.len() as f32;
+    let (mi, mr) = (placed.iter().map(|p| p.0).sum::<f32>() / m, placed.iter().map(|p| p.1 - p.2).sum::<f32>() / m);
+    let var: f32 = placed.iter().map(|p| (p.0 - mi).powi(2)).sum();
+    let tracking = if var > 0.0 { placed.iter().map(|p| (p.0 - mi) * (p.1 - p.2 - mr)).sum::<f32>() / var } else { 0.0 };
+    let x = mr - tracking * mi;
+    let mut nudges = vec![0.0; n];
+    for &(i, want, model) in &placed {
+        nudges[i as usize] = want - (x + model + tracking * i);
+    }
+    Fit { size, baseline, x, tracking, nudges, iou: 0.0 }
+}
+
+/// Coordinate descent on size, baseline and the shift of an ink layout.
+fn descend_ink(shaped: &Shaped, ink: &LineInk, goal: &Goal, segs: &[Option<(u32, u32)>], p: &mut [f32; 3], steps: &[f32], coarse: bool) -> f32 {
+    let mut current = score(shaped, &ink_layout(shaped, ink, segs, p[0], p[1], p[2]), ink, goal, coarse);
+    for &step in steps {
+        loop {
+            let mut improved = false;
+            for k in 0..3 {
+                for dir in [-1.0f32, 1.0] {
+                    let mut t = *p;
+                    t[k] += step * dir * if k == 0 { 0.5 } else { 1.0 };
+                    if t[0] <= 1.0 {
+                        continue;
+                    }
+                    let s = score(shaped, &ink_layout(shaped, ink, segs, t[0], t[1], t[2]), ink, goal, coarse);
+                    if s > current + 1e-5 {
+                        *p = t;
+                        current = s;
+                        improved = true;
+                    }
+                }
+            }
+            if !improved {
+                break;
+            }
+        }
+    }
+    current
 }
 
 /// The initial guess from the ink bounds, then coordinate descent on (size, baseline, x, tracking), then per-glyph
@@ -289,13 +362,35 @@ pub fn fit_line(shaped: &Shaped, ink: &LineInk, all_caps: bool) -> Option<Fit> {
             best = Some(fit);
         }
     }
-    let mut fit = best?;
-    descend(shaped, ink, &goal, &mut fit, &[0.25, 0.1], false);
-    for _ in 0..2 {
-        nudge(shaped, ink, &goal, &mut fit);
-        descend(shaped, ink, &goal, &mut fit, &[0.25, 0.1], false);
+    let mut starts = vec![best?];
+    // the ink layout, when every glyph has its segment, from the same guesses; both are polished and the better
+    // kept (on evenly spaced text the tracking model's uniform spacing is the truth, and the segments' whole-pixel
+    // extents only add noise to it)
+    if let Some(segs) = glyph_segments(shaped, ink) {
+        let mut laid: Option<Fit> = None;
+        for scale in [1.0f32, 0.96, 1.04] {
+            let size = ink_h / em_h * scale;
+            let mut p = [size, (ink.top + b) as f32 - depth * size, 0.0];
+            descend_ink(shaped, ink, &goal, &segs, &mut p, &[2.0, 1.0, 0.5], true);
+            let iou = descend_ink(shaped, ink, &goal, &segs, &mut p, &[0.5, 0.25], false);
+            if laid.as_ref().is_none_or(|f| iou > f.iou) {
+                laid = Some(Fit { iou, ..ink_layout(shaped, ink, &segs, p[0], p[1], p[2]) });
+            }
+        }
+        starts.extend(laid);
     }
-    Some(fit)
+    let mut out: Option<Fit> = None;
+    for mut fit in starts {
+        descend(shaped, ink, &goal, &mut fit, &[0.25, 0.1], false);
+        for _ in 0..2 {
+            nudge(shaped, ink, &goal, &mut fit);
+            descend(shaped, ink, &goal, &mut fit, &[0.25, 0.1], false);
+        }
+        if out.as_ref().is_none_or(|o| fit.iou > o.iou) {
+            out = Some(fit);
+        }
+    }
+    out
 }
 
 fn fmt(v: f32) -> String {
@@ -362,6 +457,42 @@ mod tests {
         let shaped = Shaped { glyphs: vec![ShapedGlyph { ch: 'I', path: pb.finish(), advance: 0.6, x_offset: 0.0 }], cap_height: 0.7, x_height: 0.5 };
         let fit = Fit { size: 10.0, baseline: 20.0, x: 5.0, tracking: 0.0, nudges: vec![0.0], iou: 1.0 };
         assert_eq!(path_data(&shaped, &fit), "M5 20L10 20L10 13L5 13Z");
+    }
+
+    /// `string` in the fixture Montserrat drawn black on white at `truth` (nudges included), with the quad Vision
+    /// would give, through the real ink reader.
+    pub(super) fn drawn(string: &str, truth: &Fit, w: u32, h: u32) -> (super::super::glyphs::Font, LineInk) {
+        use super::super::glyphs::Font;
+        let font = Font::load(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/text/fonts/Montserrat-Regular.ttf"), 0).unwrap();
+        let shaped = font.shape(string);
+        let page = LineInk { left: 0, top: 0, width: w, height: h, coverage: Vec::new(), mask: Vec::new(), backdrop: [255; 3], colour: [0; 3], spread: 0.0, segments: Vec::new(), ink_bounds: None };
+        let cov = render_coverage(&shaped, truth, &page);
+        let rgba: Vec<u8> = cov.iter().flat_map(|c| { let v = (255.0 * (1.0 - c)).round() as u8; [v, v, v, 255] }).collect();
+        let src = crate::redraw::Source { rgba, width: w, height: h };
+        let top = truth.baseline - truth.size * shaped.cap_height - 4.0;
+        let quad = [[4.0, top], [w as f32 - 4.0, top], [w as f32 - 4.0, truth.baseline + 4.0], [4.0, truth.baseline + 4.0]];
+        (font, super::super::ink::line_ink(&src, quad))
+    }
+
+    #[test]
+    fn a_line_with_uneven_letter_gaps_and_a_wide_word_gap_is_laid_out_from_its_ink() {
+        // tracked 6 px, the word gap 14 px wider than the tracking makes it, and letters a few px off either way:
+        // what an AI-made tagline looks like, and what one tracking value with ±2 px nudges cannot follow
+        let string = "LIFE IS GOOD";
+        let mut nudges = vec![0.0, 3.0, -2.5, 3.5, 0.0, 14.0, 17.5, 0.0, 28.0, 25.0, 31.5, 28.0];
+        nudges[4] = 0.0;
+        let truth = Fit { size: 40.0, baseline: 60.0, x: 10.0, tracking: 6.0, nudges, iou: 1.0 };
+        let (font, ink) = drawn(string, &truth, 560, 80);
+        let shaped = font.shape(string);
+        assert_eq!(ink.segments.len(), 10);
+        let fit = fit_line(&shaped, &ink, true).unwrap();
+        assert!(fit.iou > 0.9, "iou {}", fit.iou);
+        assert!((fit.size - 40.0).abs() < 0.8, "size {}", fit.size);
+        for (i, (a, b)) in origins(&shaped, &fit).iter().zip(origins(&shaped, &truth)).enumerate() {
+            if shaped.glyphs[i].path.is_some() {
+                assert!((a - b).abs() < 0.75, "glyph {i} at {a}, drawn at {b}");
+            }
+        }
     }
 
     #[test]

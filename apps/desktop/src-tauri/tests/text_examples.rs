@@ -1,14 +1,15 @@
 //! By hand: `STUDI0TRACE_TEXT_EXAMPLES=<dir with 1.png 2.png 3.png> cargo test --release --test text_examples -- --ignored --nocapture`
 //! plans each image with Vision and the real catalogue (Google Fonts fetched into <dir>/fonts), writes
 //! <dir>/out/N-plan.json, N-painted.png and N-text.svg, and renders the text group over the painted image to
-//! N-check.png (over white: N-text.png) for a look. Nothing of this is in git.
+//! N-check.png (over white: N-text.png) for a look. With `STUDI0TRACE_TEXT_FORCE=1` every declined line that has a
+//! candidate is also forced on, to N-forced-plan.json and N-forced-check.png. Nothing of this is in git.
 use std::path::PathBuf;
 use std::sync::Arc;
 use studi0trace_desktop::redraw::Source;
 use studi0trace_desktop::text::catalog::Catalog;
 use studi0trace_desktop::text::fonts::GoogleFonts;
 use studi0trace_desktop::text::vision::Vision;
-use studi0trace_desktop::text::{plan, Deps};
+use studi0trace_desktop::text::{plan, set_line, Deps, LineChange};
 
 fn png(rgba: Vec<u8>, w: u32, h: u32) -> Vec<u8> {
     let mut out = std::io::Cursor::new(Vec::new());
@@ -55,5 +56,24 @@ fn plans_the_example_images() {
         let mut base = base;
         image::imageops::overlay(&mut base, &image::RgbaImage::from_raw(source.width, source.height, top).unwrap(), 0, 0);
         std::fs::write(out.join(format!("{n}-check.png")), png(base.into_raw(), source.width, source.height)).unwrap();
+        // for a look at what the fit drew on the lines it declined: every declined line with a candidate forced on
+        // (its best candidate), to N-forced-plan.json and N-forced-check.png
+        if std::env::var("STUDI0TRACE_TEXT_FORCE").is_ok() {
+            let mut cur = planned;
+            let ids: Vec<String> = cur.plan.lines.iter().filter(|l| l.status != studi0trace_desktop::text::Status::Matched && !l.candidates.is_empty()).map(|l| l.id.clone()).collect();
+            for id in ids {
+                let d = Deps { finder: Arc::new(Vision), reader: None, catalog: catalog.clone(), fonts: Some(fonts.clone()), cache_dir: cache.clone(), hidden_text: false };
+                cur = tauri::async_runtime::block_on(set_line(source.clone(), &cur, &id, LineChange { enabled: Some(true), ..Default::default() }, d)).unwrap();
+            }
+            std::fs::write(out.join(format!("{n}-forced-plan.json")), serde_json::to_string_pretty(&cur.plan).unwrap()).unwrap();
+            let overlay = format!("<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 {} {}\">{}</svg>", source.width, source.height, cur.group);
+            let top = studi0trace_core::render::render(&overlay, source.width, source.height, false).unwrap();
+            let mut base = match &cur.painted {
+                Some(p) => image::load_from_memory(p).unwrap().to_rgba8(),
+                None => image::RgbaImage::from_raw(source.width, source.height, source.rgba.clone()).unwrap(),
+            };
+            image::imageops::overlay(&mut base, &image::RgbaImage::from_raw(source.width, source.height, top).unwrap(), 0, 0);
+            std::fs::write(out.join(format!("{n}-forced-check.png")), png(base.into_raw(), source.width, source.height)).unwrap();
+        }
     }
 }
