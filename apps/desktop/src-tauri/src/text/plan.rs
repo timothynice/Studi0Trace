@@ -29,7 +29,7 @@ const MAX_HINTS: usize = 3;
 const MAX_WINNERS: usize = EAGER_FAMILIES;
 
 /// What a plan needs, owned: the finder, the optional AI reader, the catalogue, the Google fetcher and its cache
-/// folder, and whether the group carries the hidden text. Everything in it lives in the app state (or a test),
+/// folder, and the hidden-text setting. Everything in it lives in the app state (or a test),
 /// so a plan runs as a `'static` task and its pixel work goes to the blocking pool.
 #[derive(Clone)]
 pub struct Deps {
@@ -38,6 +38,9 @@ pub struct Deps {
     pub catalog: Arc<catalog::Catalog>,
     pub fonts: Option<Arc<fonts::GoogleFonts>>,
     pub cache_dir: PathBuf,
+    /// The setting as it stood when the plan was asked, for the plan's own use. The group always carries the hidden
+    /// text: the frontend leaves it out while the setting is off (`composeSvg`), so turning it on or off reaches
+    /// every cached plan and every trace without planning again.
     pub hidden_text: bool,
 }
 
@@ -230,10 +233,11 @@ fn finish_line(line: &mut TextLine, mut fitted: Vec<(Candidate, Fit)>, full: usi
 /// The painted PNG (when a line is composed) and the group.
 type Painted = (Option<Arc<Vec<u8>>>, String);
 
-/// The group, and the source with painted out only the lines the group carries: a matched line whose font cannot
-/// be located is not composed, so its pixels stay in what the trace sees.
-fn paint_and_group(source: &Image, plan: &TextPlan, inks: &[Arc<ink::LineInk>], hidden_text: bool, catalog: &catalog::Catalog, cache_dir: &Path) -> Result<Painted, CommandError> {
-    let composed = compose::compose_group(plan, hidden_text, catalog, cache_dir);
+/// The group, with the hidden text always (see `Deps::hidden_text`), and the source with painted out only the lines
+/// the group carries: a matched line whose font cannot be located is not composed, so its pixels stay in what the
+/// trace sees.
+fn paint_and_group(source: &Image, plan: &TextPlan, inks: &[Arc<ink::LineInk>], catalog: &catalog::Catalog, cache_dir: &Path) -> Result<Painted, CommandError> {
+    let composed = compose::compose_group(plan, true, catalog, cache_dir);
     let used: Vec<&ink::LineInk> = plan.lines.iter().zip(inks).filter(|(l, _)| composed.lines.contains(&l.id)).map(|(_, i)| i.as_ref()).collect();
     let painted = if used.is_empty() {
         None
@@ -402,11 +406,10 @@ async fn run(image_id: &str, source: Arc<Image>, deps: Deps, phase: &Arc<dyn Fn(
     let src = source;
     let catalog = deps.catalog.clone();
     let cache_dir = deps.cache_dir.clone();
-    let hidden = deps.hidden_text;
     let image = image_id.to_string();
     crate::redraw::blocking(move || {
         let plan = TextPlan { image, reader: reader_kind, lines: text_lines, ai_error, fonts_offline };
-        let (painted, group) = paint_and_group(&src, &plan, &inks, hidden, &catalog, &cache_dir)?;
+        let (painted, group) = paint_and_group(&src, &plan, &inks, &catalog, &cache_dir)?;
         Ok(Planned { plan, inks, painted, group })
     })
     .await
@@ -428,7 +431,6 @@ pub async fn set_line(source: Arc<Image>, planned: &Planned, line_id: &str, chan
     }
     let catalog = deps.catalog.clone();
     let cache_dir = deps.cache_dir.clone();
-    let hidden = deps.hidden_text;
     crate::redraw::blocking(move || {
         let ink = &inks[at];
         let line = &mut plan.lines[at];
@@ -513,7 +515,7 @@ pub async fn set_line(source: Arc<Image>, planned: &Planned, line_id: &str, chan
                 }
             }
         }
-        let (painted, group) = paint_and_group(&source, &plan, &inks, hidden, &catalog, &cache_dir)?;
+        let (painted, group) = paint_and_group(&source, &plan, &inks, &catalog, &cache_dir)?;
         Ok(Planned { plan, inks, painted, group })
     })
     .await

@@ -1084,4 +1084,52 @@ describe("library: text", () => {
     expect(textOf(item).plan).toBeNull();
     expect(platform.vectorize.mock.calls.length).toBe(calls);
   });
+
+  it("turning the hidden text off or on composes every trace again, and what was exported is unexported", async () => {
+    const { platform } = textPlatform();
+    const withText = '<g id="text"><path d="M0 0h1" fill="#000" data-line="a-t0"/><text x="0" y="5" data-line="a-t0">EST</text></g>';
+    platform.vectorize.mockImplementation(async () => response("<svg></svg>", 100, { text_group: withText }));
+    const on = { ...DEFAULT_SETTINGS, recogniseText: true, hiddenText: true };
+    const lib = createLibrary(platform, CATALOG, on);
+    lib.add([ok("a"), ok("b")]);
+    lib.generate("a");
+    lib.generate("b");
+    await flush();
+    lib.markExported([{ id: "a", key: "auto" }]);
+    expect(shownAnswer(lib.getState().items[0])?.svg).toContain("<text");
+    lib.setSettings({ ...on, hiddenText: false });
+    for (const item of lib.getState().items) {
+      expect(shownAnswer(item)?.svg).toBe('<svg><g id="text"><path d="M0 0h1" fill="#000" data-line="a-t0"/></g></svg>');
+      expect(shownAnswer(item)?.textGroup).toBe(withText);
+    }
+    expect(lib.getState().items[0].exported).toBeNull();
+    // a trace made while it is off leaves it out too, and turning it back on brings it back
+    lib.setParam("a", "detail", 9);
+    lib.generate("a");
+    await flush();
+    expect(shownAnswer(lib.getState().items[0])?.svg).not.toContain("<text");
+    lib.setSettings({ ...on });
+    expect(shownAnswer(lib.getState().items[0])?.svg).toContain("<text");
+    expect(platform.vectorize).toHaveBeenCalledTimes(3);
+  });
+
+  it("turning Recognise text off drops the traces that carry text, so the next trace is of the original", async () => {
+    const { platform } = textPlatform();
+    const on = { ...DEFAULT_SETTINGS, recogniseText: true };
+    const lib = createLibrary(platform, CATALOG, on);
+    lib.add([ok("a")]);
+    lib.generate("a");
+    await flush();
+    lib.markExported([{ id: "a", key: "auto" }]);
+    lib.setSettings({ ...on, recogniseText: false });
+    const item = lib.selectedItem()!;
+    expect(item.traces).toEqual({});
+    expect(item.shown).toBeNull();
+    expect(item.exported).toBeNull();
+    platform.vectorize.mockImplementation(async () => response("<svg></svg>", 100));
+    lib.generate("a");
+    await flush();
+    expect(platform.vectorize).toHaveBeenCalledTimes(2);
+    expect(shownAnswer(lib.selectedItem()!)?.textGroup).toBeNull();
+  });
 });

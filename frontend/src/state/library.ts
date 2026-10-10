@@ -244,7 +244,7 @@ export function createLibrary(platform: LibraryPlatform, catalog: Catalog, initi
   const answerOf = (res: VectorizeResponse): TraceAnswer | ApiError => {
     const r = res.results[ENGINE];
     if (!r || r.error || !r.svg) return new ApiError(r?.error?.code ?? "engine_failed", r?.error?.message ?? "The engine returned no vector");
-    return { svg: composeSvg(r.svg, res.text_group), base: r.svg, textGroup: res.text_group ?? null, elapsedMs: r.elapsed_ms ?? 0, stats: r.stats ?? {} };
+    return { svg: composeSvg(r.svg, res.text_group, settings), base: r.svg, textGroup: res.text_group ?? null, elapsedMs: r.elapsed_ms ?? 0, stats: r.stats ?? {} };
   };
 
   const finish = (id: string, jobId: string, key: string, res: VectorizeResponse) => {
@@ -263,7 +263,7 @@ export function createLibrary(platform: LibraryPlatform, catalog: Catalog, initi
     if (auto) {
       for (const c of auto.candidates) {
         const preset = presetById.get(c.preset);
-        if (preset && c.svg) traces[paramsKey(resolve(preset.params))] = { svg: composeSvg(c.svg, res.text_group), base: c.svg, textGroup: res.text_group ?? null, elapsedMs: c.elapsed_ms ?? 0, stats: c.stats ?? {} };
+        if (preset && c.svg) traces[paramsKey(resolve(preset.params))] = { svg: composeSvg(c.svg, res.text_group, settings), base: c.svg, textGroup: res.text_group ?? null, elapsedMs: c.elapsed_ms ?? 0, stats: c.stats ?? {} };
       }
       const pick = auto.pick ? presetById.get(auto.pick) : undefined;
       if (pick && current) params = resolve(pick.params);
@@ -527,8 +527,29 @@ export function createLibrary(platform: LibraryPlatform, catalog: Catalog, initi
     },
 
     setSettings(next) {
+      const prev = settings;
       settings = next;
       if (!settings.liveUpdate) [...timers.keys()].forEach(clearTimer);
+      const dropText = prev.recogniseText && !next.recogniseText;
+      const recompose = prev.hiddenText !== next.hiddenText;
+      if (!dropText && !recompose) return;
+      const items = state.items.map((item) => {
+        let traces = item.traces;
+        // Recognise text off: a trace of the painted image is not the image, and the next trace is of the original
+        if (dropText) traces = Object.fromEntries(Object.entries(traces).filter(([, t]) => t.textGroup === null));
+        // the hidden text is in every group the app wrote; the setting decides whether the SVG keeps it
+        if (recompose) traces = Object.fromEntries(Object.entries(traces).map(([k, t]) => [k, t.textGroup === null ? t : { ...t, svg: composeSvg(t.base, t.textGroup, next) }]));
+        const kept = (key: string | null) => (key !== null && traces[key] && traces[key].svg === item.traces[key]?.svg ? key : null);
+        return {
+          ...item,
+          traces,
+          shown: item.shown !== null && traces[item.shown] ? item.shown : null,
+          // what was exported is no longer what is on screen
+          exported: kept(item.exported),
+          auto: traces.auto || !item.traces.auto ? item.auto : null,
+        };
+      });
+      set({ ...state, items });
     },
 
     markExported(marks) {
@@ -639,7 +660,7 @@ export function createLibrary(platform: LibraryPlatform, catalog: Catalog, initi
           return;
         }
         // the words changed, so what was exported no longer is what is on screen
-        const traces = Object.fromEntries(Object.entries(now.traces).map(([k, t]) => [k, { ...t, svg: composeSvg(t.base, answer.textGroup), textGroup: answer.textGroup }]));
+        const traces = Object.fromEntries(Object.entries(now.traces).map(([k, t]) => [k, { ...t, svg: composeSvg(t.base, answer.textGroup, settings), textGroup: answer.textGroup }]));
         patch(id, { traces, exported: null, text: { ...textOf(now), plan: answer.plan } });
       };
       // one edit after another, in order: a failed edit does not stop the ones behind it

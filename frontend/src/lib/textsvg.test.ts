@@ -19,4 +19,9 @@ describe("composeSvg", () => {
     expect(composeSvg(base, "")).toBe(base);
     expect(composeSvg("<svg>", group)).toBe("<svg>");
   });
+  it("leaves the hidden text out when the setting is off, and keeps the glyphs", () => {
+    const withText = '<g id="text"><path d="M1 1h2" fill="#000" data-line="a"/><text x="1 2" y="3" font-family="A &amp; B" fill="none" data-line="a">A &lt;b&gt;</text><path d="M4 4h1" data-line="b"/><text x="4" y="5" data-line="b">C</text></g>';
+    expect(composeSvg(base, withText, { hiddenText: true })).toBe(base.replace("</svg>", `${withText}</svg>`));
+    expect(composeSvg(base, withText, { hiddenText: false })).toBe(base.replace("</svg>", '<g id="text"><path d="M1 1h2" fill="#000" data-line="a"/><path d="M4 4h1" data-line="b"/></g></svg>'));
+  });
 });

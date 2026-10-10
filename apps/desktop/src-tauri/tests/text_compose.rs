@@ -139,7 +139,7 @@ fn an_unknown_line_is_a_404_a_forced_font_is_matched_and_plans_are_kept_by_hash(
     let finder = Arc::new(FixtureFinder(vec![LineBox { quad: [[20.0, 14.0], [w - 20.0, 14.0], [w - 20.0, 58.0_f32.min(h)], [20.0, 58.0_f32.min(h)]], string: "EST. 2026".into(), confidence: 0.9 }]));
     let deps = Deps { finder, reader: None, catalog: Arc::new(catalog()), fonts: None, cache_dir: dir.clone(), hidden_text: false };
     let planned = tauri::async_runtime::block_on(plan("img", img.clone(), deps.clone(), Arc::new(|_| {}))).unwrap();
-    assert!(!planned.group.contains("<text"), "hidden text is off");
+    assert!(planned.group.contains("<text"), "the hidden text is always written: the frontend leaves it out when the setting is off");
     let err = tauri::async_runtime::block_on(set_line(img.clone(), &planned, "img-t9", LineChange::default(), deps.clone())).err().unwrap();
     assert_eq!((err.status, err.code()), (404, Some("no_line")));
     // off, then a font asked for: back on with that font chosen
