@@ -22,7 +22,8 @@ export interface OpenFailure {
 
 export type OpenOutcome = { ok: OpenedImage } | { failed: OpenFailure };
 
-export type Phase = "queued" | "tracing";
+/** A trace job's phase; `text` is the library's own, while the image's text plan runs before the trace is submitted. */
+export type Phase = "queued" | "tracing" | "text";
 
 export interface TraceRequest {
   imageId: string;

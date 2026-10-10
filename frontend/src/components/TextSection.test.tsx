@@ -9,7 +9,7 @@ const line = (over: Partial<TextLine> = {}): TextLine => ({ id: "a-t0", quad: [[
 const item = (plan: TextPlan | null, phase: "finding" | null = null, error: null | { code: string } = null): ImageItem =>
   ({ image: { id: "a", name: "a.png", path: null, width: 100, height: 50, format: "PNG", previewUrl: "" }, preset: "auto", params: {}, traces: {}, shown: null, exported: null, job: null, error: null, errorKey: null, auto: null, text: { plan, phase, error: error as never, asked: true } }) as ImageItem;
 const plan = (lines: TextLine[], reader: "vision" | "ai" = "vision"): TextPlan => ({ image: "a", reader, lines, aiError: null, fontsOffline: false });
-const props = () => ({ enabled: true, onChange: vi.fn(), onHover: vi.fn(), onCancel: vi.fn(), searchFonts: vi.fn(async () => []) });
+const props = () => ({ enabled: true, onChange: vi.fn(), onHover: vi.fn(), onCancel: vi.fn(), onRetry: vi.fn(), searchFonts: vi.fn(async () => []) });
 
 describe("TextSection", () => {
   it("lists a matched line with its string, font, fit and switch", () => {
@@ -104,5 +104,22 @@ describe("TextSection", () => {
   it("a matched line without a fit shows no empty chip", () => {
     const { container } = render(<TextSection item={item(plan([line({ fit: null })]))} {...props()} />);
     expect(container.querySelector(".mac-tint")).toBeNull();
+  });
+
+  it("a failed plan shows its error with Try again", () => {
+    const p = props();
+    render(<TextSection item={item(null, null, { code: "boom" })} {...p} />);
+    expect(screen.getByRole("alert")).toHaveTextContent("Reading the text failed.");
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(p.onRetry).toHaveBeenCalled();
+  });
+
+  it("before anything is asked, the header says to trace", () => {
+    const fresh = { ...item(null), text: { plan: null, phase: null, error: null, asked: false } } as ImageItem;
+    render(<TextSection item={fresh} {...props()} />);
+    expect(screen.getByText("Trace to read the text")).toBeInTheDocument();
+    // and once asked, it does not
+    const { container } = render(<TextSection item={{ ...fresh, text: { plan: null, phase: "finding", error: null, asked: true } } as ImageItem} {...props()} />);
+    expect(container).not.toHaveTextContent("Trace to read the text");
   });
 });

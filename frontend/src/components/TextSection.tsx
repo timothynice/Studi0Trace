@@ -13,6 +13,8 @@ export interface TextSectionProps {
   onChange: (lineId: string, change: TextLineChange) => void;
   onHover: (lineId: string | null) => void;
   onCancel: () => void;
+  /** Asks for the plan again after it failed. */
+  onRetry: () => void;
   searchFonts: (query: string) => Promise<FontRef[]>;
 }
 
@@ -135,7 +137,7 @@ function LineRow({ line, n, onChange, onHover, searchFonts }: { line: TextLine; 
 }
 
 /** The inspector's Text: the lines found in the image, each with its string, its font, how well it fits and whether it is re-set. */
-export function TextSection({ item, enabled, onChange, onHover, onCancel, searchFonts }: TextSectionProps) {
+export function TextSection({ item, enabled, onChange, onHover, onCancel, onRetry, searchFonts }: TextSectionProps) {
   if (!enabled) return null;
   const t = textOf(item);
   const count = t.plan?.lines.length ?? 0;
@@ -164,10 +166,15 @@ export function TextSection({ item, enabled, onChange, onHover, onCancel, search
           </button>
         </div>
       )}
-      {t.error && (
-        <p role="alert" className="text-[12px] leading-snug text-destructive">
-          {textErrorText(t.error.code)}
-        </p>
+      {t.error && !t.phase && (
+        <div className="space-y-1.5">
+          <p role="alert" className="text-[12px] leading-snug text-destructive">
+            {textErrorText(t.error.code)}
+          </p>
+          <button type="button" className="mac-button h-8 w-full" onClick={onRetry}>
+            Try again
+          </button>
+        </div>
       )}
       {t.plan?.aiError && (
         <p role="alert" className="text-[12px] leading-snug text-destructive">
@@ -177,6 +184,7 @@ export function TextSection({ item, enabled, onChange, onHover, onCancel, search
       {t.plan?.fontsOffline && <p className="mac-tint rounded-lg px-2.5 py-1.5 text-[11px]">Google Fonts unreachable — installed fonts only</p>}
       {staleGroup && <p className="text-[12px] text-muted-foreground">Text was re-set — trace again to edit it</p>}
       {t.plan && count === 0 && !t.phase && <p className="text-[12px] text-muted-foreground">No text found</p>}
+      {!t.plan && !t.asked && !t.phase && !t.error && !staleGroup && <p className="text-[12px] text-muted-foreground">Trace to read the text</p>}
       {t.plan && count > 0 && (
         <div className="-mx-2 space-y-0.5">
           {t.plan.lines.map((l, i) => (

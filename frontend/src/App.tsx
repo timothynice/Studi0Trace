@@ -223,7 +223,7 @@ function Workspace({ catalog, settings, onSettingsChange }: { catalog: Catalog; 
 
   const job = item ? currentJob(item) : null;
   const candidates = catalog.presets.filter((p) => p.auto_candidate).length;
-  const busy = job ? { phase: job.phase === "queued" ? "Queued…" : job.key === "auto" ? `Trying ${candidates} styles…` : "Tracing…", startedAt: job.startedAt } : null;
+  const busy = job ? { phase: job.phase === "queued" ? "Queued…" : job.phase === "text" ? "Reading text…" : job.key === "auto" ? `Trying ${candidates} styles…` : "Tracing…", startedAt: job.startedAt } : null;
   const viewer = item ? (
     <Viewer
       ref={viewerRef}
@@ -440,6 +440,7 @@ function Workspace({ catalog, settings, onSettingsChange }: { catalog: Catalog; 
             onChange={(lineId, change) => void lib.setTextLine(item.image.id, lineId, change).catch(failText)}
             onHover={setTextHover}
             onCancel={() => lib.cancelText(item.image.id)}
+            onRetry={() => lib.retryText(item.image.id)}
             searchFonts={searchFonts}
           />
         ) : undefined

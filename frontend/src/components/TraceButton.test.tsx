@@ -63,4 +63,12 @@ describe("TraceButton", () => {
     fireEvent.click(screen.getByRole("button", { name: "Queued…" }));
     expect(onCancel).toHaveBeenCalledOnce();
   });
+
+  it("reads the text, busy and cancellable, while the plan runs before the trace", () => {
+    const onCancel = vi.fn();
+    const key = paramsKey({ detail: 6 });
+    render(<TraceButton item={{ ...base, job: { id: "j", key, startedAt: Date.now(), phase: "text" } }} candidates={4} onGenerate={vi.fn()} onCancel={onCancel} />);
+    fireEvent.click(screen.getByRole("button", { name: /Reading text… 0 s/ }));
+    expect(onCancel).toHaveBeenCalledOnce();
+  });
 });

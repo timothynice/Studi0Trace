@@ -138,8 +138,10 @@ export interface Library {
   revertRedraw(id: string): Promise<void>;
   /** A line's string, font or switch changed. When the answer says what the trace sees changed (`repainted`), every trace of the image is dropped and traced again; otherwise the traces are composed again and nothing traces. */
   setTextLine(id: string, lineId: string, change: TextLineChange): Promise<void>;
-  /** Abandons the text plan being asked; the trace then goes on without it. */
+  /** Abandons the text plan being asked, and the trace waiting for it; the next trace asks again. */
   cancelText(id: string): void;
+  /** Asks for the text plan again after it failed; traces made without it are traced again when it re-sets a line. */
+  retryText(id: string): void;
 }
 
 export interface ExportMark {
@@ -309,7 +311,8 @@ export function createLibrary(platform: LibraryPlatform, catalog: Catalog, initi
       } catch (err) {
         if (!current()) return false;
         const e = toApiError(err);
-        patchText(id, { phase: null, error: e.code === "cancelled" ? null : e });
+        // a cancel is not an answer: the next trace asks again
+        patchText(id, e.code === "cancelled" ? { phase: null, error: null, asked: false } : { phase: null, error: e });
         return e.code !== "cancelled";
       } finally {
         if (texting.get(id)?.controller === controller) texting.delete(id);
@@ -332,20 +335,32 @@ export function createLibrary(platform: LibraryPlatform, catalog: Catalog, initi
       return;
     }
     if (item.job?.key === key) return;
-    // the plan comes first, and is only waited for when there is one to ask; otherwise the trace starts at once
-    if (needsText(id)) void ensureText(id).then((go) => go && startTrace(id));
-    else startTrace(id);
+    // the plan comes first, and is only waited for when there is one to ask; otherwise the trace starts at once.
+    // While it runs the image holds a job of phase "text", so the trace button shows busy with Cancel and the
+    // canvas says what is happening; the real trace job replaces it
+    if (needsText(id)) {
+      abortJob(item);
+      const textJob = newJobId();
+      patch(id, { job: { id: textJob, key, startedAt: Date.now(), phase: "text" }, error: null, errorKey: null });
+      void ensureText(id).then((go) => {
+        if (go) startTrace(id);
+        else if (find(id)?.job?.id === textJob) patch(id, { job: null });
+      });
+    } else startTrace(id);
   };
+
+  /** The image's job, unless it is the stand-in for a text plan (which `startTrace` replaces). */
+  const traceJob = (item: ImageItem) => (item.job?.phase === "text" ? null : item.job);
 
   const startTrace = (id: string) => {
     const item = find(id);
     if (!item) return;
     const key = traceKey(item);
     if (item.traces[key]) {
-      patch(id, { shown: key, error: null, errorKey: null });
+      patch(id, { shown: key, error: null, errorKey: null, job: traceJob(item) });
       return;
     }
-    if (item.job?.key === key) return;
+    if (traceJob(item)?.key === key) return;
     abortJob(item);
     const jobId = newJobId();
     const controller = new AbortController();
@@ -502,6 +517,11 @@ export function createLibrary(platform: LibraryPlatform, catalog: Catalog, initi
       clearTimer(id);
       const item = find(id);
       if (!item?.job) return;
+      // the trace is waiting for its text plan: that is what is cancelled
+      if (item.job.phase === "text") {
+        lib.cancelText(id);
+        return;
+      }
       abortJob(item);
       patch(id, { job: null });
     },
@@ -634,7 +654,26 @@ export function createLibrary(platform: LibraryPlatform, catalog: Catalog, initi
 
     cancelText(id) {
       abortText(id);
-      if (find(id)) patchText(id, { phase: null });
+      const item = find(id);
+      if (!item) return;
+      // never answered, so not asked: the next trace asks again
+      patch(id, { text: { ...textOf(item), phase: null, asked: textOf(item).plan ? textOf(item).asked : false }, ...(item.job?.phase === "text" ? { job: null } : {}) });
+    },
+
+    retryText(id) {
+      const item = find(id);
+      if (!item || texting.has(id)) return;
+      patchText(id, { asked: false, error: null });
+      void ensureText(id).then((go) => {
+        const now = find(id);
+        const plan = now ? textOf(now).plan : null;
+        // the traces on screen were made without the plan; when it re-sets a line they hold the text as shapes
+        if (!go || !now || !plan || !plan.lines.some((l) => l.status.kind === "matched" && l.enabled) || Object.keys(now.traces).length === 0) return;
+        abortJob(now);
+        clearTimer(id);
+        patch(id, { traces: {}, shown: null, exported: null, auto: null, job: null, error: null, errorKey: null });
+        generate(id);
+      });
     },
 
     async revertRedraw(id) {

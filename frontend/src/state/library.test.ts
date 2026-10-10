@@ -898,13 +898,70 @@ describe("library: text", () => {
     lib.cancelText("a");
     await flush();
     expect(signal?.aborted).toBe(true);
-    expect(textOf(lib.selectedItem()!)).toMatchObject({ phase: null, error: null, plan: null });
+    expect(textOf(lib.selectedItem()!)).toMatchObject({ phase: null, error: null, plan: null, asked: false });
+    expect(lib.selectedItem()!.job).toBeNull();
     expect(platform.vectorize).not.toHaveBeenCalled();
-    // asking again goes straight to the trace: the plan is not asked twice
+    // a cancelled plan was never answered: the next trace asks again
+    platform.textPlan.mockImplementation(async () => PLAN([LINE]));
     lib.generate("a");
     await flush();
-    expect(platform.textPlan).toHaveBeenCalledTimes(1);
+    expect(platform.textPlan).toHaveBeenCalledTimes(2);
     expect(platform.vectorize).toHaveBeenCalledTimes(1);
+  });
+
+  it("while the plan runs the image holds a text job; the trace job replaces it; Cancel on the trace button stops the plan", async () => {
+    const { platform } = textPlatform();
+    let resolvePlan: (p: TextPlan) => void = () => {};
+    let signal: AbortSignal | undefined;
+    platform.textPlan.mockImplementation(((_id: string, opts: { signal: AbortSignal }) => {
+      signal = opts.signal;
+      return new Promise<TextPlan>((r, reject) => {
+        resolvePlan = r;
+        signal!.addEventListener("abort", () => reject(new ApiError("cancelled", "x", 499)));
+      });
+    }) as never);
+    const lib = createLibrary(platform, CATALOG, { ...DEFAULT_SETTINGS, recogniseText: true });
+    lib.add([ok("a")]);
+    lib.generate("a");
+    const job = lib.selectedItem()!.job!;
+    expect(job).toMatchObject({ key: "auto", phase: "text" });
+    // asking again while it reads starts nothing more
+    lib.generate("a");
+    expect(platform.textPlan).toHaveBeenCalledTimes(1);
+    resolvePlan(PLAN([LINE]));
+    await flush();
+    expect(platform.vectorize).toHaveBeenCalledTimes(1);
+    expect(lib.selectedItem()!.job).toBeNull(); // the fake trace answered at once
+    expect(lib.selectedItem()!.shown).toBe("auto");
+    // a second image: the trace button's Cancel (lib.cancel) during the plan stops the plan and ends the job
+    lib.add([ok("b")]);
+    lib.generate("b");
+    expect(lib.selectedItem()!.job?.phase).toBe("text");
+    lib.cancel("b");
+    await flush();
+    expect(signal?.aborted).toBe(true);
+    expect(lib.selectedItem()!.job).toBeNull();
+    expect(textOf(lib.selectedItem()!)).toMatchObject({ asked: false, phase: null });
+    expect(platform.vectorize).toHaveBeenCalledTimes(1);
+  });
+
+  it("Try again after a failed plan asks once more and traces again when the plan re-sets a line", async () => {
+    const { platform } = textPlatform();
+    platform.textPlan.mockImplementationOnce(async () => Promise.reject(new ApiError("text_failed", "no", 500)));
+    const lib = createLibrary(platform, CATALOG, { ...DEFAULT_SETTINGS, recogniseText: true });
+    lib.add([ok("a")]);
+    lib.generate("a");
+    await flush();
+    expect(textOf(lib.selectedItem()!).error?.code).toBe("text_failed");
+    expect(platform.vectorize).toHaveBeenCalledTimes(1);
+    lib.retryText("a");
+    expect(textOf(lib.selectedItem()!)).toMatchObject({ error: null, asked: true });
+    await flush();
+    expect(platform.textPlan).toHaveBeenCalledTimes(2);
+    expect(textOf(lib.selectedItem()!).plan?.lines).toHaveLength(1);
+    // the trace made without the plan held the text as shapes: it is traced again, with the group
+    expect(platform.vectorize).toHaveBeenCalledTimes(2);
+    expect(shownAnswer(lib.selectedItem()!)?.textGroup).toBe(GROUP);
   });
 
   it("a plan superseded by a used redraw does not trace the new bytes unasked", async () => {
