@@ -129,27 +129,37 @@ pub fn line_ink(source: &Source, quad: [[f32; 2]; 4]) -> LineInk {
         }
     }
     let mask: Vec<bool> = coverage.iter().map(|&c| c >= 0.5).collect();
-    // the spread: 90th percentile ΔE from the ink colour over the ink's flat patches, the mask pixels whose eight
+    // the spread: 90th percentile ΔE from their own median colour over the ink's flat patches, the mask pixels whose eight
     // neighbours are all in the mask and within CORE_FLAT of the pixel itself. An edge pixel is a blend of ink and
     // backdrop by construction, and on a stroke of a pixel or three there is nowhere a pixel and its neighbours
     // agree: a light ink and a thin one look the same there, so with fewer than 8 flat pixels there is no evidence
     // of a gradient and the spread is 0. (Not coverage >= some level, which is measured against the one ink colour
     // and so can never see a second, lighter ink such as the 90 and 160 grey bars of a gradient; and not the mask's
-    // interior or its coverage ridge, which on 1-2 px strokes are still blends, 20-45 ΔE from the ink.)
+    // interior or its coverage ridge, which on 1-2 px strokes are still blends, 20-45 ΔE from the ink.) Their own
+    // median, not the ink colour: that is the furthest pixels' colour, and on large display letters with grain it is
+    // the darkest specks, 7-11 ΔE from a body that is one colour.
+    //
+    // Only the characters' own pixels count: the box is grown round the quad, and a rule, a divider or a
+    // neighbouring element of another colour inside it is neither ink nor gradient (`character_pixels`).
+    let linked: Vec<bool> = coverage.iter().map(|&c| c >= SEGMENT_COVERAGE).collect();
+    let quad_box = ((x0 - left as f32).max(0.0), (y0 - top as f32).max(0.0), x1 - left as f32, y1 - top as f32);
+    let characters = character_pixels(&linked, width, height, quad_box);
     let at = |x: u32, y: u32| px(left + x, top + y);
-    let mut spreads: Vec<f32> = Vec::new();
+    let mut flats: Vec<[u8; 3]> = Vec::new();
     for y in 1..height.saturating_sub(1) {
         for x in 1..width.saturating_sub(1) {
-            if !mask[(y * width + x) as usize] {
+            if !mask[(y * width + x) as usize] || !characters[(y * width + x) as usize] {
                 continue;
             }
             let here = at(x, y);
             let flat = (y - 1..=y + 1).all(|ny| (x - 1..=x + 1).all(|nx| mask[(ny * width + nx) as usize] && delta_e(at(nx, ny), here) <= CORE_FLAT));
             if flat {
-                spreads.push(delta_e(here, colour));
+                flats.push(here);
             }
         }
     }
+    let centre = median_colour(&flats);
+    let mut spreads: Vec<f32> = flats.iter().map(|p| delta_e(*p, centre)).collect();
     let spread = if spreads.len() < 8 {
         0.0
     } else {
@@ -158,10 +168,58 @@ pub fn line_ink(source: &Source, quad: [[f32; 2]; 4]) -> LineInk {
     };
     // pixels join into a segment at a lower coverage than the mask: a hairline serif or a thin join under 0.5 must
     // not cut a glyph in two (a fragment would read as an extra character); the segment's extent is still the mask's
-    let linked: Vec<bool> = coverage.iter().map(|&c| c >= SEGMENT_COVERAGE).collect();
     let segments = segments_of(&mask, &linked, width, height);
     let ink_bounds = bounds_of(&mask, width, height);
     LineInk { left, top, width, height, coverage, mask, backdrop, colour, spread, segments, ink_bounds }
+}
+
+/// A character's height, against the line's, that a component may have and count as one for the spread.
+const CHARACTER_HEIGHT: (f32, f32) = (0.4, 1.3);
+
+/// The pixels of the components (8-connected, of `linked`) that are the line's characters: those overlapping the
+/// quad as Vision gave it (`quad_box`, in the box's frame, before it was grown) whose height is within
+/// `CHARACTER_HEIGHT` of the line's, the median height of the overlapping components at least 0.3 of the quad's
+/// (punctuation left out of it). A rule under the line or a divider beside it (another colour, inside the grown
+/// box) is too short or too tall; a neighbouring line's letters lie outside the quad. With no such component
+/// every pixel counts, as before.
+fn character_pixels(linked: &[bool], width: u32, height: u32, quad_box: (f32, f32, f32, f32)) -> Vec<bool> {
+    let (w, h) = (width as usize, height as usize);
+    let mut label = vec![u32::MAX; linked.len()];
+    let mut boxes: Vec<(usize, usize, usize, usize)> = Vec::new();
+    let mut stack = Vec::new();
+    for start in 0..linked.len() {
+        if !linked[start] || label[start] != u32::MAX {
+            continue;
+        }
+        let id = boxes.len() as u32;
+        let mut b = (usize::MAX, usize::MAX, 0, 0);
+        label[start] = id;
+        stack.push(start);
+        while let Some(i) = stack.pop() {
+            let (x, y) = (i % w, i / w);
+            b = (b.0.min(x), b.1.min(y), b.2.max(x + 1), b.3.max(y + 1));
+            for ny in y.saturating_sub(1)..(y + 2).min(h) {
+                for nx in x.saturating_sub(1)..(x + 2).min(w) {
+                    let j = ny * w + nx;
+                    if linked[j] && label[j] == u32::MAX {
+                        label[j] = id;
+                        stack.push(j);
+                    }
+                }
+            }
+        }
+        boxes.push(b);
+    }
+    let (ql, qt, qr, qb) = quad_box;
+    let overlaps = |b: &(usize, usize, usize, usize)| (b.0 as f32) < qr && (b.2 as f32) > ql && (b.1 as f32) < qb && (b.3 as f32) > qt;
+    let mut heights: Vec<f32> = boxes.iter().filter(|b| overlaps(b)).map(|b| (b.3 - b.1) as f32).filter(|&hh| hh >= 0.3 * (qb - qt)).collect();
+    if heights.is_empty() {
+        return vec![true; linked.len()];
+    }
+    heights.sort_by(f32::total_cmp);
+    let line = heights[heights.len() / 2];
+    let keep: Vec<bool> = boxes.iter().map(|b| overlaps(b) && ((b.3 - b.1) as f32 / line) >= CHARACTER_HEIGHT.0 && ((b.3 - b.1) as f32 / line) <= CHARACTER_HEIGHT.1).collect();
+    label.iter().map(|&id| id != u32::MAX && keep[id as usize]).collect()
 }
 
 fn bounds_of(mask: &[bool], width: u32, height: u32) -> Option<(u32, u32, u32, u32)> {
@@ -518,6 +576,46 @@ mod tests {
         // tight text: a gap twice the median of two is still not a word space
         let (src, quad) = bars([2, 2, 5, 2]);
         assert_eq!(repair_spaces(&line_ink(&src, quad), "ABCDE"), "ABCDE");
+    }
+
+    #[test]
+    fn a_rule_or_a_divider_of_another_colour_in_the_grown_box_is_not_a_gradient() {
+        // the three letters, with a gold divider beside them taller than the line and a gold rule under them, both
+        // inside the box grown round the quad but neither a character
+        let (mut src, quad) = three_letters();
+        paint(&mut src, 70, 13, 4, 38, [190, 150, 80]);
+        paint(&mut src, 18, 46, 52, 3, [190, 150, 80]);
+        let ink = line_ink(&src, quad);
+        assert!(ink.spread < INK_SPREAD_MAX, "spread {}", ink.spread);
+        assert_eq!(ink.colour, [0, 0, 0]);
+        assert_ne!(decline(&ink, "lli", Class::Type, quad), Some(Reason::Gradient));
+        // a second ink colour on the characters themselves still is one
+        paint(&mut src, 40, 20, 6, 24, [190, 150, 80]);
+        paint(&mut src, 60, 28, 6, 16, [120, 90, 50]);
+        assert_eq!(decline(&line_ink(&src, quad), "lli", Class::Type, quad), Some(Reason::Gradient));
+    }
+
+    #[test]
+    fn a_large_ink_with_grain_and_a_darker_speck_or_two_is_not_a_gradient() {
+        // display letters as an image generator paints them: a body of 40 with ±3 levels of grain and a few specks
+        // of 15, which are the furthest pixels from the backdrop and so set the ink colour. The body is one colour;
+        // measured from the specks it was 12 ΔE away everywhere and the line was declined as a gradient
+        let mut src = solid(160, 80, [250, 248, 244]);
+        for (x0, w) in [(20u32, 14u32), (50, 14), (80, 14)] {
+            for y in 15..65u32 {
+                for x in x0..x0 + w {
+                    let v = (40 + ((x * 7 + y * 13) % 7) as i32 - 3) as u8;
+                    paint(&mut src, x, y, 1, 1, [v, v, v]);
+                }
+            }
+            paint(&mut src, x0 + 4, 30, 1, 1, [15, 15, 15]);
+            paint(&mut src, x0 + 9, 50, 1, 1, [15, 15, 15]);
+        }
+        let quad = [[15.0, 12.0], [100.0, 12.0], [100.0, 68.0], [15.0, 68.0]];
+        let ink = line_ink(&src, quad);
+        assert!(ink.colour[0] < 30, "the specks set the ink colour: {:?}", ink.colour);
+        assert!(ink.spread < INK_SPREAD_MAX, "spread {}", ink.spread);
+        assert_eq!(decline(&ink, "III", Class::Type, quad), None);
     }
 
     #[test]
