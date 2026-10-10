@@ -504,9 +504,22 @@ pub fn decline(ink: &LineInk, string: &str, class: Class, quad: [[f32; 2]; 4]) -
     None
 }
 
+/// The source with the inks' masks (dilated 1 px) filled from their nearest unmasked neighbours along the row and the
+/// column. A foreign pixel (another element's colour over or beside the letters, `LineInk::foreign`) is neither
+/// filled nor sampled: the walk to a neighbour goes past it to the backdrop, so a script laid over the letters keeps
+/// its own pixels and lends none of its colour to the hole.
 pub fn paint_out(source: &Source, inks: &[&LineInk]) -> Vec<u8> {
     let (w, h) = (source.width as usize, source.height as usize);
     let mut masked = vec![false; w * h];
+    let mut foreign = vec![false; w * h];
+    for ink in inks {
+        for (i, _) in ink.foreign.iter().enumerate().filter(|(_, f)| **f) {
+            let (sx, sy) = (ink.left as usize + i % ink.width as usize, ink.top as usize + i / ink.width as usize);
+            if sx < w && sy < h {
+                foreign[sy * w + sx] = true;
+            }
+        }
+    }
     for ink in inks {
         for y in 0..ink.height as usize {
             for x in 0..ink.width as usize {
@@ -515,7 +528,7 @@ pub fn paint_out(source: &Source, inks: &[&LineInk]) -> Vec<u8> {
                     for dy in -1i64..=1 {
                         for dx in -1i64..=1 {
                             let (sx, sy) = (ink.left as i64 + x as i64 + dx, ink.top as i64 + y as i64 + dy);
-                            if sx >= 0 && sy >= 0 && (sx as usize) < w && (sy as usize) < h {
+                            if sx >= 0 && sy >= 0 && (sx as usize) < w && (sy as usize) < h && !foreign[sy as usize * w + sx as usize] {
                                 masked[sy as usize * w + sx as usize] = true;
                             }
                         }
@@ -526,7 +539,7 @@ pub fn paint_out(source: &Source, inks: &[&LineInk]) -> Vec<u8> {
     }
     let mut out = source.rgba.clone();
     let at = |x: usize, y: usize, c: usize| source.rgba[(y * w + x) * 4 + c] as f32;
-    // nearest unmasked neighbour along a row (left/right) and a column (up/down)
+    // nearest unmasked neighbour that is not foreign along a row (left/right) and a column (up/down)
     let find = |x: usize, y: usize, dx: i64, dy: i64| -> Option<(usize, usize)> {
         let (mut cx, mut cy) = (x as i64, y as i64);
         loop {
@@ -535,7 +548,8 @@ pub fn paint_out(source: &Source, inks: &[&LineInk]) -> Vec<u8> {
             if cx < 0 || cy < 0 || cx as usize >= w || cy as usize >= h {
                 return None;
             }
-            if !masked[cy as usize * w + cx as usize] {
+            let j = cy as usize * w + cx as usize;
+            if !masked[j] && !foreign[j] {
                 return Some((cx as usize, cy as usize));
             }
         }
@@ -617,6 +631,32 @@ mod tests {
         assert!(delta_e([r, gg, b], [212, 160, 23]) < 6.0);
         // the bar's pixels are not ink: the segments are still three
         assert_eq!(ink.segments.len(), 3);
+    }
+
+    #[test]
+    fn the_paint_out_keeps_a_bar_across_the_letters_and_fills_the_letters_from_the_backdrop_not_from_the_bar() {
+        let (mut src, quad) = three_letters();
+        paint(&mut src, 18, 30, 52, 4, [212, 160, 23]);
+        let ink = line_ink(&src, quad);
+        let out = paint_out(&src, &[&ink]);
+        let at = |x: u32, y: u32| -> [u8; 3] {
+            let i = ((y * 120 + x) * 4) as usize;
+            [out[i], out[i + 1], out[i + 2]]
+        };
+        for x in 18..70u32 {
+            for y in 30..34u32 {
+                assert_eq!(at(x, y), [212, 160, 23], "the bar at ({x},{y}) is left as it was");
+            }
+        }
+        // the letters' pixels within 2 px of the bar take the backdrop's colour, not the bar's
+        for x0 in [20u32, 40, 60] {
+            for x in x0..x0 + 6 {
+                for y in [28u32, 29, 34, 35] {
+                    let p = at(x, y);
+                    assert!(p.iter().all(|&c| c >= 249), "({x},{y}) painted {p:?}");
+                }
+            }
+        }
     }
 
     /// The three letters with the rects of `under` (indices: the bars, the i's stem, its dot) also painted `dx`, `dy`
