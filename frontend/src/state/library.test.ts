@@ -1375,6 +1375,25 @@ describe("library: traces by the painted set", () => {
     expect(item().shown).toBe(`${P}|a-t1`);
   });
 
+  it("a screened candidate picked is drawn at once, then with the app's full fit when its answer brings a new path", async () => {
+    const { calls, answer, item, lib, platform } = await tracedOnBalanced();
+    await answer(calls[0]);
+    const refined = { ...candidate(FONT_L, "M0 0h22v10z", "a-t0", "EST"), refined: true };
+    platform.textSetLine.mockImplementationOnce(async () => ({ plan: PLAN([{ ...T0, candidates: [T0.candidates[0], refined], chosen: 1 }, T1]) }));
+    const pick = lib.setTextLine("a", "a-t0", { font: FONT_L });
+    // the screen's outline at once
+    expect(shownAnswer(item())!.svg).toContain("M0 0h20v10z");
+    await pick;
+    await flush();
+    // the same number of candidates, but the chosen one fitted in full: merged
+    const line = textOf(item()).plan!.lines[0];
+    expect(line.chosen).toBe(1);
+    expect(line.candidates[1]).toMatchObject({ path: "M0 0h22v10z", refined: true });
+    expect(shownAnswer(item())!.svg).toContain("M0 0h22v10z");
+    expect(shownAnswer(item())!.svg).not.toContain("M0 0h20v10z");
+    expect(calls).toHaveLength(2); // nothing traced
+  });
+
   it("a string edit recomposes every cached trace from its base", async () => {
     const { calls, answer, item, lib, platform } = await tracedOnBalanced();
     await answer(calls[0]);

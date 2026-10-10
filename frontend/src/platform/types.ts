@@ -71,6 +71,8 @@ export interface TextCandidate {
   path: string;
   /** The candidate's hidden `<text>` element. */
   text: string;
+  /** Its fit is the full one; a screened candidate picked is fitted in full by the app (a new `path`). */
+  refined?: boolean;
 }
 export interface TextLine {
   id: string;

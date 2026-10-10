@@ -98,11 +98,11 @@ fn pick(fitted: &[Candidate]) -> Option<usize> {
 }
 
 /// The one place a `Candidate` is built, so none forgets a field: the font's fit under `shaped` (the string shaped in
-/// that font), its outline and its hidden `<text>`.
-fn candidate(font: FontRef, fit: Fit, string: &str, line_id: &str, shaped: &glyphs::Shaped) -> Candidate {
+/// that font), its outline, its hidden `<text>` and whether the fit is the full one.
+fn candidate(font: FontRef, fit: Fit, string: &str, line_id: &str, shaped: &glyphs::Shaped, refined: bool) -> Candidate {
     let path = compose::candidate_path(shaped, &fit);
     let text = compose::candidate_text(line_id, string, &font.family, shaped, &fit);
-    Candidate { font, iou: fit.iou, stroke: fit.stroke, fit, path, text }
+    Candidate { font, iou: fit.iou, stroke: fit.stroke, fit, path, text, refined }
 }
 
 /// `fonts` fitted in order, best first: in full (`fit::fit_line`) when `full`, else screened (`fit_line_quick`).
@@ -128,7 +128,7 @@ fn fit_candidates(string: &str, line_id: &str, ink: &ink::LineInk, fonts: &[Font
             if stroke_agrees(&fit) {
                 best = best.max(fit.iou);
             }
-            out.push(candidate(f.clone(), fit, string, line_id, &shaped));
+            out.push(candidate(f.clone(), fit, string, line_id, &shaped, full));
         }
     }
     sort_best_first(&mut out);
@@ -407,9 +407,10 @@ async fn run(image_id: &str, source: Arc<Image>, deps: Deps, phase: &Arc<dyn Fn(
 }
 
 /// One line changed: a new string refits every candidate (the paths and texts with them), a font the user asked for
-/// is chosen and the line matched whatever its score: one that is already a candidate is only chosen (no fit), one
-/// that is not is fitted and appended. A line's `enabled` is the plan's own and is never changed here (the frontend
-/// owns it once the plan lands). An unknown line is a 404 `no_line`.
+/// is chosen and the line matched whatever its score: one that is already a candidate is chosen with its fit when that
+/// is the full fit (`refined`), and fitted in full in its place first when it is only the screen; one that is not is
+/// fitted and appended. A line's `enabled` is the plan's own and is never changed here (the frontend owns it once the
+/// plan lands). An unknown line is a 404 `no_line`.
 pub async fn set_line(_source: Arc<Image>, planned: &Planned, line_id: &str, change: LineChange, deps: Deps) -> Result<Planned, CommandError> {
     let mut plan = planned.plan.clone();
     let inks = planned.inks.clone();
@@ -483,9 +484,15 @@ pub async fn set_line(_source: Arc<Image>, planned: &Planned, line_id: &str, cha
             let (fitted, full) = refine(&line.string, &id, ink, fitted, &catalog, &cache_dir);
             finish_line(line, fitted, full, any_located, keep.as_ref());
         } else if let Some(f) = &change.font {
-            // the string stands. A font that is already a candidate is only chosen, with the fit it has; any
-            // other is fitted, and the others keep their scores
+            // the string stands. A font that is already a candidate is chosen, with the fit it has when that is the
+            // full one, else fitted in full in its place (the screen places a glyph a pixel or two off); any other is
+            // fitted, and the others keep their scores
             if let Some(at) = line.candidates.iter().position(|c| c.font == *f) {
+                if !line.candidates[at].refined {
+                    if let Some(c) = refit_one(&line.string, &id, ink, f, &catalog, &cache_dir) {
+                        line.candidates[at] = c;
+                    }
+                }
                 line.fit = Some(line.candidates[at].fit.clone());
                 line.chosen = Some(at);
                 line.status = Status::Matched;
@@ -551,7 +558,7 @@ mod tests {
 
     fn fitted(family: &str, weight: u16, iou: f32, stroke: f32) -> Candidate {
         let font = FontRef { family: family.into(), weight, italic: false, source: Source::Google };
-        Candidate { font, iou, stroke, fit: Fit { size: 20.0, baseline: 30.0, x: 0.0, tracking: 0.0, nudges: Vec::new(), iou, stroke }, path: String::new(), text: String::new() }
+        Candidate { font, iou, stroke, fit: Fit { size: 20.0, baseline: 30.0, x: 0.0, tracking: 0.0, nudges: Vec::new(), iou, stroke }, path: String::new(), text: String::new(), refined: false }
     }
 
     #[test]

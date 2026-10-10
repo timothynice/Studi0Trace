@@ -106,6 +106,9 @@ pub struct Candidate {
     pub path: String,
     /// The hidden `<text>` element carrying the string under `fit` (`compose::candidate_text`).
     pub text: String,
+    /// `fit` is the full fit (`fit::fit_line`), not the screen: what a pick of this font may use as it is.
+    #[serde(default)]
+    pub refined: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

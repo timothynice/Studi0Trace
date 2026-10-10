@@ -23,7 +23,7 @@ fn plan(font: &FontRef, enabled: bool, status: Status) -> TextPlan {
     TextPlan {
         image: "img".into(),
         reader: ReaderKind::Vision,
-        lines: vec![TextLine { id: "img-t0".into(), quad: [[8.0, 20.0], [220.0, 20.0], [220.0, 70.0], [8.0, 70.0]], string: "EST. 2026".into(), class: Class::Type, colour: [24, 28, 44], status, candidates: vec![Candidate { font: font.clone(), iou: 0.95, stroke: 1.0, fit: fit.clone(), path: String::new(), text: String::new() }], chosen: Some(0), enabled, fit: Some(fit), occluders: Vec::new() }],
+        lines: vec![TextLine { id: "img-t0".into(), quad: [[8.0, 20.0], [220.0, 20.0], [220.0, 70.0], [8.0, 70.0]], string: "EST. 2026".into(), class: Class::Type, colour: [24, 28, 44], status, candidates: vec![Candidate { font: font.clone(), iou: 0.95, stroke: 1.0, fit: fit.clone(), path: String::new(), text: String::new(), refined: true }], chosen: Some(0), enabled, fit: Some(fit), occluders: Vec::new() }],
         ai_error: None,
         fonts_offline: false,
     }
@@ -585,13 +585,28 @@ mod round1 {
         let line = &planned.plan.lines[0];
         assert!(line.candidates.len() >= 2, "{:?}", line.candidates.iter().map(|c| &c.font.family).collect::<Vec<_>>());
         let other = (0..line.candidates.len()).find(|i| Some(*i) != line.chosen).unwrap();
+        assert!(line.candidates.iter().all(|c| c.refined), "two families: every candidate had the full fit");
         let picked = edit(&img, &planned, "img-t0", LineChange { font: Some(line.candidates[other].font.clone()), ..Default::default() }, &d);
         let p = &picked.plan.lines[0];
         assert_eq!((p.chosen, p.status, p.enabled), (Some(other), Status::Matched, line.enabled));
         assert_eq!(p.fit.as_ref(), Some(&line.candidates[other].fit));
         let before: Vec<&str> = line.candidates.iter().map(|c| c.path.as_str()).collect();
         let after: Vec<&str> = p.candidates.iter().map(|c| c.path.as_str()).collect();
-        assert_eq!(before, after, "no refit: the same paths in the same order");
+        assert_eq!(before, after, "a refined candidate is not fitted again: the same paths in the same order");
+        // a screened candidate (its fit the quick one) picked: fitted in full in its place, and marked so
+        let mut screened = studi0trace_desktop::text::Planned { plan: planned.plan.clone(), inks: planned.inks.clone() };
+        let s = &mut screened.plan.lines[0].candidates[other];
+        s.refined = false;
+        s.path = "M0 0h1".into();
+        let refit = edit(&img, &screened, "img-t0", LineChange { font: Some(line.candidates[other].font.clone()), ..Default::default() }, &d);
+        let r = &refit.plan.lines[0];
+        assert_eq!((r.chosen, r.status), (Some(other), Status::Matched));
+        assert!(r.candidates[other].refined);
+        assert_eq!(r.candidates[other].font, line.candidates[other].font);
+        assert_ne!(r.candidates[other].path, "M0 0h1", "the screened outline is replaced");
+        assert_eq!(r.candidates[other].path, line.candidates[other].path, "the full fit is the one the plan had");
+        assert_eq!(r.fit.as_ref(), Some(&r.candidates[other].fit));
+        assert_eq!(r.candidates.len(), line.candidates.len());
         // a string: every candidate's text carries it and its outline follows
         let edited = edit(&img, &planned, "img-t0", LineChange { string: Some("EST. 2027".into()), ..Default::default() }, &d);
         let e = &edited.plan.lines[0];

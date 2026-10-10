@@ -993,10 +993,12 @@ export function createLibrary(platform: LibraryPlatform, catalog: Catalog, initi
           const plan = now ? textOf(now).plan : null;
           const mine = plan?.lines.find((l) => l.id === lineId);
           const theirs = answer.plan.lines.find((l) => l.id === lineId);
-          // the answer is only news when it fitted a candidate the line does not have
-          if (!now || now.image !== image || !plan || !mine || !theirs || theirs.candidates.length <= mine.candidates.length) return;
-          const chosenFont = mine.chosen !== null ? mine.candidates[mine.chosen]?.font : undefined;
-          const at = chosenFont ? theirs.candidates.findIndex((c) => sameFont(c.font, chosenFont)) : -1;
+          if (!now || now.image !== image || !plan || !mine || !theirs) return;
+          const chosen = mine.chosen !== null ? mine.candidates[mine.chosen] : undefined;
+          const at = chosen ? theirs.candidates.findIndex((c) => sameFont(c.font, chosen.font)) : -1;
+          // the answer is only news when it fitted a candidate the line does not have, or fitted the chosen one in
+          // full (a screened candidate: a new path)
+          if (theirs.candidates.length <= mine.candidates.length && (at < 0 || theirs.candidates[at].path === chosen?.path)) return;
           const merged = at >= 0 ? { ...theirs, chosen: at, fit: theirs.candidates[at].fit, status: mine.status } : theirs;
           applyPlan(id, { ...plan, lines: plan.lines.map((l) => (l.id === lineId ? merged : l)) }, lineId);
         }).catch(() => {});
