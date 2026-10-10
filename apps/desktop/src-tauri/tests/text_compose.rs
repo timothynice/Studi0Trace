@@ -593,4 +593,23 @@ mod round1 {
         assert!(!edited.plan.fonts_offline && edited.painted.is_some());
         let _ = std::fs::remove_dir_all(&dir);
     }
+
+    #[test]
+    fn a_change_naming_an_unknown_font_or_an_overlong_string_is_refused() {
+        let dir = cache(&[("Montserrat-Regular.ttf", "Montserrat", 400)]);
+        let img = image("montserrat-est-30-t0-white.png");
+        let d = deps(Arc::new(FixtureFinder(vec![line_box(&img, 14.0, 58.0)])), None, index(&[("Montserrat", 400)]), &dir);
+        let planned = run_plan(&img, &d);
+        let refused = |change: LineChange| tauri::async_runtime::block_on(set_line(img.clone(), &planned, "img-t0", change, d.clone())).err().map(|e| (e.status, e.code().map(str::to_string)));
+        let bad = Some((400, Some("bad_request".to_string())));
+        // a family the index does not hold (its name would be a file in the cache and a download)
+        assert_eq!(refused(LineChange { font: Some(font("../../Evil", 400)), ..Default::default() }), bad);
+        // an installed family this Mac does not have (the test's fontdb is empty)
+        assert_eq!(refused(LineChange { font: Some(FontRef { source: Source::Installed, ..font("Montserrat", 400) }), ..Default::default() }), bad);
+        // "EST. 2026" is 9 characters: 3 x 9 + 16 = 43 is the most an edit may hold
+        assert_eq!(refused(LineChange { string: Some("E".repeat(44)), ..Default::default() }), bad);
+        assert_eq!(refused(LineChange { string: Some("EST. 2027".into()), ..Default::default() }), None);
+        assert_eq!(refused(LineChange { font: Some(font("Montserrat", 400)), ..Default::default() }), None);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

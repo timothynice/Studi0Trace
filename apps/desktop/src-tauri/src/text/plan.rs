@@ -425,6 +425,7 @@ pub async fn set_line(source: Arc<Image>, planned: &Planned, line_id: &str, chan
     let mut plan = planned.plan.clone();
     let inks = planned.inks.clone();
     let at = plan.lines.iter().position(|l| l.id == line_id).ok_or_else(|| CommandError::new(404, "no_line", "There is no such line of text."))?;
+    check_change(&change, &plan.lines[at], &deps.catalog)?;
     let mut offline: Option<bool> = None;
     if let Some(f) = &change.font {
         if f.source == Source::Google {
@@ -547,6 +548,30 @@ pub fn repainted(before: &Planned, after: &Planned) -> bool {
         (Some(a), Some(b)) => !(Arc::ptr_eq(a, b) || a == b),
         _ => true,
     }
+}
+
+/// How long an edited string may be: `EDIT_GROWTH` times the line's string and `EDIT_SLACK` characters more.
+const EDIT_GROWTH: usize = 3;
+const EDIT_SLACK: usize = 16;
+
+/// A change the webview sends is checked before anything is fitted or fetched: a Google font must be one the index
+/// holds (its family names a file in the cache and a download), an installed one a family on this Mac, and the
+/// string at most `EDIT_GROWTH` × the line's own length + `EDIT_SLACK` characters (a fit is per glyph).
+fn check_change(change: &LineChange, line: &TextLine, catalog: &catalog::Catalog) -> Result<(), CommandError> {
+    if let Some(f) = &change.font {
+        if catalog.weights_of(&f.family, f.source).is_empty() {
+            return Err(CommandError::bad_request(match f.source {
+                Source::Google => "That font is not in the Google Fonts index.",
+                Source::Installed => "That font is not installed on this Mac.",
+            }));
+        }
+    }
+    if let Some(s) = &change.string {
+        if s.chars().count() > EDIT_GROWTH * line.string.chars().count() + EDIT_SLACK {
+            return Err(CommandError::bad_request("That text is too long for this line."));
+        }
+    }
+    Ok(())
 }
 
 /// The fonts a line with no candidates is fitted against: the shortlist of its ink and string, then the plain sans
