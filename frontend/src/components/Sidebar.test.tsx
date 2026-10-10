@@ -31,7 +31,7 @@ function props_(patch: Partial<SidebarProps> = {}): SidebarProps {
     tab: "images",
     onTab: vi.fn(),
     inspect: null,
-    items: [item("a"), item("b", { job: { id: "j", key: "auto", startedAt: 0, phase: "queued" } }), item("c", { error: new ApiError("engine_crashed", "The trace crashed (signal 9)"), errorKey: "auto" })],
+    items: [item("a"), item("b", { job: { id: "j", key: "auto|", startedAt: 0, phase: "queued", mask: [], prefetch: false } }), item("c", { error: new ApiError("engine_crashed", "The trace crashed (signal 9)"), errorKey: "auto|" })],
     failed: [],
     selected: "a",
     formats: "PNG, JPG, HEIC, etc.",
@@ -60,14 +60,14 @@ describe("Sidebar", () => {
   });
 
   it("badges a traced image, amber when its settings have moved since, and dims one that is tracing", () => {
-    const key = paramsKey({ detail: 6 });
-    const answer = { svg: "<svg/>", base: "<svg/>", textGroup: null, elapsedMs: 1, stats: {} };
+    const key = `${paramsKey({ detail: 6 })}|`;
+    const answer = { svg: "<svg/>", base: "<svg/>", elapsedMs: 1, stats: {} };
     setup({
       items: [
         item("t", { preset: "balanced", params: { detail: 6 }, traces: { [key]: answer }, shown: key }),
         item("s", { preset: "logo", params: { detail: 9 }, traces: { [key]: answer }, shown: key }),
         item("u"),
-        item("r", { job: { id: "j", key: "auto", startedAt: 0, phase: "tracing" } }),
+        item("r", { job: { id: "j", key: "auto|", startedAt: 0, phase: "tracing", mask: [], prefetch: false } }),
       ],
     });
     const badges = screen.getAllByText("SVG");

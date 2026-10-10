@@ -8,7 +8,7 @@ import { TextSection } from "./TextSection";
 const FIT = { size: 10, baseline: 5, x: 0, tracking: 0, nudges: [], iou: 0.946, stroke: 1 };
 const line = (over: Partial<TextLine> = {}): TextLine => ({ id: "a-t0", quad: [[0, 0], [10, 0], [10, 5], [0, 5]], string: "EST. 2026", class: "type", colour: [0, 0, 0], status: { kind: "matched" }, candidates: [{ font: { family: "Montserrat", weight: 400, italic: false, source: "google" }, iou: 0.946, stroke: 1, fit: FIT, path: "M0 0h1", text: "<text/>" }, { font: { family: "Lato", weight: 400, italic: false, source: "installed" }, iou: 0.8, stroke: 1, fit: FIT, path: "M0 0h1", text: "<text/>" }], chosen: 0, enabled: true, fit: FIT, occluders: [], ...over });
 const item = (plan: TextPlan | null, phase: "finding" | null = null, error: null | { code: string } = null): ImageItem =>
-  ({ image: { id: "a", name: "a.png", path: null, width: 100, height: 50, format: "PNG", previewUrl: "" }, preset: "auto", params: {}, traces: {}, shown: null, exported: null, job: null, error: null, errorKey: null, auto: null, text: { plan, phase, error: error as never, asked: true } }) as ImageItem;
+  ({ image: { id: "a", name: "a.png", path: null, width: 100, height: 50, format: "PNG", previewUrl: "" }, preset: "auto", params: {}, traces: {}, shown: null, exported: null, job: null, error: null, errorKey: null, auto: null, text: { plan, phase, error: error as never, asked: true, enabled: new Set((plan?.lines ?? []).filter((l) => l.enabled).map((l) => l.id)) } }) as ImageItem;
 const plan = (lines: TextLine[], reader: "vision" | "ai" = "vision"): TextPlan => ({ image: "a", reader, lines, aiError: null, fontsOffline: false });
 const props = () => ({ enabled: true, onChange: vi.fn(), onToggle: vi.fn(), onHover: vi.fn(), onCancel: vi.fn(), onRetry: vi.fn(), searchFonts: vi.fn(async () => []) });
 
@@ -82,8 +82,8 @@ describe("TextSection", () => {
 
   it("after a revert, a trace that carries text with no plan says to trace again", () => {
     const it = item(null);
-    it.traces = { auto: { svg: "<svg/>", base: "<svg/>", textGroup: "<g/>", elapsedMs: 1, stats: {} } } as never;
-    it.shown = "auto" as never;
+    it.traces = { "auto|a-t0": { svg: '<svg><path data-line="a-t0"/></svg>', base: "<svg/>", elapsedMs: 1, stats: {} } } as never;
+    it.shown = "auto|a-t0" as never;
     render(<TextSection item={it} {...props()} />);
     expect(screen.getByText("Text was re-set — trace again to edit it")).toBeInTheDocument();
     expect(screen.queryByText("No text found")).toBeNull();
@@ -116,11 +116,11 @@ describe("TextSection", () => {
   });
 
   it("before anything is asked, the header says to trace", () => {
-    const fresh = { ...item(null), text: { plan: null, phase: null, error: null, asked: false } } as ImageItem;
+    const fresh = { ...item(null), text: { plan: null, phase: null, error: null, asked: false, enabled: new Set() } } as ImageItem;
     render(<TextSection item={fresh} {...props()} />);
     expect(screen.getByText("Trace to read the text")).toBeInTheDocument();
     // and once asked, it does not
-    const { container } = render(<TextSection item={{ ...fresh, text: { plan: null, phase: "finding", error: null, asked: true } } as ImageItem} {...props()} />);
+    const { container } = render(<TextSection item={{ ...fresh, text: { plan: null, phase: "finding", error: null, asked: true, enabled: new Set() } } as ImageItem} {...props()} />);
     expect(container).not.toHaveTextContent("Trace to read the text");
   });
 });

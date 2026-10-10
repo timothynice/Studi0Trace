@@ -98,7 +98,7 @@ function FontPicker({ line, onPick, searchFonts }: { line: TextLine; onPick: (fo
   );
 }
 
-function LineRow({ line, n, onChange, onToggle, onHover, searchFonts }: { line: TextLine; n: number; onChange: (c: TextLineChange) => void; onToggle: (on: boolean) => void; onHover: (id: string | null) => void; searchFonts: (q: string) => Promise<FontRef[]> }) {
+function LineRow({ line, n, on, onChange, onToggle, onHover, searchFonts }: { line: TextLine; n: number; on: boolean; onChange: (c: TextLineChange) => void; onToggle: (on: boolean) => void; onHover: (id: string | null) => void; searchFonts: (q: string) => Promise<FontRef[]> }) {
   const [draft, setDraft] = useState(line.string);
   useEffect(() => setDraft(line.string), [line.string]);
   const commit = () => {
@@ -122,7 +122,7 @@ function LineRow({ line, n, onChange, onToggle, onHover, searchFonts }: { line: 
             if (e.key === "Escape") setDraft(line.string);
           }}
         />
-        <Switch aria-label={`Re-set line ${n} in a font`} checked={line.enabled} onCheckedChange={(on) => onToggle(on)} />
+        <Switch aria-label={`Re-set line ${n} in a font`} checked={on} onCheckedChange={(on) => onToggle(on)} />
       </div>
       <FontPicker line={line} onPick={(font) => onChange({ font })} searchFonts={searchFonts} />
       <div className="flex items-center justify-between text-[11px] text-muted-foreground">
@@ -143,8 +143,8 @@ export function TextSection({ item, enabled, onChange, onToggle, onHover, onCanc
   if (!enabled) return null;
   const t = textOf(item);
   const count = t.plan?.lines.length ?? 0;
-  // a redraw's Revert restores traces that carry a text group while the plan is gone
-  const staleGroup = !t.plan && !t.phase && !!shownAnswer(item)?.textGroup;
+  // a redraw's Revert restores traces that carry text paths while the plan is gone
+  const staleGroup = !t.plan && !t.phase && !!shownAnswer(item)?.svg.includes("data-line");
   return (
     <section aria-labelledby="text-section-title" className="space-y-2">
       <div className="flex items-center justify-between">
@@ -190,7 +190,7 @@ export function TextSection({ item, enabled, onChange, onToggle, onHover, onCanc
       {t.plan && count > 0 && (
         <div className="-mx-2 space-y-0.5">
           {t.plan.lines.map((l, i) => (
-            <LineRow key={l.id} line={l} n={i + 1} onChange={(c) => onChange(l.id, c)} onToggle={(on) => onToggle(l.id, on)} onHover={onHover} searchFonts={searchFonts} />
+            <LineRow key={l.id} line={l} n={i + 1} on={t.enabled.has(l.id)} onChange={(c) => onChange(l.id, c)} onToggle={(on) => onToggle(l.id, on)} onHover={onHover} searchFonts={searchFonts} />
           ))}
         </div>
       )}

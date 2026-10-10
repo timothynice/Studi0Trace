@@ -5,7 +5,7 @@ import type { Preset } from "@/lib/api";
 import { formatBytes, formatInt, formatMs } from "@/lib/format";
 import type { ParamSpec } from "@/lib/schema";
 import { svgStats } from "@/lib/svgdoc";
-import { shownAnswer, type Catalog, type ImageItem } from "@/state/library";
+import { isAutoKey, shownAnswer, userJob, type Catalog, type ImageItem } from "@/state/library";
 import { ParamPanel } from "./ParamPanel";
 import { PresetCards } from "./PresetCards";
 import { TraceButton } from "./TraceButton";
@@ -55,7 +55,7 @@ export function VectorizePanel({ item, catalog, specs, invalidField, onPick, onP
           values={item.params}
           active={item.preset}
           auto={item.auto}
-          autoRunning={item.job?.key === "auto"}
+          autoRunning={isAutoKey(userJob(item)?.key ?? "")}
           onPick={onPick}
         />
         <div className="border-t pt-2">

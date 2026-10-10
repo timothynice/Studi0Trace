@@ -4,7 +4,8 @@ import { ApiError, type EngineDescription, type Preset, type VectorizeResponse }
 import { paramsKey } from "@/lib/schema";
 import type { Drift, OpenOutcome, Phase, Platform, RedrawPhase, RedrawResult, TextLine, TextLineChange, TextPlan, TraceRequest } from "@/platform/types";
 import { DEFAULT_SETTINGS } from "@/platform/types";
-import { createLibrary, DEBOUNCE_MS, errorOf, needsUpdate, NO_REDRAW, shownAnswer, textOf, traceKey, unexportedCount, type Catalog, type LibraryPlatform } from "./library";
+import { composeSvg } from "@/lib/textsvg";
+import { createLibrary, currentJob, DEBOUNCE_MS, errorOf, fullMask, maskOf, needsUpdate, NO_REDRAW, shownAnswer, textOf, traceKey, traceKeyFor, unexportedCount, userJob, type Catalog, type LibraryPlatform } from "./library";
 
 const ENGINE: EngineDescription = {
   id: "vexel",
@@ -91,7 +92,7 @@ describe("library", () => {
     lib.add([ok("a")]);
     lib.generate("a");
     expect(calls[0].req).toMatchObject({ imageId: "a", auto: true, parameters: {} });
-    expect(lib.getState().items[0].job).toMatchObject({ key: "auto", phase: "queued" });
+    expect(lib.getState().items[0].job).toMatchObject({ key: "auto|", phase: "queued" });
     calls[0].onPhase?.("tracing");
     expect(lib.getState().items[0].job?.phase).toBe("tracing");
     calls[0].resolve(
@@ -111,14 +112,14 @@ describe("library", () => {
     );
     await flush();
     const item = lib.getState().items[0];
-    expect(item.shown).toBe("auto");
+    expect(item.shown).toBe("auto|");
     expect(item.job).toBeNull();
     expect(item.auto?.pick).toBe("logo");
     expect(item.params).toEqual({ detail: 10, min_region: 16 });
-    expect(item.traces[paramsKey({ detail: 6, min_region: 8 })].svg).toBe("<svg>balanced</svg>");
+    expect(item.traces[`${paramsKey({ detail: 6, min_region: 8 })}|`].svg).toBe("<svg>balanced</svg>");
     // a candidate is shown at once, nothing traced again
     lib.pickPreset("a", PRESETS[1]);
-    expect(lib.getState().items[0].shown).toBe(paramsKey({ detail: 6, min_region: 8 }));
+    expect(lib.getState().items[0].shown).toBe(`${paramsKey({ detail: 6, min_region: 8 })}|`);
     expect(platform.vectorize).toHaveBeenCalledTimes(1);
   });
 
@@ -286,7 +287,7 @@ describe("library", () => {
     const b = lib.getState().items[1];
     expect(b.preset).toBe("balanced");
     expect(b.params).toEqual({ detail: 6, min_region: 8 });
-    expect(b.traces.auto.svg).toBe("<svg>logo</svg>");
+    expect(b.traces["auto|"].svg).toBe("<svg>logo</svg>");
     expect(b.shown).toBe(traceKey(b));
     expect(b.traces[b.shown as string].svg).toBe("<svg>balanced</svg>");
     expect(b.auto?.pick).toBe("logo");
@@ -334,7 +335,7 @@ describe("library", () => {
     lib.pickPreset("a", PRESETS[0]);
     const item = lib.getState().items[0];
     expect(item.params).toEqual({ detail: 10, min_region: 16 });
-    expect(item.shown).toBe("auto");
+    expect(item.shown).toBe("auto|");
   });
 
   it("counts the images whose vector on screen has not been exported or copied since it was traced", async () => {
@@ -382,7 +383,7 @@ describe("library", () => {
     lib.setParam("a", "detail", 6); // the default it already has
     lib.setParam("a", "detail", "6");
     expect(lib.getState()).toBe(before);
-    expect(lib.getState().items[0]).toMatchObject({ preset: "auto", shown: "auto" });
+    expect(lib.getState().items[0]).toMatchObject({ preset: "auto", shown: "auto|" });
     vi.advanceTimersByTime(DEBOUNCE_MS * 4);
     expect(platform.vectorize).toHaveBeenCalledTimes(1);
     lib.setParam("a", "detail", 7);
@@ -444,12 +445,12 @@ describe("library", () => {
     const mid = lib.getState().items[0];
     expect(mid.shown).toBe(traceKey(mid));
     expect(calls[1].signal.aborted).toBe(false);
-    expect(mid.job).toMatchObject({ key: "auto" });
+    expect(mid.job).toMatchObject({ key: "auto|" });
     calls[1].resolve(response("<svg>auto</svg>", 5000));
     await flush();
     const done = lib.getState().items[0];
     expect(done.job).toBeNull();
-    expect(done.traces.auto.svg).toBe("<svg>auto</svg>");
+    expect(done.traces["auto|"].svg).toBe("<svg>auto</svg>");
     expect(done.preset).toBe("balanced");
     expect(done.shown).toBe(traceKey(done));
   });
@@ -570,7 +571,7 @@ describe("library: AI redraw", () => {
     expect(r.platform.acceptRedraw).toHaveBeenCalledWith("a");
     expect(item.image).toMatchObject({ id: "a", previewUrl: "blob:redraw", width: 128 });
     expect(item.redraw).toMatchObject({ active: true, pending: null, drift: DRIFT, original: { id: "a-original" } });
-    expect(item.redraw?.kept?.traces.auto?.svg).toBe("<svg>original</svg>");
+    expect(item.redraw?.kept?.traces["auto|"]?.svg).toBe("<svg>original</svg>");
     expect(item.shown).toBeNull();
     expect(r.platform.vectorize).toHaveBeenCalledTimes(2);
     expect(r.calls[1].req.imageId).toBe("a");
@@ -592,8 +593,8 @@ describe("library: AI redraw", () => {
     expect(r.platform.revertRedraw).toHaveBeenCalledWith("a");
     expect(item.image.previewUrl).toBe("blob:a");
     expect(item.redraw).toEqual(NO_REDRAW);
-    expect(item.shown).toBe("auto");
-    expect(item.traces.auto.svg).toBe("<svg>original</svg>");
+    expect(item.shown).toBe("auto|");
+    expect(item.traces["auto|"].svg).toBe("<svg>original</svg>");
     expect(item.rough).toBeUndefined();
   });
 
@@ -778,7 +779,6 @@ describe("library: AI redraw", () => {
 
 const PLAN = (lines: TextLine[]): TextPlan => ({ image: "a", reader: "vision", lines, aiError: null, fontsOffline: false });
 const LINE: TextLine = { id: "a-t0", quad: [[0, 0], [10, 0], [10, 5], [0, 5]], string: "EST", class: "type", colour: [0, 0, 0], status: { kind: "matched" }, candidates: [{ font: { family: "Montserrat", weight: 400, italic: false, source: "google" }, iou: 0.9, stroke: 1, fit: { size: 10, baseline: 5, x: 0, tracking: 0, nudges: [], iou: 0.9, stroke: 1 }, path: "M0 0h1", text: "<text/>" }], chosen: 0, enabled: true, fit: { size: 10, baseline: 5, x: 0, tracking: 0, nudges: [], iou: 0.9, stroke: 1 }, occluders: [] };
-const GROUP = '<g id="text"><path d="M0 0h1" fill="#000" data-line="a-t0"/></g>';
 
 /** A platform whose traces answer at once, with the text calls and the redraw calls left to each test. */
 function textPlatform() {
@@ -875,7 +875,8 @@ describe("library: text", () => {
     lib.setParam("a", "detail", 9); // another key: generate reaches the plan check again
     lib.generate("a");
     await flush();
-    expect(platform.vectorize).toHaveBeenCalledTimes(2);
+    // the trace for detail 9, then (off Auto) the untouched image prefetched: no plan asked for either
+    expect(platform.vectorize).toHaveBeenCalledTimes(3);
     expect(platform.textPlan).toHaveBeenCalledTimes(1);
   });
 
@@ -919,7 +920,7 @@ describe("library: text", () => {
     lib.add([ok("a")]);
     lib.generate("a");
     const job = lib.selectedItem()!.job!;
-    expect(job).toMatchObject({ key: "auto", phase: "text" });
+    expect(job).toMatchObject({ key: "auto|", phase: "text" });
     // asking again while it reads starts nothing more
     lib.generate("a");
     expect(platform.textPlan).toHaveBeenCalledTimes(1);
@@ -927,7 +928,7 @@ describe("library: text", () => {
     await flush();
     expect(platform.vectorize).toHaveBeenCalledTimes(1);
     expect(lib.selectedItem()!.job).toBeNull(); // the fake trace answered at once
-    expect(lib.selectedItem()!.shown).toBe("auto");
+    expect(lib.selectedItem()!.shown).toBe("auto|a-t0");
     // a second image: the trace button's Cancel (lib.cancel) during the plan stops the plan and ends the job
     lib.add([ok("b")]);
     lib.generate("b");
@@ -1018,42 +1019,10 @@ describe("library: text", () => {
     lib.add([ok("a")]);
     lib.generate("a");
     await flush();
-    lib.markExported([{ id: "a", key: "auto" }]);
+    lib.markExported([{ id: "a", key: lib.selectedItem()!.shown! }]);
     expect(unexportedCount(lib.getState())).toBe(0);
     await lib.setTextLine("a", "a-t0", { string: "EST." });
     expect(unexportedCount(lib.getState())).toBe(1);
-  });
-
-  // Task 5 of the text-toggles plan: the answer no longer says `repainted`; traces are keyed by the mask instead
-  it.skip("a font picked for a declined or an Off line traces again; a string edit of a matched line does not", async () => {
-    const { platform } = textPlatform();
-    const declined: TextLine = { ...LINE, status: { kind: "declined", reason: "no_fit" }, chosen: null, enabled: false, fit: null };
-    const off: TextLine = { ...LINE, status: { kind: "off" }, enabled: false };
-    for (const line of [declined, off]) {
-      platform.textPlan.mockImplementation(async () => PLAN([line]));
-      const lib = createLibrary(platform, CATALOG, { ...DEFAULT_SETTINGS, recogniseText: true });
-      lib.add([ok("a")]);
-      lib.generate("a");
-      await flush();
-      const before = platform.vectorize.mock.calls.length;
-      // the app answers that the line is now painted out
-      platform.textSetLine.mockImplementationOnce((async () => ({ plan: PLAN([LINE]), textGroup: GROUP, repainted: true })) as never);
-      await lib.setTextLine("a", "a-t0", { font: { family: "Montserrat", weight: 400, italic: false, source: "google" } });
-      await flush();
-      expect(platform.vectorize.mock.calls.length).toBe(before + 1);
-      expect(lib.selectedItem()!.shown).not.toBeNull();
-      lib.remove("a");
-    }
-    // a string edit of a matched line is composed again, not traced
-    platform.textPlan.mockImplementation(async () => PLAN([LINE]));
-    const lib = createLibrary(platform, CATALOG, { ...DEFAULT_SETTINGS, recogniseText: true });
-    lib.add([ok("b")]);
-    lib.generate("b");
-    await flush();
-    const before = platform.vectorize.mock.calls.length;
-    await lib.setTextLine("b", "a-t0", { string: "EST." });
-    await flush();
-    expect(platform.vectorize.mock.calls.length).toBe(before);
   });
 
   it("an edit answered after a redraw was used is dropped", async () => {
@@ -1079,54 +1048,272 @@ describe("library: text", () => {
     expect(textOf(item).plan).toBeNull();
     expect(platform.vectorize.mock.calls.length).toBe(calls);
   });
+});
 
-  // Task 5 of the text-toggles plan: the traces' group now comes from the plan, not from the trace answer
-  it.skip("turning the hidden text off or on composes every trace again, and what was exported is unexported", async () => {
-    const { platform } = textPlatform();
-    const withText = '<g id="text"><path d="M0 0h1" fill="#000" data-line="a-t0"/><text x="0" y="5" data-line="a-t0">EST</text></g>';
-    platform.vectorize.mockImplementation(async () => response("<svg></svg>", 100));
-    const on = { ...DEFAULT_SETTINGS, recogniseText: true, hiddenText: true };
-    const lib = createLibrary(platform, CATALOG, on);
-    lib.add([ok("a"), ok("b")]);
-    lib.generate("a");
-    lib.generate("b");
+const FONT_M = { family: "Montserrat", weight: 400, italic: false, source: "google" } as const;
+const FONT_L = { family: "Lato", weight: 400, italic: false, source: "installed" } as const;
+const FONT_O = { family: "Oswald", weight: 500, italic: false, source: "google" } as const;
+const candidate = (font: TextLine["candidates"][number]["font"], path: string, id: string, word: string) => ({ font, iou: 0.9, stroke: 1, fit: LINE.fit!, path, text: `<text x="0" y="10" fill="none" data-line="${id}">${word}</text>` });
+const T0: TextLine = { ...LINE, id: "a-t0", quad: [[0, 0], [30, 0], [30, 10], [0, 10]], string: "EST", candidates: [candidate(FONT_M, "M0 0h10v10z", "a-t0", "EST"), candidate(FONT_L, "M0 0h20v10z", "a-t0", "EST")], chosen: 0 };
+const T1: TextLine = { ...LINE, id: "a-t1", quad: [[0, 20], [30, 20], [30, 30], [0, 30]], string: "2026", candidates: [candidate(FONT_M, "M0 20h10v10z", "a-t1", "2026")], chosen: 0 };
+const BOTH = ["a-t0", "a-t1"];
+/** The engine's answer for a mask: a red square, tagged with the mask so a test can tell the traces apart. */
+const baseFor = (mask: string[]) => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 32"><path d="M40 0h10v10h-10z" fill="#ff0000" id="m${mask.join("_")}"/></svg>`;
+const P = paramsKey({ detail: 6, min_region: 8 });
+const TEXT_ON = { ...DEFAULT_SETTINGS, recogniseText: true, hiddenText: false, liveUpdate: false };
+
+/** Traces that wait to be answered, with a plan and a line edit the test controls. */
+function maskPlatform(plan: TextPlan) {
+  const base = fakePlatform();
+  const platform = {
+    ...base.platform,
+    textPlan: vi.fn(async () => plan),
+    textSetLine: vi.fn(async (_id: string, _line: string, _change: TextLineChange) => ({ plan })),
+  } satisfies LibraryPlatform;
+  const answer = async (call: Call, elapsed = 500) => {
+    call.resolve(response(baseFor(call.req.mask), elapsed));
     await flush();
-    lib.markExported([{ id: "a", key: "auto" }]);
-    expect(shownAnswer(lib.getState().items[0])?.svg).toContain("<text");
-    lib.setSettings({ ...on, hiddenText: false });
-    for (const item of lib.getState().items) {
-      expect(shownAnswer(item)?.svg).toBe('<svg><g id="text"><path d="M0 0h1" fill="#000" data-line="a-t0"/></g></svg>');
-      expect(shownAnswer(item)?.textGroup).toBe(withText);
-    }
-    expect(lib.getState().items[0].exported).toBeNull();
-    // a trace made while it is off leaves it out too, and turning it back on brings it back
-    lib.setParam("a", "detail", 9);
-    lib.generate("a");
-    await flush();
-    expect(shownAnswer(lib.getState().items[0])?.svg).not.toContain("<text");
-    lib.setSettings({ ...on });
-    expect(shownAnswer(lib.getState().items[0])?.svg).toContain("<text");
-    expect(platform.vectorize).toHaveBeenCalledTimes(3);
+  };
+  return { platform, calls: base.calls, answer };
+}
+
+/** An image on Balanced (prefetching never runs under Auto), its plan read and its first trace asked for. */
+async function tracedOnBalanced(plan: TextPlan = PLAN([T0, T1]), settings = TEXT_ON) {
+  const p = maskPlatform(plan);
+  const lib = createLibrary(p.platform, CATALOG, settings);
+  lib.add([ok("a")]);
+  lib.pickPreset("a", PRESETS[1]);
+  lib.generate("a");
+  await flush();
+  return { ...p, lib, item: () => lib.selectedItem()! };
+}
+
+describe("library: traces by the painted set", () => {
+  beforeEach(() => vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] }));
+  afterEach(() => vi.useRealTimers());
+
+  it("keys the first trace by params and the full mask, then prefetches the empty mask and all-but-one masks in order", async () => {
+    const { calls, answer, item } = await tracedOnBalanced();
+    expect(calls.map((c) => c.req.mask)).toEqual([BOTH]);
+    expect(item().job).toMatchObject({ key: `${P}|a-t0,a-t1`, mask: BOTH, prefetch: false });
+    expect(traceKey(item())).toBe(`${P}|a-t0,a-t1`);
+    expect(traceKeyFor(item(), [])).toBe(`${P}|`);
+    expect(maskOf(textOf(item()))).toEqual(BOTH);
+    expect(fullMask(textOf(item()).plan!)).toEqual(BOTH);
+    await answer(calls[0]);
+    expect(item().shown).toBe(`${P}|a-t0,a-t1`);
+    // the trace on screen is its base with both lines set in their fonts
+    expect(shownAnswer(item())!.base).toBe(baseFor(BOTH));
+    expect(shownAnswer(item())!.svg).toContain('data-line="a-t0"');
+    expect(shownAnswer(item())!.svg).toContain('data-line="a-t1"');
+    // then the untouched image, in the background: no busy state
+    expect(calls).toHaveLength(2);
+    expect(calls[1].req).toMatchObject({ mask: [], auto: false, parameters: { detail: 6, min_region: 8 } });
+    expect(item().job).toMatchObject({ mask: [], prefetch: true });
+    expect(userJob(item())).toBeNull();
+    expect(currentJob(item())).toBeNull();
+    await answer(calls[1]);
+    expect(calls[2].req.mask).toEqual(["a-t1"]);
+    await answer(calls[2]);
+    expect(calls[3].req.mask).toEqual(["a-t0"]);
+    expect(item().job?.prefetch).toBe(true);
+    await answer(calls[3]);
+    expect(calls).toHaveLength(4);
+    const done = item();
+    expect(done.job).toBeNull();
+    expect(Object.keys(done.traces).sort()).toEqual([`${P}|`, `${P}|a-t0`, `${P}|a-t0,a-t1`, `${P}|a-t1`]);
+    // each trace sets the lines its own mask painted out, and only those
+    expect(done.traces[`${P}|`].svg).toBe(baseFor([]));
+    expect(done.traces[`${P}|a-t1`].svg).toContain('data-line="a-t1"');
+    expect(done.traces[`${P}|a-t1`].svg).not.toContain('data-line="a-t0"');
+    expect(done.shown).toBe(`${P}|a-t0,a-t1`);
   });
 
-  // Task 5 of the text-toggles plan: a trace now carries text only when composed from the plan, so which traces drop is redefined there
-  it.skip("turning Recognise text off drops the traces that carry text, so the next trace is of the original", async () => {
-    const { platform } = textPlatform();
-    const on = { ...DEFAULT_SETTINGS, recogniseText: true };
-    const lib = createLibrary(platform, CATALOG, on);
-    lib.add([ok("a")]);
-    lib.generate("a");
+  it("a prefetch is aborted by a parameter change and never runs under Auto", async () => {
+    // Auto: the full mask only
+    const auto = maskPlatform(PLAN([T0, T1]));
+    const onAuto = createLibrary(auto.platform, CATALOG, TEXT_ON);
+    onAuto.add([ok("a")]);
+    onAuto.generate("a");
     await flush();
-    lib.markExported([{ id: "a", key: "auto" }]);
-    lib.setSettings({ ...on, recogniseText: false });
-    const item = lib.selectedItem()!;
-    expect(item.traces).toEqual({});
-    expect(item.shown).toBeNull();
-    expect(item.exported).toBeNull();
-    platform.vectorize.mockImplementation(async () => response("<svg></svg>", 100));
-    lib.generate("a");
+    expect(auto.calls[0].req).toMatchObject({ auto: true, mask: BOTH });
+    await auto.answer(auto.calls[0]);
+    expect(onAuto.selectedItem()!.shown).toBe("auto|a-t0,a-t1");
+    expect(auto.calls).toHaveLength(1);
+    expect(onAuto.selectedItem()!.job).toBeNull();
+
+    const { calls, answer, item, lib } = await tracedOnBalanced();
+    await answer(calls[0]);
+    expect(calls[1].req.mask).toEqual([]);
+    lib.setParam("a", "detail", 9);
+    expect(calls[1].signal.aborted).toBe(true);
+    expect(item().job).toBeNull();
+    calls[1].reject(new ApiError("cancelled", "Cancelled", 499));
     await flush();
-    expect(platform.vectorize).toHaveBeenCalledTimes(2);
-    expect(shownAnswer(lib.selectedItem()!)?.textGroup).toBeNull();
+    vi.advanceTimersByTime(DEBOUNCE_MS * 4);
+    await flush();
+    expect(calls).toHaveLength(2);
+    expect(item().error).toBeNull();
+    // the next user trace prefetches again, under the new settings
+    lib.generate("a");
+    expect(calls[2].req).toMatchObject({ mask: BOTH, parameters: { detail: 9, min_region: 8 } });
+    await answer(calls[2]);
+    expect(calls[3].req).toMatchObject({ mask: [], parameters: { detail: 9, min_region: 8 } });
+  });
+
+  it("toggling a line shows the cached trace for its mask instantly, and traces on demand when it is not cached", async () => {
+    const { calls, answer, item, lib } = await tracedOnBalanced();
+    await answer(calls[0]);
+    await answer(calls[1]); // the empty mask
+    expect(calls[2]).toMatchObject({ req: { mask: ["a-t1"] } }); // a prefetch, running
+    // a-t1 off: nothing known of [a-t0], so it is traced as a user trace; the screen keeps what it shows meanwhile
+    lib.toggleTextLine("a", "a-t1", false);
+    expect([...textOf(item()).enabled]).toEqual(["a-t0"]);
+    expect(calls[2].signal.aborted).toBe(true);
+    expect(calls[3].req.mask).toEqual(["a-t0"]);
+    expect(item().job).toMatchObject({ key: `${P}|a-t0`, prefetch: false });
+    expect(currentJob(item())).not.toBeNull();
+    expect(item().shown).toBe(`${P}|a-t0,a-t1`);
+    // a-t0 off too: the untouched image is cached and shows at once, and the trace for [a-t0] runs on
+    lib.toggleTextLine("a", "a-t0", false);
+    expect(item().shown).toBe(`${P}|`);
+    expect(calls).toHaveLength(4);
+    expect(calls[3].signal.aborted).toBe(false);
+    await answer(calls[3]);
+    expect(item().traces[`${P}|a-t0`]).toBeDefined();
+    expect(item().shown).toBe(`${P}|`);
+    // and a-t0 back on shows it without a request
+    const before = calls.length;
+    lib.toggleTextLine("a", "a-t0", true);
+    expect(item().shown).toBe(`${P}|a-t0`);
+    expect(shownAnswer(item())!.svg).toContain('data-line="a-t0"');
+    expect(calls.slice(before).every((c) => c.req.mask.join() !== "a-t0")).toBe(true);
+  });
+
+  it("toggling while that mask's trace is in flight does not request it twice and lands under its key", async () => {
+    const { calls, answer, item, lib } = await tracedOnBalanced();
+    await answer(calls[0]);
+    expect(calls[1].req.mask).toEqual([]); // the empty mask, prefetching
+    lib.toggleTextLine("a", "a-t0", false); // [a-t1]: traced on demand
+    expect(calls[2].req.mask).toEqual(["a-t1"]);
+    lib.toggleTextLine("a", "a-t0", true); // back: cached, shown, and the trace for [a-t1] runs on
+    expect(item().shown).toBe(`${P}|a-t0,a-t1`);
+    expect(calls[2].signal.aborted).toBe(false);
+    expect(currentJob(item())).toBeNull();
+    lib.toggleTextLine("a", "a-t0", false); // and off again: the trace in flight is the one
+    expect(calls).toHaveLength(3);
+    expect(currentJob(item())).toMatchObject({ key: `${P}|a-t1` });
+    expect([...textOf(item()).enabled]).toEqual(["a-t1"]);
+    await answer(calls[2]);
+    expect(item().shown).toBe(`${P}|a-t1`);
+    expect(shownAnswer(item())!.base).toBe(baseFor(["a-t1"]));
+    // the prefetch picks up again; switching to the mask it is tracing makes it the user's, not a second request
+    expect(calls[3]).toMatchObject({ req: { mask: [] } });
+    expect(item().job?.prefetch).toBe(true);
+    lib.toggleTextLine("a", "a-t1", false);
+    expect(calls).toHaveLength(4);
+    expect(calls[3].signal.aborted).toBe(false);
+    expect(currentJob(item())).toMatchObject({ key: `${P}|`, prefetch: false });
+    await answer(calls[3]);
+    expect(item().shown).toBe(`${P}|`);
+  });
+
+  it("a font among the candidates swaps locally and tells the app in the background; a search pick round-trips", async () => {
+    const { calls, answer, item, lib, platform } = await tracedOnBalanced();
+    await answer(calls[0]);
+    expect(shownAnswer(item())!.svg).toContain("M0 0h10v10z");
+    let release: () => void = () => {};
+    platform.textSetLine.mockImplementationOnce((async () => {
+      await new Promise<void>((r) => (release = r));
+      return { plan: PLAN([{ ...T0, string: "NOT USED", chosen: 1 }, T1]) };
+    }) as never);
+    void lib.setTextLine("a", "a-t0", { font: FONT_L });
+    // at once, before the app has answered
+    expect(textOf(item()).plan!.lines[0].chosen).toBe(1);
+    expect(shownAnswer(item())!.svg).toContain("M0 0h20v10z");
+    expect(shownAnswer(item())!.svg).not.toContain("M0 0h10v10z");
+    await flush();
+    expect(platform.textSetLine).toHaveBeenCalledWith("a", "a-t0", { font: FONT_L });
+    release();
+    await flush();
+    // the answer adds no candidate, so it is not merged
+    expect(textOf(item()).plan!.lines[0].string).toBe("EST");
+    expect(calls).toHaveLength(2); // nothing traced; the prefetch runs on
+    expect(calls[1].signal.aborted).toBe(false);
+    // a font from search is fitted by the app first
+    platform.textSetLine.mockImplementationOnce(async () => ({ plan: PLAN([{ ...T0, candidates: [...T0.candidates, candidate(FONT_O, "M0 0h30v10z", "a-t0", "EST")], chosen: 2 }, T1]) }));
+    const pick = lib.setTextLine("a", "a-t0", { font: FONT_O });
+    expect(shownAnswer(item())!.svg).toContain("M0 0h20v10z");
+    await pick;
+    expect(platform.textSetLine).toHaveBeenLastCalledWith("a", "a-t0", { font: FONT_O });
+    expect(textOf(item()).plan!.lines[0].chosen).toBe(2);
+    expect(shownAnswer(item())!.svg).toContain("M0 0h30v10z");
+    expect(calls).toHaveLength(2);
+  });
+
+  it("a string edit recomposes every cached trace from its base", async () => {
+    const { calls, answer, item, lib, platform } = await tracedOnBalanced();
+    await answer(calls[0]);
+    await answer(calls[1]);
+    await answer(calls[2]);
+    expect(calls[3].req.mask).toEqual(["a-t0"]); // prefetching
+    const edited = PLAN([{ ...T0, string: "EST.", candidates: [candidate(FONT_M, "M0 0h11v10z", "a-t0", "EST."), candidate(FONT_L, "M0 0h21v10z", "a-t0", "EST.")] }, T1]);
+    platform.textSetLine.mockImplementationOnce(async () => ({ plan: edited }));
+    await lib.setTextLine("a", "a-t0", { string: "EST." });
+    expect(calls[3].signal.aborted).toBe(true);
+    expect(calls).toHaveLength(4);
+    const done = item();
+    expect(textOf(done).plan).toBe(edited);
+    for (const [key, t] of Object.entries(done.traces)) {
+      const mask = key.slice(key.lastIndexOf("|") + 1).split(",").filter(Boolean);
+      expect(t.svg).toBe(composeSvg(t.base, { plan: edited, enabled: new Set(mask), hiddenText: false }));
+    }
+    expect(done.traces[`${P}|a-t0,a-t1`].svg).toContain("M0 0h11v10z");
+    expect(done.traces[`${P}|a-t0,a-t1`].svg).not.toContain("M0 0h10v10z");
+    expect(done.traces[`${P}|`].svg).toBe(baseFor([]));
+  });
+
+  it("a plan with no matched line traces with an empty mask and prefetches nothing", async () => {
+    const declined = (l: TextLine): TextLine => ({ ...l, status: { kind: "declined", reason: "no_fit" }, chosen: null, enabled: false, fit: null });
+    const { calls, answer, item } = await tracedOnBalanced(PLAN([declined(T0), declined(T1)]));
+    expect(calls.map((c) => c.req.mask)).toEqual([[]]);
+    await answer(calls[0]);
+    expect(item().shown).toBe(`${P}|`);
+    expect(shownAnswer(item())!.svg).toBe(baseFor([]));
+    expect(calls).toHaveLength(1);
+    expect(item().job).toBeNull();
+  });
+
+  it("hidden text off recomposes every trace without <text>", async () => {
+    const on = { ...TEXT_ON, hiddenText: true };
+    const { calls, answer, item, lib } = await tracedOnBalanced(PLAN([T0, T1]), on);
+    await answer(calls[0]);
+    await answer(calls[1]);
+    await answer(calls[2]);
+    lib.markExported([{ id: "a", key: item().shown! }]);
+    expect(shownAnswer(item())!.svg).toContain("<text");
+    lib.setSettings({ ...on, hiddenText: false });
+    for (const t of Object.values(item().traces)) expect(t.svg).not.toContain("<text");
+    expect(item().traces[`${P}|a-t0,a-t1`].svg).toContain('data-line="a-t0"');
+    expect(item().exported).toBeNull();
+    lib.setSettings(on);
+    expect(item().traces[`${P}|a-t0,a-t1`].svg).toContain("<text");
+    expect(item().traces[`${P}|a-t1`].svg).toContain(">2026</text>");
+    expect(item().traces[`${P}|a-t1`].svg).not.toContain(">EST</text>");
+  });
+
+  it("turning Recognise text off keeps only the traces of the untouched image, and shows one when it is known", async () => {
+    const { calls, answer, item, lib } = await tracedOnBalanced();
+    await answer(calls[0]);
+    await answer(calls[1]);
+    expect(calls[2].req.mask).toEqual(["a-t1"]);
+    lib.markExported([{ id: "a", key: item().shown! }]);
+    lib.setSettings({ ...TEXT_ON, recogniseText: false });
+    expect(calls[2].signal.aborted).toBe(true);
+    expect(Object.keys(item().traces)).toEqual([`${P}|`]);
+    expect(item().shown).toBe(`${P}|`);
+    expect(item().exported).toBeNull();
+    await flush();
+    expect(calls).toHaveLength(3);
   });
 });

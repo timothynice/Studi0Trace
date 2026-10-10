@@ -1,7 +1,7 @@
 import { Check, Square, Wand2 } from "lucide-react";
 import { useEffect, useState } from "react";
 
-import { currentJob, needsUpdate, traceKey, type ImageItem } from "@/state/library";
+import { currentJob, isAutoKey, needsUpdate, traceKey, type ImageItem } from "@/state/library";
 
 export interface TraceButtonProps {
   item: ImageItem;
@@ -25,7 +25,7 @@ export function TraceButton({ item, candidates, onGenerate, onCancel }: TraceBut
   if (job) {
     const seconds = Math.max(0, Math.floor((now - job.startedAt) / 1000));
     const queued = job.phase === "queued";
-    const phase = queued ? "Queued…" : `${job.phase === "text" ? "Reading text…" : job.key === "auto" ? `Trying ${candidates} styles…` : "Tracing…"} ${seconds} s`;
+    const phase = queued ? "Queued…" : `${job.phase === "text" ? "Reading text…" : isAutoKey(job.key) ? `Trying ${candidates} styles…` : "Tracing…"} ${seconds} s`;
     return (
       <button type="button" className={`mac-primary relative overflow-hidden ${queued ? "opacity-80" : ""}`} onClick={onCancel} title="Cancel Trace (⌘.)">
         {!queued && <span data-testid="sweep" aria-hidden="true" className="sweep pointer-events-none absolute inset-0" />}

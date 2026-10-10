@@ -1,7 +1,7 @@
 import * as ContextMenu from "@radix-ui/react-context-menu";
 import type { ReactNode } from "react";
 
-import type { ImageItem } from "@/state/library";
+import { userJob, type ImageItem } from "@/state/library";
 
 export interface ImageMenuProps {
   item: ImageItem;
@@ -24,7 +24,7 @@ export function ImageMenu({ item, children, onSelect, onGenerate, onExport, onRe
       </ContextMenu.Trigger>
       <ContextMenu.Portal>
         <ContextMenu.Content className="mac-menu">
-          <ContextMenu.Item className="mac-menu-item" disabled={!!item.job} onSelect={onGenerate}>
+          <ContextMenu.Item className="mac-menu-item" disabled={!!userJob(item)} onSelect={onGenerate}>
             Generate Vector
           </ContextMenu.Item>
           <ContextMenu.Item className="mac-menu-item" disabled={item.shown === null} onSelect={onExport}>

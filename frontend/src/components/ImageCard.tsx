@@ -1,4 +1,4 @@
-import { errorOf, needsUpdate, shownAnswer, type ImageItem } from "@/state/library";
+import { errorOf, needsUpdate, shownAnswer, userJob, type ImageItem } from "@/state/library";
 
 export interface ImageCardProps {
   item: ImageItem;
@@ -8,7 +8,9 @@ export interface ImageCardProps {
 
 /** One image in the sidebar: its thumbnail, name and size; a dot while it is queued, tracing or failed; a badge once traced. */
 export function ImageCard({ item, selected, onSelect }: ImageCardProps) {
-  const { image, job } = item;
+  const { image } = item;
+  // a prefetch runs in the background and shows nothing
+  const job = userJob(item);
   const error = errorOf(item);
   const phase = job ? (job.phase === "queued" ? "Queued" : "Tracing…") : error ? "Failed" : null;
   const traced = !job && !!shownAnswer(item);

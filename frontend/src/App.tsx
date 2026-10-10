@@ -31,7 +31,7 @@ import { specsFor } from "./lib/schema";
 import { commandForKey, isTyping, type Command } from "./lib/shortcuts";
 import { textErrorText } from "./lib/text";
 import { platform, type OpenOutcome, type Settings, type ViewMode } from "./platform";
-import { createLibrary, ENGINE, currentJob, errorOf, redrawOf, shownAnswer, textOf, unexportedCount, type Catalog } from "./state/library";
+import { createLibrary, ENGINE, currentJob, errorOf, isAutoKey, redrawOf, shownAnswer, textOf, unexportedCount, userJob, type Catalog } from "./state/library";
 import { useLibrary } from "./state/useLibrary";
 
 const FORMATS = platform.kind === "native" ? "PNG, JPG, HEIC, etc." : "PNG, JPG, GIF, WebP, BMP";
@@ -223,7 +223,7 @@ function Workspace({ catalog, settings, onSettingsChange }: { catalog: Catalog; 
 
   const job = item ? currentJob(item) : null;
   const candidates = catalog.presets.filter((p) => p.auto_candidate).length;
-  const busy = job ? { phase: job.phase === "queued" ? "Queued…" : job.phase === "text" ? "Reading text…" : job.key === "auto" ? `Trying ${candidates} styles…` : "Tracing…", startedAt: job.startedAt } : null;
+  const busy = job ? { phase: job.phase === "queued" ? "Queued…" : job.phase === "text" ? "Reading text…" : isAutoKey(job.key) ? `Trying ${candidates} styles…` : "Tracing…", startedAt: job.startedAt } : null;
   const viewer = item ? (
     <Viewer
       ref={viewerRef}
@@ -408,7 +408,7 @@ function Workspace({ catalog, settings, onSettingsChange }: { catalog: Catalog; 
   const hasVector = !!layers.exportSvg;
   const hasPath = !!item?.image.path;
   const tracing = !!job;
-  const anyTracing = state.items.some((i) => i.job);
+  const anyTracing = state.items.some((i) => userJob(i));
   const unexported = unexportedCount(state);
   const redraw = item ? redrawOf(item) : null;
   const canRedraw = CAN_REDRAW && hasImage && !redraw?.phase;
