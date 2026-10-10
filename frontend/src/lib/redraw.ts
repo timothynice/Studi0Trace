@@ -3,7 +3,7 @@ import { ApiError } from "./api";
 import type { Drift, DriftVerdict, RedrawPhase, Roughness } from "@/platform/types";
 
 /** The README's sentence, and the consent sheet's. */
-export const PRIVACY_SENTENCE = "Your images stay on your Mac: nothing is uploaded unless you choose AI redraw or turn on Read text with AI, which send that one image to OpenAI with your own API key.";
+export const PRIVACY_SENTENCE = "Your images stay on your Mac: nothing is uploaded unless you choose AI redraw or turn on Read text with AI, which send the image you are tracing to OpenAI with your own API key.";
 export const CONSENT_UPLOAD = "The image is uploaded to OpenAI with your API key and billed to your OpenAI account.";
 export const CONSENT_TEXT_UPLOAD = "Each image with text is uploaded to OpenAI with your API key and billed to your OpenAI account; the reply is the text and a font name, and the image is never changed.";
 export const CONSENT_CHANGES = "The redraw may change shapes, spacing and colours. You check it against the original before it is used.";

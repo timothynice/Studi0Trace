@@ -244,11 +244,12 @@ with those defaults; its `defaults_and_camel_case` test follows.
 
 Copy. `PRIVACY_SENTENCE` (`frontend/src/lib/redraw.ts`, held by `redraw.test.ts` and repeated in
 the README at line 76 and the consent sheet) becomes: "Your images stay on your Mac: nothing is
-uploaded unless you choose AI redraw or turn on Read text with AI, which send that one image to
-OpenAI with your own API key." The README's next sentence, "It is the only thing in the app that
-touches the network, and it is off until you turn it on", becomes: "Those two and the fonts are
-the only things in the app that touch the network: a matched Google Font is downloaded from
-Google with no image attached, and the AI features are off until you turn them on." The consent
+uploaded unless you choose AI redraw or turn on Read text with AI, which send the image you are
+tracing to OpenAI with your own API key." The README's next sentence, "It is the only thing in the
+app that touches the network, and it is off until you turn it on", becomes: "Those two, the fonts
+and the update check are the only things in the app that touch the network: a matched Google Font
+is downloaded from Google and the update check asks GitHub for the newest version, neither with an
+image attached, and the AI features are off until you turn them on." The consent
 sheet gets a text-reading variant of its first paragraph ("Each image with text is uploaded to
 OpenAI with your API key and billed to your OpenAI account; the reply is the text and a font name,
 and the image is never changed") and the same key field.
@@ -407,7 +408,7 @@ a forced font, to look at what the fit draws):
   weight sweep of Montserrat, Raleway, Kumbh Sans, Josefin Sans, Quicksand, Jost and Poppins over the sans lines found
   EST. 2026 (image 2) at Montserrat 500 0.807, but that family is not on that line's shortlist.
 - *A string with a missing space fits worse and shortlists worse* (`ABRIGHTER`, `LIFEIS`, `IDEAS FOR ABRIGHTER`): the
-  AI reader is the intended fix and was not run (no key stored). With the spaces put back the IoUs rose by
+  AI reader is the intended fix and was not run (the harness wires no reader). With the spaces put back the IoUs rose by
   0.03-0.12 and still stayed under the threshold.
 - *Wide, uneven tracking* (the taglines) is the fit's weak spot: one tracking value for the whole line, the word gaps
   of these sources are wider than a letter gap, and the per-glyph nudges stop at 2 px.
@@ -424,8 +425,8 @@ OUTSIDE (image 2).
 **Settings window.** The sheet was rendered in a browser at the window's 520x850 in light and dark: the Text group
 is whole and correct in both, the consent sheet opens from *Read text with AI* with no key. The sheet is **968 px
 tall** (955 without the new Model hint), so the fixed, non-resizable window scrolls 118 px; the Text group's heading
-is in view at the top and *Hidden text in exports* is reached by scrolling. Raising `inner_size` to about 980 would
-show it all.
+sits at y≈711 of the window's 850, and the rest of the group, *Hidden text in exports* last, is reached by scrolling.
+The window stays at 850 (a 13″ display cannot show 980) and the sheet scrolls.
 
 **Not verified.** The real app was not launched: Tim's installed Studi0Trace was running, `npm run smoke` refuses to
 run beside it, and a second `tauri dev` instance would share its settings file and Keychain. So the main window's

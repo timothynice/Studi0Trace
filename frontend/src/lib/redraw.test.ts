@@ -57,7 +57,7 @@ describe("redraw words", () => {
   });
 
   it("says what is uploaded, to whom, on whose bill, and that it is checked first", () => {
-    expect(PRIVACY_SENTENCE).toBe("Your images stay on your Mac: nothing is uploaded unless you choose AI redraw or turn on Read text with AI, which send that one image to OpenAI with your own API key.");
+    expect(PRIVACY_SENTENCE).toBe("Your images stay on your Mac: nothing is uploaded unless you choose AI redraw or turn on Read text with AI, which send the image you are tracing to OpenAI with your own API key.");
     expect(CONSENT_TEXT_UPLOAD).toContain("the image is never changed");
     expect(CONSENT_UPLOAD).toContain("uploaded to OpenAI with your API key and billed to your OpenAI account");
     expect(CONSENT_CHANGES).toContain("may change shapes, spacing and colours");

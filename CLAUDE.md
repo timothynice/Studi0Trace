@@ -53,14 +53,35 @@ fidelity bench. Read `README.md` first — it has the run/test/API reference.
   child process, the app's own binary with `--trace-worker`, one at a time (`queue.rs`), killed to cancel.
   HEIC/HEIF/TIFF and Downscale go through `/usr/bin/sips`. The webview never names a path to write: Rust shows
   the panels and writes (`export.rs`). AI redraw (`src-tauri/src/redraw/`: `geometry`, `rough`, `drift`, `openai`;
-  `keychain.rs`) is the app's only network code and the only code that sees the OpenAI key (Keychain service
+  `keychain.rs`) is, with the text module's two network files below and the updater, the app's only network code,
+  and with the AI reader the only code that sees the OpenAI key (Keychain service
   `com.studi0.trace.openai`; its calls run off the async runtime): opt-in, the drift check before a redraw is used,
   the store swapping an image's bytes for its redraw and back (`"{id}-original"`). Errors carry stable codes
   (`no_key`, `invalid_key`, `not_allowed`, `quota`, `refused`, `timeout`, `offline`, `bad_reply`, `too_large`; `cancelled`
   is silent, and a cancelled or superseded redraw emits no terminal `redraw-phase`). `STUDI0TRACE_OPENAI_BASE`
   points it at the tests' mock server (`tests/redraw_openai.rs`), the `#[ignore]`d `live_redraw` calls OpenAI by
   hand, and `tests/redraw_boundary.rs` holds the CSP, the worker and the core offline (spec
-  `2026-10-06-ai-redraw-design.md`). The Settings window is 520×780.
+  `2026-10-06-ai-redraw-design.md`). The Settings window is 520×850 and its sheet scrolls (a 13″ display cannot
+  show the whole sheet).
+  Text re-setting (`src-tauri/src/text/`, spec `2026-10-09-text-resetting-design.md`) sets the lines of text in an
+  image in a matched font over the trace instead of tracing them as shapes: macOS Vision finds the lines
+  (`vision.rs`) → the optional AI reader reads them and names fonts (`reader_openai.rs`, Settings ▸ Text ▸ Read text
+  with AI; never handed an image Vision found no text in) → `ink.rs` measures each line's ink and declines what it
+  cannot set (script, gradient, rotated, mismatch) → `catalog.rs` shortlists Google and installed families →
+  `fit.rs` (on `glyphs.rs`'s shaping and outlines) fits size, baseline, tracking and per-glyph nudges → the matched
+  lines are painted out of what the trace sees (`plan.rs`) → `commands::vectorize` hands the worker the painted
+  bytes → `compose.rs` writes the `<g id="text">` group (one path per line, and always the hidden `<text>`, which
+  the frontend's `lib/textsvg.ts` leaves out when the setting is off) that the frontend composes before `</svg>`.
+  Progress is the `text-phase` event (`{id, phase}`); `plans.rs` keeps a plan per image by the SHA-256 of its bytes
+  with generations (a cancel, a newer plan or a close refuses a late result; an edit is stored only while the
+  bytes are the same, `put_if`), at most two plans run at once, and an edit answers `repainted` when it changed
+  the painted bytes (the frontend traces again then, else recomposes). Google Fonts are downloaded on demand
+  into the app data dir's `fonts/` (`fonts.rs`). The two network files are `fonts.rs` (Google, family names only)
+  and `reader_openai.rs` (OpenAI, the user's key, `store: false`); `STUDI0TRACE_GFONTS_BASE` and
+  `STUDI0TRACE_OPENAI_BASE` point them at the tests' mock servers. Fixture suites: `cargo test --release --test
+  text_fit --test text_match --test text_ink_fixtures --test text_compose --test text_fonts --test text_openai --lib`
+  (fixtures in `tests/fixtures/text/`); the real-image gate is the `#[ignore]`d `tests/text_examples_gate.rs`, run by
+  hand with `STUDI0TRACE_TEXT_EXAMPLES=<dir with 1.png 2.png 3.png>` (the images are not in git).
   `npm run dev` / `npm run build` / `npm run smoke` from `apps/desktop`;
   `cargo test -p studi0trace-desktop --release` includes the worker tests on the real binary. The crate embeds
   `frontend/dist` when it compiles, so `cd frontend && npm run build` comes before any cargo build of the workspace.
