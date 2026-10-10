@@ -335,14 +335,15 @@ export function createLibrary(platform: LibraryPlatform, catalog: Catalog, initi
   };
 
   /**
-   * A user action: the running prefetch is aborted and the queue of `id` (every image's when none is named) is
-   * cleared. A prefetch of another image that was running goes back to the head of the queue. The next one starts
-   * once no user job is left (this runs it in a microtask, after the caller has started its own job).
+   * A user action: the queue of `id` (every image's when none is named) is cleared, and the running prefetch is
+   * aborted when it is of that image, or when `starting` (a user job is about to start and needs the worker); a
+   * prefetch of another image aborted for it goes back to the head of the queue. The next one starts once no user
+   * job is left (this runs it in a microtask, after the caller has started its own job, if any).
    */
-  const abortPrefetch = (id?: string) => {
+  const abortPrefetch = (id?: string, starting = false) => {
     queue = id === undefined ? [] : queue.filter((q) => q.id !== id);
     const running = prefetching;
-    if (running) {
+    if (running && (id === undefined || running.id === id || starting)) {
       prefetching = null;
       controllers.get(running.jobId)?.abort();
       controllers.delete(running.jobId);
@@ -475,20 +476,23 @@ export function createLibrary(platform: LibraryPlatform, catalog: Catalog, initi
     const item = find(id);
     if (!item) return;
     const key = traceKey(item);
-    if (item.traces[key]) {
-      patch(id, { shown: key, error: null, errorKey: null });
-      return;
-    }
     if (item.job?.key === key) {
       promote(id);
       return;
     }
-    // a user trace: the background work stops for it
-    abortPrefetch(id);
+    // a plan to ask comes first even when the key without it is cached (after a Revert the plan is gone and the
+    // untouched trace is known): once the plan lands, its own key is shown if cached, else traced
+    const text = needsText(id);
+    if (item.traces[key] && !text) {
+      patch(id, { shown: key, error: null, errorKey: null });
+      return;
+    }
+    // a user job: the background work stops for it
+    abortPrefetch(id, true);
     // the plan comes first, and is only waited for when there is one to ask; otherwise the trace starts at once.
     // While it runs the image holds a job of phase "text", so the trace button shows busy with Cancel and the
     // canvas says what is happening; the real trace job replaces it
-    if (needsText(id)) {
+    if (text) {
       abortJob(item);
       const textJob = newJobId();
       patch(id, { job: { id: textJob, key, startedAt: Date.now(), phase: "text", mask: maskOf(textOf(item)), prefetch: false }, error: null, errorKey: null });
@@ -545,6 +549,9 @@ export function createLibrary(platform: LibraryPlatform, catalog: Catalog, initi
     if (item.traces[key]) {
       // a job for other settings runs on: its answer is kept as any other, and it takes nothing from the screen
       patch(id, { shown: key });
+      // the settings changed, so the background work stopped: it starts again for these
+      schedulePrefetch(id);
+      runPrefetch();
       return;
     }
     const last = item.shown ? item.traces[item.shown] : undefined;
@@ -849,7 +856,9 @@ export function createLibrary(platform: LibraryPlatform, catalog: Catalog, initi
       const line = item ? textOf(item).plan?.lines.find((l) => l.id === lineId) : undefined;
       if (!item || !line) return;
       const known = change.font && change.string === undefined ? line.candidates.findIndex((c) => sameFont(c.font, change.font!)) : -1;
-      if (known >= 0) {
+      // a pick made while an edit is in flight waits for it: applied here to the plan before the edit's answer, the
+      // answer would take it back, and the app would answer it from a plan the frontend no longer shows
+      if (known >= 0 && !editQueue.has(id)) {
         // a font the app has already fitted: chosen here, as the app would choose it, and composed at once
         applyPlan(id, withChosen(textOf(item).plan!, lineId, known));
         const image = item.image;
@@ -878,6 +887,9 @@ export function createLibrary(platform: LibraryPlatform, catalog: Catalog, initi
         // a redraw used or a revert while the edit ran swapped the image: the answer is about bytes it no longer has
         if (!now || now.image !== before.image) return;
         applyPlan(id, answer.plan);
+        // what is painted out did not change, so the masks still wanted are prefetched again
+        schedulePrefetch(id);
+        runPrefetch();
       });
     },
 

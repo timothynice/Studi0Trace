@@ -1069,6 +1069,10 @@ function maskPlatform(plan: TextPlan) {
     ...base.platform,
     textPlan: vi.fn(async () => plan),
     textSetLine: vi.fn(async (_id: string, _line: string, _change: TextLineChange) => ({ plan })),
+    redrawImage: vi.fn(async () => RESULT),
+    acceptRedraw: vi.fn(async (id: string) => ({ image: image(id), original: image(`${id}-original`) })),
+    discardRedraw: vi.fn(async () => {}),
+    revertRedraw: vi.fn(async (id: string) => image(id)),
   } satisfies LibraryPlatform;
   const answer = async (call: Call, elapsed = 500) => {
     call.resolve(response(baseFor(call.req.mask), elapsed));
@@ -1261,7 +1265,9 @@ describe("library: traces by the painted set", () => {
     platform.textSetLine.mockImplementationOnce(async () => ({ plan: edited }));
     await lib.setTextLine("a", "a-t0", { string: "EST." });
     expect(calls[3].signal.aborted).toBe(true);
-    expect(calls).toHaveLength(4);
+    // nothing traced on the edit's account: the aborted prefetch is only queued again
+    expect(calls).toHaveLength(5);
+    expect(calls[4].req.mask).toEqual(["a-t0"]);
     const done = item();
     expect(textOf(done).plan).toBe(edited);
     for (const [key, t] of Object.entries(done.traces)) {
@@ -1315,5 +1321,82 @@ describe("library: traces by the painted set", () => {
     expect(item().exported).toBeNull();
     await flush();
     expect(calls).toHaveLength(3);
+  });
+
+  it("a candidate pick made while a string edit is in flight waits for it and is applied as the app answers", async () => {
+    const { calls, answer, item, lib, platform } = await tracedOnBalanced();
+    await answer(calls[0]);
+    const edited = PLAN([{ ...T0, string: "EST.", candidates: [candidate(FONT_M, "M0 0h11v10z", "a-t0", "EST."), candidate(FONT_L, "M0 0h21v10z", "a-t0", "EST.")], chosen: 0 }, T1]);
+    const picked = PLAN([{ ...edited.lines[0], chosen: 1 }, T1]);
+    let release: () => void = () => {};
+    platform.textSetLine
+      .mockImplementationOnce((async () => {
+        await new Promise<void>((r) => (release = r));
+        return { plan: edited };
+      }) as never)
+      .mockImplementationOnce(async () => ({ plan: picked }));
+    const edit = lib.setTextLine("a", "a-t0", { string: "EST." });
+    const pick = lib.setTextLine("a", "a-t0", { font: FONT_L });
+    await flush();
+    expect(platform.textSetLine).toHaveBeenCalledTimes(1); // the pick waits behind the edit
+    release();
+    await Promise.all([edit, pick]);
+    expect(platform.textSetLine.mock.calls.map((c) => c[2])).toEqual([{ string: "EST." }, { font: FONT_L }]);
+    const line = textOf(item()).plan!.lines[0];
+    expect(line.string).toBe("EST.");
+    expect(line.chosen).toBe(1);
+    expect(shownAnswer(item())!.svg).toContain("M0 0h21v10z");
+  });
+
+  it("after Revert, Generate asks for the plan again and shows the cached full-mask trace without tracing", async () => {
+    const { calls, answer, item, lib, platform } = await tracedOnBalanced();
+    await answer(calls[0]);
+    await answer(calls[1]); // the untouched image: what the key is without a plan
+    await lib.redraw("a");
+    await lib.acceptRedraw("a");
+    await lib.revertRedraw("a");
+    expect(textOf(item()).plan).toBeNull();
+    expect(item().traces[`${P}|`]).toBeDefined();
+    const traced = calls.length;
+    lib.generate("a");
+    await flush();
+    expect(platform.textPlan).toHaveBeenCalledTimes(2);
+    expect(calls).toHaveLength(traced);
+    expect(item().shown).toBe(`${P}|a-t0,a-t1`);
+    expect(item().job).toBeNull();
+  });
+
+  it("another image's prefetch is aborted only when a user job starts, and resumes after it", async () => {
+    const { calls, answer, lib } = await tracedOnBalanced();
+    await answer(calls[0]);
+    expect(calls[1].req).toMatchObject({ imageId: "a", mask: [] });
+    lib.add([ok("b")]);
+    lib.pickPreset("b", PRESETS[1]);
+    lib.setParam("b", "detail", 9); // nothing traces: a's prefetch runs on
+    expect(calls[1].signal.aborted).toBe(false);
+    lib.generate("b");
+    expect(calls[1].signal.aborted).toBe(true);
+    await flush();
+    expect(calls[2].req).toMatchObject({ imageId: "b", mask: BOTH });
+    await answer(calls[2]);
+    // a's aborted prefetch went back to the head of the queue
+    expect(calls[3].req).toMatchObject({ imageId: "a", mask: [] });
+  });
+
+  it("the prefetch queue is rebuilt after a string edit and after settings that land on a cached trace", async () => {
+    const { calls, answer, lib } = await tracedOnBalanced();
+    await answer(calls[0]);
+    expect(calls[1].req.mask).toEqual([]);
+    await lib.setTextLine("a", "a-t0", { string: "EST." });
+    expect(calls[1].signal.aborted).toBe(true);
+    await flush();
+    expect(calls[2].req.mask).toEqual([]);
+    lib.setParam("a", "detail", 9);
+    expect(calls[2].signal.aborted).toBe(true);
+    await flush();
+    expect(calls).toHaveLength(3);
+    lib.setParam("a", "detail", 6); // back to the traced settings
+    await flush();
+    expect(calls[3].req).toMatchObject({ mask: [], parameters: { detail: 6, min_region: 8 } });
   });
 });
