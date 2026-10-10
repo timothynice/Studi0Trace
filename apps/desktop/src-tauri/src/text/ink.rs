@@ -8,6 +8,10 @@ use crate::redraw::Source;
 /// How far a pixel may be from each of its eight neighbours and still be on a flat patch of ink.
 const CORE_FLAT: f32 = 6.0;
 
+/// How far off the backdrop-to-ink line (in linear RGB, over the line's length) a pixel may be and still be a blend
+/// of the two: anti-aliased ink is on it to a few hundredths; a gold swash beside dark ink is 0.2 off it.
+const OFF_LINE: f32 = 0.1;
+
 /// The coverage at which a pixel joins its neighbours into a segment (the mask itself is coverage >= 0.5; the
 /// fixture lines keep their segment counts for any value from 0.25 to 0.37; at 0.40 Playfair 12 px splits).
 const SEGMENT_COVERAGE: f32 = 0.33;
@@ -119,13 +123,18 @@ pub fn line_ink(source: &Source, quad: [[f32; 2]; 4]) -> LineInk {
     let k = [srgb_to_linear(colour[0]), srgb_to_linear(colour[1]), srgb_to_linear(colour[2])];
     let axis = [k[0] - b[0], k[1] - b[1], k[2] - b[2]];
     let len2 = axis.iter().map(|a| a * a).sum::<f32>().max(1e-6);
+    // and how far off that line the pixel is: a blend of the ink and the backdrop sits on it, a pixel of another
+    // colour (a neighbouring element's, reaching into the grown box) does not
     let mut coverage = vec![0f32; (width * height) as usize];
+    let mut foreign = vec![false; (width * height) as usize];
     for y in 0..height {
         for x in 0..width {
             let p = px(left + x, top + y);
             let l = [srgb_to_linear(p[0]) - b[0], srgb_to_linear(p[1]) - b[1], srgb_to_linear(p[2]) - b[2]];
             let t = (l[0] * axis[0] + l[1] * axis[1] + l[2] * axis[2]) / len2;
+            let off2: f32 = (0..3).map(|c| (l[c] - t * axis[c]).powi(2)).sum();
             coverage[(y * width + x) as usize] = t.clamp(0.0, 1.0);
+            foreign[(y * width + x) as usize] = off2 > OFF_LINE * OFF_LINE * len2;
         }
     }
     let mask: Vec<bool> = coverage.iter().map(|&c| c >= 0.5).collect();
@@ -168,6 +177,16 @@ pub fn line_ink(source: &Source, quad: [[f32; 2]; 4]) -> LineInk {
     };
     // pixels join into a segment at a lower coverage than the mask: a hairline serif or a thin join under 0.5 must
     // not cut a glyph in two (a fragment would read as an extra character); the segment's extent is still the mask's
+    // what the spread has read, the line's ink is only what is on the ink's line: a pixel of another colour is no
+    // coverage, no mask and no segment, so the fit does not chase it and the paint-out leaves it where it is (a
+    // wordmark's box reaching the swash of a script under it had cut the swash)
+    for (i, f) in foreign.iter().enumerate() {
+        if *f {
+            coverage[i] = 0.0;
+        }
+    }
+    let mask: Vec<bool> = coverage.iter().map(|&c| c >= 0.5).collect();
+    let linked: Vec<bool> = coverage.iter().map(|&c| c >= SEGMENT_COVERAGE).collect();
     let segments = segments_of(&mask, &linked, width, height);
     let ink_bounds = bounds_of(&mask, width, height);
     LineInk { left, top, width, height, coverage, mask, backdrop, colour, spread, segments, ink_bounds }
@@ -616,6 +635,22 @@ mod tests {
         assert!(ink.colour[0] < 30, "the specks set the ink colour: {:?}", ink.colour);
         assert!(ink.spread < INK_SPREAD_MAX, "spread {}", ink.spread);
         assert_eq!(decline(&ink, "III", Class::Type, quad), None);
+    }
+
+    #[test]
+    fn a_neighbour_of_another_colour_reaching_into_the_box_is_neither_ink_nor_painted_out() {
+        // a gold swash crosses the bottom of the grown box under the three letters, as a script under a wordmark does
+        let (mut src, quad) = three_letters();
+        paint(&mut src, 10, 45, 100, 3, [200, 150, 90]);
+        let ink = line_ink(&src, quad);
+        assert_eq!(ink.colour, [0, 0, 0]);
+        assert_eq!(ink.segments.len(), 3, "{:?}", ink.segments);
+        assert_eq!(ink.ink_bounds, Some((20 - ink.left, 20 - ink.top, 66 - ink.left, 44 - ink.top)));
+        let out = paint_out(&src, &[&ink]);
+        for x in 10..110u32 {
+            let i = ((46 * 120 + x) * 4) as usize;
+            assert_eq!(&out[i..i + 3], &[200, 150, 90], "the swash at x {x} is left as it was");
+        }
     }
 
     #[test]
