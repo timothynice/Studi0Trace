@@ -20,6 +20,10 @@ export interface Shape {
   area: number;
   /** The shape's own geometry as unfilled markup, for drawing its true outline. */
   outline: string;
+  /** The `data-line` of a set line of text: its shape takes an index after every traced one. */
+  line?: string;
+  /** The `data-label` the app gave it (a text line's string). */
+  label?: string;
 }
 
 export interface SvgDoc {
@@ -265,16 +269,7 @@ export function parseSvg(markup: string): SvgDoc | null {
   const width = viewBox[2] || attrNum(root, "width", 0);
   const height = viewBox[3] || attrNum(root, "height", 0);
 
-  // A shape may sit in a group that carries a transform: Vexel draws a
-  // small input traced at twice its size inside <g transform="scale(0.5)">.
-  const elements: [Element, Matrix][] = [];
-  for (const child of Array.from(root.children)) {
-    if (child.tagName.toLowerCase() === "defs") continue;
-    if (child.tagName.toLowerCase() === "g") {
-      const gm = parseTransform(child.getAttribute("transform"));
-      for (const c of Array.from(child.children)) if (SHAPE_TAGS.has(c.tagName.toLowerCase())) elements.push([c, gm]);
-    } else if (SHAPE_TAGS.has(child.tagName.toLowerCase())) elements.push([child, IDENTITY]);
-  }
+  const elements = orderedElements(root);
 
   const shapes: Shape[] = elements.map(([el, parent], index) => {
     const raw = el.getAttribute("fill") ?? "#000000";
@@ -297,30 +292,52 @@ export function parseSvg(markup: string): SvgDoc | null {
       bounds,
       area: bounds[2] * bounds[3],
       outline: pt && el.parentElement?.tagName.toLowerCase() === "g" ? `<g transform="${escapeAttr(pt)}">${own}</g>` : own,
+      ...(el.hasAttribute("data-line") ? { line: el.getAttribute("data-line") as string } : {}),
+      ...(el.hasAttribute("data-label") ? { label: el.getAttribute("data-label") as string } : {}),
     };
   });
 
-  return {
+  const result: SvgDoc = {
     width,
     height,
     shapes,
     render(hidden: ReadonlySet<number>): string {
       if (!hidden.size) return markup;
       const copy = new DOMParser().parseFromString(markup, "image/svg+xml");
-      const live: Element[] = [];
-      for (const child of Array.from(copy.documentElement.children)) {
-        if (child.tagName.toLowerCase() === "defs") continue;
-        if (child.tagName.toLowerCase() === "g") live.push(...Array.from(child.children).filter((c) => SHAPE_TAGS.has(c.tagName.toLowerCase())));
-        else if (SHAPE_TAGS.has(child.tagName.toLowerCase())) live.push(child);
-      }
-      live.forEach((el, i) => hidden.has(i) && el.remove());
+      orderedElements(copy.documentElement).forEach(([el], i) => hidden.has(i) && el.remove());
       return new XMLSerializer().serializeToString(copy);
     },
   };
+  DOMS.set(result, { root, elements: elements.map(([el]) => el) });
+  return result;
+}
+
+/** The shapes of a document with the matrix of the group each sits in, in index order: every traced shape in document
+ *  order, then every shape of a set line of text (`data-line`) in document order, so a line toggled on or off moves no
+ *  other shape's index. A shape may sit in a group that carries a transform: Vexel draws a small input traced at twice
+ *  its size inside <g transform="scale(0.5)">. */
+function orderedElements(root: Element): [Element, Matrix][] {
+  const found: [Element, Matrix][] = [];
+  for (const child of Array.from(root.children)) {
+    if (child.tagName.toLowerCase() === "defs") continue;
+    if (child.tagName.toLowerCase() === "g") {
+      const gm = parseTransform(child.getAttribute("transform"));
+      for (const c of Array.from(child.children)) if (SHAPE_TAGS.has(c.tagName.toLowerCase())) found.push([c, gm]);
+    } else if (SHAPE_TAGS.has(child.tagName.toLowerCase())) found.push([child, IDENTITY]);
+  }
+  return [...found.filter(([el]) => !el.hasAttribute("data-line")), ...found.filter(([el]) => el.hasAttribute("data-line"))];
+}
+
+const DOMS = new WeakMap<SvgDoc, { root: Element; elements: Element[] }>();
+
+/** The parsed DOM behind a `parseSvg` result: its root and each shape's element by index. For `textsvg`, which inserts into it. */
+export function svgDom(doc: SvgDoc): { root: Element; elements: Element[] } | undefined {
+  return DOMS.get(doc);
 }
 
 /** A readable name for a shape, since traced output has no layer names. */
 export function shapeLabel(s: Shape): string {
+  if (s.line !== undefined) return `Text: ${s.label ?? ""}`;
   const kind = s.tag === "path" ? "Path" : s.tag[0].toUpperCase() + s.tag.slice(1);
   return `${kind} ${s.index + 1}`;
 }

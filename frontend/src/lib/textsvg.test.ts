@@ -1,27 +1,100 @@
 import { describe, expect, it } from "vitest";
-
+import type { TextLine, TextPlan } from "@/platform/types";
 import { composeSvg } from "./textsvg";
 
-const base = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><defs></defs><path d="M0 0h10v10z" fill="#fff"/></svg>';
-const group = '<g id="text"><path d="M1 1h2" fill="#000" data-line="a"/></g>';
+const base = (shapes: string) => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 60">${shapes}</svg>`;
+const line = (
+  id: string,
+  quad: [number, number][],
+  occluders: [number, number, number][] = [],
+  colour: [number, number, number] = [0, 0, 0],
+): TextLine => ({
+  id,
+  quad,
+  string: "AB",
+  class: "type",
+  colour,
+  status: { kind: "matched" },
+  chosen: 0,
+  enabled: true,
+  fit: null,
+  occluders,
+  candidates: [
+    {
+      font: { family: "F", weight: 400, italic: false, source: "google" },
+      iou: 0.9,
+      stroke: 1,
+      fit: { size: 10, baseline: 30, x: 10, tracking: 0, nudges: [], iou: 0.9, stroke: 1 },
+      path: "M10 20h20v10h-20z",
+      text: `<text x="10" y="30" fill="none" data-line="${id}">AB</text>`,
+    },
+  ],
+});
+const plan = (...lines: TextLine[]): TextPlan => ({ image: "i", reader: "vision", lines, aiError: null, fontsOffline: false });
+const all = (p: TextPlan) => new Set(p.lines.map((l) => l.id));
+const compose = (b: string, p: TextPlan | null, hiddenText = false, enabled?: Set<string>) =>
+  composeSvg(b, { plan: p, enabled: enabled ?? (p ? all(p) : new Set()), hiddenText });
+const children = (svg: string) => Array.from(new DOMParser().parseFromString(svg, "image/svg+xml").documentElement.children);
+const box: [number, number][] = [[10, 20], [30, 20], [30, 30], [10, 30]];
+const BACKDROP = '<rect width="100" height="60" fill="#ffffff"/>';
+const GOLD = '<rect x="5" y="15" width="40" height="20" fill="#d49c17"/>';
+const GOLD_RGB: [number, number, number] = [212, 156, 23];
 
 describe("composeSvg", () => {
-  it("inserts the group before the closing tag", () => {
-    expect(composeSvg(base, group)).toBe(base.replace("</svg>", `${group}</svg>`));
+  it("appends a line with no occluder, before </svg>", () => {
+    const out = compose(base(BACKDROP), plan(line("a", box)));
+    const kids = children(out);
+    expect(kids.map((k) => k.tagName)).toEqual(["rect", "path"]);
+    expect(kids[1].getAttribute("data-line")).toBe("a");
+    expect(kids[1].getAttribute("d")).toBe("M10 20h20v10h-20z");
+    expect(kids[1].getAttribute("fill")).toBe("#000000");
+    expect(kids[1].getAttribute("data-label")).toBe("AB");
   });
-  it("keeps the group a sibling of an upsample root group", () => {
-    const up = '<svg viewBox="0 0 10 10"><g transform="scale(0.5)"><path d="M0 0h20v20z"/></g></svg>';
-    const out = composeSvg(up, group);
-    expect(out).toBe(`<svg viewBox="0 0 10 10"><g transform="scale(0.5)"><path d="M0 0h20v20z"/></g>${group}</svg>`);
+
+  it("inserts before the first overlapping shape whose fill matches an occluder", () => {
+    const blue = '<rect x="60" y="40" width="20" height="10" fill="#0000ff"/>';
+    const out = compose(base(BACKDROP + GOLD + blue), plan(line("a", box, [GOLD_RGB])));
+    expect(children(out).map((k) => k.getAttribute("data-line") ?? k.getAttribute("fill"))).toEqual(["#ffffff", "a", "#d49c17", "#0000ff"]);
   });
-  it("leaves the base alone without a group or a closing tag", () => {
-    expect(composeSvg(base, null)).toBe(base);
-    expect(composeSvg(base, "")).toBe(base);
-    expect(composeSvg("<svg>", group)).toBe("<svg>");
+
+  it("ignores a matching colour that does not overlap the line", () => {
+    const far = '<rect x="60" y="40" width="20" height="10" fill="#d49c17"/>';
+    const out = compose(base(BACKDROP + far), plan(line("a", box, [GOLD_RGB])));
+    expect(children(out).map((k) => k.getAttribute("data-line") ?? k.getAttribute("fill"))).toEqual(["#ffffff", "#d49c17", "a"]);
   });
-  it("leaves the hidden text out when the setting is off, and keeps the glyphs", () => {
-    const withText = '<g id="text"><path d="M1 1h2" fill="#000" data-line="a"/><text x="1 2" y="3" font-family="A &amp; B" fill="none" data-line="a">A &lt;b&gt;</text><path d="M4 4h1" data-line="b"/><text x="4" y="5" data-line="b">C</text></g>';
-    expect(composeSvg(base, withText, { hiddenText: true })).toBe(base.replace("</svg>", `${withText}</svg>`));
-    expect(composeSvg(base, withText, { hiddenText: false })).toBe(base.replace("</svg>", '<g id="text"><path d="M1 1h2" fill="#000" data-line="a"/><path d="M4 4h1" data-line="b"/></g></svg>'));
+
+  it("keeps plan order between two overlapping lines", () => {
+    const lower: [number, number][] = [[10, 40], [30, 40], [30, 50], [10, 50]];
+    const out = compose(base(BACKDROP + GOLD), plan(line("A", box, [GOLD_RGB]), line("B", lower)));
+    const ids = children(out).map((k) => k.getAttribute("data-line"));
+    expect(ids.indexOf("A")).toBeGreaterThan(-1);
+    expect(ids.indexOf("A")).toBeLessThan(ids.indexOf("B"));
+    expect(ids.indexOf("A")).toBeLessThan(2); // before the gold rect
+  });
+
+  it("appends on an upsampled trace", () => {
+    const up = base(`<g transform="scale(0.5)">${BACKDROP}${GOLD}</g>`);
+    const out = compose(up, plan(line("a", box, [GOLD_RGB])));
+    const kids = children(out);
+    expect(kids.map((k) => k.tagName)).toEqual(["g", "path"]);
+  });
+
+  it("leaves the hidden text out when the setting is off, in when on", () => {
+    const p = plan(line("a", box));
+    expect(compose(base(BACKDROP), p, false)).not.toContain("<text");
+    const on = children(compose(base(BACKDROP), p, true));
+    expect(on.map((k) => k.tagName)).toEqual(["rect", "path", "text"]);
+    expect(on[2].getAttribute("data-line")).toBe("a");
+    expect(on[2].textContent).toBe("AB");
+  });
+
+  it("returns the base unchanged with no plan, no enabled line, or a declined line", () => {
+    const b = base(BACKDROP);
+    const p = plan(line("a", box));
+    expect(compose(b, null)).toBe(b);
+    expect(compose(b, p, false, new Set())).toBe(b);
+    const declined = { ...line("a", box), status: { kind: "declined", reason: "script" } as const, chosen: null };
+    expect(compose(b, plan(declined))).toBe(b);
+    expect(compose("<svg>", p)).toBe("<svg>");
   });
 });

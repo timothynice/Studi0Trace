@@ -144,3 +144,18 @@ test("shapes inside clipPath, mask, pattern, symbol and marker are not painted",
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 8 8"><clipPath id="c"><rect width="4" height="4"/></clipPath><mask id="m"><circle r="2"/></mask><pattern id="p"><path d="M0 0L1 1"/></pattern><symbol id="s"><rect width="1" height="1"/></symbol><marker id="k"><path d="M0 0L1 1"/></marker><rect width="8" height="8" clip-path="url(#c)"/></svg>`;
   expect(svgStats(svg)).toEqual({ shapes: 1, nodes: 0 });
 });
+
+test("text-line shapes take the indices after every traced shape, so hiding survives a toggle", () => {
+  const markup = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><rect width="4" height="4" fill="#111111"/><path d="M0 0h2v2z" fill="#000000" data-line="a" data-label="Hi"/><rect x="5" width="4" height="4" fill="#222222"/></svg>`;
+  const doc = parseSvg(markup)!;
+  expect(doc.shapes.map((s) => [s.tag, s.fill, s.line])).toEqual([
+    ["rect", "#111111", undefined],
+    ["rect", "#222222", undefined],
+    ["path", "#000000", "a"],
+  ]);
+  expect(shapeLabel(doc.shapes[2])).toBe("Text: Hi");
+  const out = doc.render(new Set([1]));
+  expect(out).toContain('data-line="a"');
+  expect(out).toContain("#111111");
+  expect(out).not.toContain("#222222");
+});

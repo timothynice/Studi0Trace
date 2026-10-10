@@ -68,6 +68,11 @@ export interface TextState {
 
 export const NO_TEXT: TextState = { plan: null, phase: null, error: null, asked: false };
 
+/** What `composeSvg` needs of an image: its plan and the lines the plan has set. */
+const composeInput = (item: Pick<ImageItem, "text">, hiddenText: boolean) => {
+  const plan = textOf(item).plan;
+  return { plan, enabled: new Set((plan?.lines ?? []).filter((l) => l.enabled).map((l) => l.id)), hiddenText };
+};
 export const textOf = (item: Pick<ImageItem, "text">): TextState => item.text ?? NO_TEXT;
 
 /** An image's AI redraw: the one running, the one waiting for a decision, and the original while the source is a redraw. */
@@ -540,7 +545,7 @@ export function createLibrary(platform: LibraryPlatform, catalog: Catalog, initi
         // Recognise text off: a trace of the painted image is not the image, and the next trace is of the original
         if (dropText) traces = Object.fromEntries(Object.entries(traces).filter(([, t]) => t.textGroup === null));
         // the hidden text is in every group the app wrote; the setting decides whether the SVG keeps it
-        if (recompose) traces = Object.fromEntries(Object.entries(traces).map(([k, t]) => [k, t.textGroup === null ? t : { ...t, svg: composeSvg(t.base, t.textGroup, next) }]));
+        if (recompose) traces = Object.fromEntries(Object.entries(traces).map(([k, t]) => [k, { ...t, svg: composeSvg(t.base, composeInput(item, next.hiddenText)) }]));
         const kept = (key: string | null) => (key !== null && traces[key] && traces[key].svg === item.traces[key]?.svg ? key : null);
         return {
           ...item,
@@ -653,8 +658,8 @@ export function createLibrary(platform: LibraryPlatform, catalog: Catalog, initi
         // a redraw used or a revert while the edit ran swapped the image: the answer is about bytes it no longer has
         if (!now || now.image !== before.image) return;
         // the words changed, so what was exported no longer is what is on screen
-        // (Task 5 of the text-toggles plan: composed from the plan's candidates; until then no group is composed)
-        const traces = Object.fromEntries(Object.entries(now.traces).map(([k, t]) => [k, { ...t, svg: composeSvg(t.base, null, settings), textGroup: null }]));
+        // (Task 5 of the text-toggles plan reworks this: the traces are composed from the plan's candidates and enabled flags)
+        const traces = Object.fromEntries(Object.entries(now.traces).map(([k, t]) => [k, { ...t, svg: composeSvg(t.base, composeInput({ text: { ...textOf(now), plan: answer.plan } }, settings.hiddenText)), textGroup: null }]));
         patch(id, { traces, exported: null, text: { ...textOf(now), plan: answer.plan } });
       };
       // one edit after another, in order: a failed edit does not stop the ones behind it
