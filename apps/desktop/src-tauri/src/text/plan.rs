@@ -295,6 +295,9 @@ async fn run(image_id: &str, source: Arc<Image>, deps: Deps, phase: &Arc<dyn Fn(
         }
     }
     drop(flat);
+    for r in &mut readings {
+        r.string = compose::clean_text(&r.string);
+    }
     phase(Phase::Matching);
     // ink, decline, shortlist: pixels, off the runtime
     let (mut text_lines, inks, wanted) = {
@@ -438,7 +441,7 @@ pub async fn set_line(source: Arc<Image>, planned: &Planned, line_id: &str, chan
         let was_chosen = matches!(line.status, Status::Matched | Status::Off);
         let mut restring = false;
         if let Some(s) = change.string {
-            let s = s.trim().to_string();
+            let s = compose::clean_text(&s).trim().to_string();
             if !s.is_empty() && s != line.string {
                 line.string = s;
                 restring = true;

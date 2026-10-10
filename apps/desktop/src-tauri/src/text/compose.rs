@@ -7,9 +7,15 @@ use super::glyphs::Font;
 use super::{Status, TextPlan};
 use std::path::Path;
 
-/// `& < > "` as entities.
+/// The string without the control characters XML 1.0 cannot carry: U+0000–U+001F but tab, LF and CR, and U+007F.
+/// A reader's string or an edit holding one would make the SVG invalid (a blank viewer, a corrupt export).
+pub fn clean_text(s: &str) -> String {
+    s.chars().filter(|c| !matches!(c, '\u{0}'..='\u{8}' | '\u{b}' | '\u{c}' | '\u{e}'..='\u{1f}' | '\u{7f}')).collect()
+}
+
+/// `& < > "` as entities, the control characters `clean_text` drops left out.
 pub fn escape_text(s: &str) -> String {
-    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;")
+    clean_text(s).replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;")
 }
 
 fn num(v: f32) -> String {

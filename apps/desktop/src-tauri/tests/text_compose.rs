@@ -85,6 +85,8 @@ fn the_core_renders_the_paths_and_nothing_for_the_text() {
 #[test]
 fn text_is_escaped() {
     assert_eq!(studi0trace_desktop::text::compose::escape_text("A & B <c> \"d\""), "A &amp; B &lt;c&gt; &quot;d&quot;");
+    // the control characters XML cannot carry are dropped; tab, LF and CR stay
+    assert_eq!(studi0trace_desktop::text::compose::escape_text("A\u{0}B\u{1b}C\u{7f}D\tE\nF\rG\u{8}"), "ABCD\tE\nF\rG");
 }
 
 struct FixtureFinder(Vec<studi0trace_desktop::text::reader::LineBox>);
@@ -519,5 +521,23 @@ mod round1 {
         plans.put_if("img", hash, planned_with(None, "none")).unwrap();
         assert!(plans.group_for("img", &hash, &submitted).is_none());
         assert!(plans.group_for("img", &bytes_hash(b"two"), &submitted).is_none(), "other bytes");
+    }
+
+    #[test]
+    fn a_control_character_in_an_edit_never_reaches_the_svg() {
+        let dir = cache(&[("Montserrat-Regular.ttf", "Montserrat", 400)]);
+        let img = image("montserrat-est-30-t0-white.png");
+        let d = deps(Arc::new(FixtureFinder(vec![line_box(&img, 14.0, 58.0)])), None, index(&[("Montserrat", 400)]), &dir);
+        let planned = run_plan(&img, &d);
+        let edited = edit(&img, &planned, "img-t0", LineChange { string: Some("EST.\u{0} 2027\u{1b}".into()), ..Default::default() }, &d);
+        assert_eq!(edited.plan.lines[0].string, "EST. 2027");
+        assert!(!edited.group.chars().any(|c| (c as u32) < 0x20 || c as u32 == 0x7f), "{:?}", edited.group);
+        assert!(edited.group.contains(">EST. 2027</text>"));
+        // and from a reader
+        let reader = Failing(Ok(vec![Reading { string: "EST.\u{7}\u{0} 2026".into(), hints: Vec::new(), class: Class::Type }]));
+        let d = deps(Arc::new(FixtureFinder(vec![line_box(&img, 14.0, 58.0)])), Some(Arc::new(reader)), index(&[("Montserrat", 400)]), &dir);
+        let planned = run_plan(&img, &d);
+        assert_eq!(planned.plan.lines[0].string, "EST. 2026");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
