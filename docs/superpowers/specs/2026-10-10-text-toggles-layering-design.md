@@ -160,8 +160,9 @@ gained the line id) is allowed `too_many_arguments`; `vexel-rs` has its own pre-
 
 **Trace times** (Rust engine, balanced, the cost of the prefetch; a trace of the painted image is the cheaper one
 since the text is no longer in it): image 1 original 9.3 s (first run), full mask 3.7 s; image 2 original 30.3 s, full
-mask 15.6 s. Image 1 (2 lines) needs the full, empty and two all-but-one masks after its first result; image 2's 14
-all-but-one masks at 15-30 s each take minutes, which is why the prefetch yields to any user job and stops on an edit.
+mask 15.6 s. Each all-but-one mask is about a full-mask trace, 15.6 s measured on image 2 (the all-but-one masks
+themselves were not timed). Image 1 (2 lines) needs the full, empty and two all-but-one masks after its first result;
+image 2 has 14 matched lines, above `PREFETCH_MAX_LINES`, so after the final fix wave it prefetches the empty mask only.
 
 **Deviations.** Hidden shapes (Layers) do not survive a line toggle, because the base trace changes with the mask and
 shape indices with it. A line whose status is declined has its switch disabled (it has no candidate to set). With
@@ -169,6 +170,29 @@ Recognise text off the Text section shows its header with "Off in Settings". The
 inserted before the "Awaits" shapes) is the occluder-colour assertion above plus the by-eye render, since the gate
 has no trace. The assertion is on a declined line; the only matched line of the three images with occluders is image 3's HORIZON (two
 warm colours, the sun's), whose layering was not looked at.
+
+**Final fix wave** (2026-10-10, after the whole-branch review). Toggles work under Auto: once the pick is known,
+masks other than the full one are traced (`auto: false`) and kept under the pick's params, and the prefetch runs
+under them (§1). Prefetch is for the selected image only, the all-but-one masks only up to 8 matched lines, and
+settings landing on a cached trace restart it after 1 s. Caps: 24 masked traces per settings key per image in the
+store (least recently shown out first), 16 painted masks per image in Rust (LRU, full mask kept). A font pick or a
+line edit recomposes only the traces whose mask sets that line; after Revert (no plan) a masked trace keeps its
+composed vector on a hidden-text change. `Candidate.refined`: a pick of a screened candidate is fitted in full in its
+place, and the frontend merges the background answer when the chosen path changed. `vectorize` answers
+`image_expired` for a mask with no plan behind it. `composeSvg` composes every enabled line with a chosen font
+whatever its status; a line a string edit leaves fontless is switched off. A switched-off line reads "Traced as
+shapes". `Deps.hidden_text` and `Status::Off` are gone. Occluders (§3): a foreign blob counts only when it lies
+over the letters. The rule as first written (30 % of the blob's pixels with ink within 3 px on both sides along one
+axis) dropped ADVENTURE's gold, which the gate asserts: the script overlaps ADVENTURE's feet and crosses no stem
+(4-17 % of each blob's pixels have ink on both sides, 41-62 % on one side). So the rule kept is "crosses (30 %), or
+touches (10 % or more with ink on some side) without hugging (under 80 %)"; shadows and outlines hug (about 100 %)
+and are refused. A known limit: an offset shadow of an i's dot falls into the gap between the dot and the stem, has
+letter on both sides and reads as crossing (the unit test shadows the bars only). The paint-out skips foreign
+pixels, both as holes and as samples. On the real images: ADVENTURE keeps `[[186,153,99]]` (0.56 ΔE from the
+script), LUMORA none, HORIZON keeps `[[245,171,114]]` (the "Creative" swash crossing the Z's foot: 60 % of that
+blob crosses) and drops `[224,123,100]`, a 206 px blob that touches no letter. By eye (harness crops): the
+paint-out no longer smears the swash's orange along the Z's bar, and image 2's forced painted image keeps "Awaits"
+whole with no gold smudge beside it. Gate: 19 matched of 25 (1: 2, 2: 14, 3: 3), 36.0 s.
 
 **Not verified.** The running app. The dev app was built and launched (`npm run dev`, debug build, no panic in its
 output) but this environment grants no accessibility or screen-recording access, so no window could be seen or
