@@ -298,9 +298,13 @@ export function createLibrary(platform: LibraryPlatform, catalog: Catalog, initi
   const composed = (base: string, mask: string[], plan: TextPlan | null, hiddenText = settings.hiddenText) =>
     composeSvg(base, { plan, enabled: new Set(mask), hiddenText });
 
-  /** Every trace composed again from its base, each with its own key's mask. */
+  /**
+   * Every trace composed again from its base, each with its own key's mask. Without a plan (after a Revert, whose
+   * kept traces carry their glyphs while the plan is gone) a trace with lines painted out keeps the vector it has:
+   * its base alone would show the image with the text missing.
+   */
   const recomposed = (traces: Record<string, TraceAnswer>, plan: TextPlan | null, hiddenText = settings.hiddenText) =>
-    Object.fromEntries(Object.entries(traces).map(([k, t]) => [k, { ...t, svg: composed(t.base, maskOfKey(k), plan, hiddenText) }]));
+    Object.fromEntries(Object.entries(traces).map(([k, t]) => [k, !plan && maskOfKey(k).length ? t : { ...t, svg: composed(t.base, maskOfKey(k), plan, hiddenText) }]));
 
   /** What was exported stays exported only while its vector is unchanged. */
   const keptExport = (item: ImageItem, traces: Record<string, TraceAnswer>) =>

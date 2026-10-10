@@ -1421,6 +1421,21 @@ describe("library: traces by the painted set", () => {
     expect(item().job).toBeNull();
   });
 
+  it("after Revert, turning hidden text off keeps the glyphs of the masked trace on screen", async () => {
+    const on = { ...TEXT_ON, hiddenText: true };
+    const { calls, answer, item, lib } = await tracedOnBalanced(PLAN([T0, T1]), on);
+    await answer(calls[0]);
+    await lib.redraw("a");
+    await lib.acceptRedraw("a");
+    await lib.revertRedraw("a");
+    expect(textOf(item()).plan).toBeNull();
+    expect(item().shown).toBe(`${P}|a-t0,a-t1`);
+    const svg = shownAnswer(item())!.svg;
+    expect(svg).toContain('data-line="a-t0"');
+    lib.setSettings({ ...on, hiddenText: false });
+    expect(shownAnswer(item())!.svg).toBe(svg);
+  });
+
   it("another image's prefetch is aborted only when a user job starts, and resumes after it", async () => {
     const { calls, answer, lib } = await tracedOnBalanced();
     await answer(calls[0]);
