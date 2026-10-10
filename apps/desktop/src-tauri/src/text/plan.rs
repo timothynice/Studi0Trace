@@ -614,7 +614,7 @@ mod tests {
                 }
             }
             let mask = coverage.iter().map(|c| *c >= 0.5).collect();
-            ink::LineInk { left: 0, top: 0, width: w, height: h, coverage, mask, backdrop: [255; 3], colour: [0; 3], spread: 0.0, segments: vec![(10, 14), (25, 29)], ink_bounds: Some((10, 5, 29, 35)), occluders: Vec::new() }
+            ink::LineInk { left: 0, top: 0, width: w, height: h, coverage, mask, backdrop: [255; 3], colour: [0; 3], spread: 0.0, segments: vec![(10, 14), (25, 29)], ink_bounds: Some((10, 5, 29, 35)), occluders: Vec::new(), foreign: Vec::new() }
         };
         let list = vec![fitted("K", 500, 0.7, 1.3)];
         let weights = |stroke: f32| -> Vec<u16> { weight_neighbours(&ink_of(stroke), &list, &cat).iter().map(|f| f.weight).collect() };

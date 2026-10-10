@@ -29,9 +29,13 @@ pub struct LineInk {
     pub segments: Vec<(u32, u32)>,
     pub ink_bounds: Option<(u32, u32, u32, u32)>,
     /// The colours of what lay over the letters: the pixels inside the characters' boxes that the off-colour rule
-    /// kept out of the ink, in 8-connected blobs of at least `OCCLUDER_MIN_PX`, each blob's median colour, those
-    /// within `OCCLUDER_MERGE` ΔE of one already listed merged into it. Usually empty.
+    /// kept out of the ink, in 8-connected blobs of at least `OCCLUDER_MIN_PX` that lie over the letters
+    /// (`lies_over`), each blob's median colour, those within `OCCLUDER_MERGE` ΔE of one already listed merged into
+    /// it. Usually empty.
     pub occluders: Vec<[u8; 3]>,
+    /// Per pixel of the box, as `mask`: off the backdrop-to-ink line (another element's colour, never ink). Empty
+    /// when unknown (a reduced or hand-made ink): then no pixel is foreign.
+    pub foreign: Vec<bool>,
 }
 
 /// A blob of foreign pixels inside the characters' boxes under this many is noise (an anti-aliased fringe), not
@@ -39,6 +43,16 @@ pub struct LineInk {
 pub const OCCLUDER_MIN_PX: usize = 12;
 /// Occluder colours this close (ΔE) are one.
 const OCCLUDER_MERGE: f32 = 6.0;
+/// How far past a blob's edge (px) ink must lie for the blob to have letter on that side of it.
+const CROSS_REACH: u32 = 3;
+/// The share of a blob's pixels that must have ink on both sides of the blob along one axis for it to cross the
+/// letters (and so be something laid over them) rather than sit beside them.
+const CROSS_SHARE: f32 = 0.3;
+/// A blob that does not cross the letters but has ink past it on one side at this share of its pixels or more is a
+/// band hugging them (a drop shadow, an outline): never an occluder.
+const HUG_SHARE: f32 = 0.8;
+/// A blob with ink past it at under this share of its pixels does not touch the letters at all.
+const TOUCH_SHARE: f32 = 0.1;
 
 fn srgb_to_linear(v: u8) -> f32 {
     let c = v as f32 / 255.0;
@@ -87,7 +101,7 @@ pub fn quad_angle_deg(quad: [[f32; 2]; 4]) -> f32 {
 }
 
 pub fn line_ink(source: &Source, quad: [[f32; 2]; 4]) -> LineInk {
-    let empty = LineInk { left: 0, top: 0, width: 0, height: 0, coverage: Vec::new(), mask: Vec::new(), backdrop: [0, 0, 0], colour: [0, 0, 0], spread: 0.0, segments: Vec::new(), ink_bounds: None, occluders: Vec::new() };
+    let empty = LineInk { left: 0, top: 0, width: 0, height: 0, coverage: Vec::new(), mask: Vec::new(), backdrop: [0, 0, 0], colour: [0, 0, 0], spread: 0.0, segments: Vec::new(), ink_bounds: None, occluders: Vec::new(), foreign: Vec::new() };
     if source.width == 0 || source.height == 0 || source.rgba.len() != source.width as usize * source.height as usize * 4 {
         return empty;
     }
@@ -202,22 +216,22 @@ pub fn line_ink(source: &Source, quad: [[f32; 2]; 4]) -> LineInk {
     let linked: Vec<bool> = coverage.iter().map(|&c| c >= SEGMENT_COVERAGE).collect();
     let segments = segments_of(&mask, &linked, width, height);
     let ink_bounds = bounds_of(&mask, width, height);
-    let occluders = occluders_of(&foreign, &segments, ink_bounds, width, height, |x, y| px(left + x, top + y));
-    LineInk { left, top, width, height, coverage, mask, backdrop, colour, spread, segments, ink_bounds, occluders }
+    let occluders = occluders_of(&foreign, &mask, &segments, ink_bounds, width, height, |x, y| px(left + x, top + y));
+    LineInk { left, top, width, height, coverage, mask, backdrop, colour, spread, segments, ink_bounds, occluders, foreign }
 }
 
 /// The colours that lay over the letters: `foreign` pixels (off the backdrop-to-ink line) inside a character's box,
 /// each segment's x range by the ink's y range, grown 1 px, grouped into 8-connected blobs. A blob of at least
-/// `OCCLUDER_MIN_PX` gives its median colour; a colour within `OCCLUDER_MERGE` ΔE of one already listed is
-/// dropped (the first is kept). In blob order.
-fn occluders_of(foreign: &[bool], segments: &[(u32, u32)], ink_bounds: Option<(u32, u32, u32, u32)>, width: u32, height: u32, px: impl Fn(u32, u32) -> [u8; 3]) -> Vec<[u8; 3]> {
+/// `OCCLUDER_MIN_PX` that lies over the letters (`lies_over`) gives its median colour; a colour within
+/// `OCCLUDER_MERGE` ΔE of one already listed is dropped (the first is kept). In blob order.
+fn occluders_of(foreign: &[bool], mask: &[bool], segments: &[(u32, u32)], ink_bounds: Option<(u32, u32, u32, u32)>, width: u32, height: u32, px: impl Fn(u32, u32) -> [u8; 3]) -> Vec<[u8; 3]> {
     let Some((_, top, _, bottom)) = ink_bounds else { return Vec::new() };
     let (y0, y1) = (top.saturating_sub(1), (bottom + 1).min(height));
     let inside = |x: u32, y: u32| y >= y0 && y < y1 && segments.iter().any(|&(lo, hi)| x + 1 >= lo && x < hi + 1);
     let in_box: Vec<bool> = (0..foreign.len()).map(|i| foreign[i] && inside((i as u32) % width, (i as u32) / width)).collect();
     let mut out: Vec<[u8; 3]> = Vec::new();
     for blob in blobs(&in_box, width, height) {
-        if blob.len() < OCCLUDER_MIN_PX {
+        if blob.len() < OCCLUDER_MIN_PX || !lies_over(&blob, &in_box, mask, width, height) {
             continue;
         }
         let colours: Vec<[u8; 3]> = blob.iter().map(|&i| px((i as u32) % width, (i as u32) / width)).collect();
@@ -227,6 +241,48 @@ fn occluders_of(foreign: &[bool], segments: &[(u32, u32)], ink_bounds: Option<(u
         }
     }
     out
+}
+
+/// Whether a blob lies over the letters. A pixel has ink past it in a direction when there is ink within
+/// `CROSS_REACH` px past the blob's edge that way (the walk goes through the blob's own pixels first, `member`, so a
+/// thick bar's middle rows count as its edge rows do). The blob crosses the letters when at least `CROSS_SHARE` of
+/// its pixels have ink past them on both sides along one axis (above and below, or left and right): a bar or a
+/// script stroke laid across a stem. Otherwise it is a band hugging the letters when `HUG_SHARE` of its pixels or
+/// more have ink past them on one side (a drop shadow has ink on one side of it only, an outline only on its inside),
+/// and not over them at all under `TOUCH_SHARE`; between the two it lies over the letters' edge and reaches away from
+/// them (the script "Awaits" over the feet of ADVENTURE, which crosses no stem), and is laid over them.
+fn lies_over(blob: &[usize], member: &[bool], mask: &[bool], width: u32, height: u32) -> bool {
+    let ink_beyond = |i: usize, dx: i64, dy: i64| -> bool {
+        let (mut x, mut y) = (((i as u32) % width) as i64, ((i as u32) / width) as i64);
+        let (mut out, mut steps) = (false, 0);
+        loop {
+            x += dx;
+            y += dy;
+            if x < 0 || y < 0 || x >= width as i64 || y >= height as i64 {
+                return false;
+            }
+            let j = (y as u32 * width + x as u32) as usize;
+            if mask[j] {
+                return true;
+            }
+            if !out && member[j] {
+                continue;
+            }
+            out = true;
+            steps += 1;
+            if steps >= CROSS_REACH {
+                return false;
+            }
+        }
+    };
+    let (mut across, mut beside) = (0usize, 0usize);
+    for &i in blob {
+        let [up, down, left, right] = [ink_beyond(i, 0, -1), ink_beyond(i, 0, 1), ink_beyond(i, -1, 0), ink_beyond(i, 1, 0)];
+        across += ((up && down) || (left && right)) as usize;
+        beside += (up || down || left || right) as usize;
+    }
+    let n = blob.len() as f32;
+    across as f32 >= CROSS_SHARE * n || ((beside as f32) < HUG_SHARE * n && beside as f32 >= TOUCH_SHARE * n)
 }
 
 /// The 8-connected components of `set`, each as its pixel indices, in raster order of their first pixel.
@@ -561,6 +617,56 @@ mod tests {
         assert!(delta_e([r, gg, b], [212, 160, 23]) < 6.0);
         // the bar's pixels are not ink: the segments are still three
         assert_eq!(ink.segments.len(), 3);
+    }
+
+    /// The three letters with the rects of `under` (indices: the bars, the i's stem, its dot) also painted `dx`, `dy`
+    /// px off and grown by `grow` in `colour` first, beneath them.
+    fn three_letters_over(colour: [u8; 3], grow: u32, dx: u32, dy: u32, under: &[usize]) -> (Source, [[f32; 2]; 4]) {
+        let mut src = solid(120, 60, [255, 255, 255]);
+        let rects = [(20u32, 20u32, 6u32, 24u32), (40, 20, 6, 24), (60, 28, 6, 16), (60, 20, 6, 4)];
+        for &(x, y, w, h) in under.iter().map(|&i| &rects[i]) {
+            paint(&mut src, x + dx - grow, y + dy - grow, w + 2 * grow, h + 2 * grow, colour);
+        }
+        for &(x, y, w, h) in &rects {
+            paint(&mut src, x, y, w, h, [0, 0, 0]);
+        }
+        (src, [[15.0, 18.0], [75.0, 18.0], [75.0, 46.0], [15.0, 46.0]])
+    }
+
+    #[test]
+    fn a_drop_shadow_or_an_outline_of_another_colour_is_not_an_occluder() {
+        // a light blue copy of the bars 3 px right and down, beneath them: ink on one side of it only. (The dot's
+        // shadow is left out: 3 px down it falls into the gap between the dot and the stem, which has letter on
+        // both sides of it, and reads as crossing; see the spec's Status.)
+        let (src, quad) = three_letters_over([150, 170, 230], 0, 3, 3, &[0, 1, 2]);
+        let ink = line_ink(&src, quad);
+        assert!(ink.foreign.iter().filter(|f| **f).count() >= 3 * OCCLUDER_MIN_PX, "the shadow is off the ink's line");
+        assert!(ink.occluders.is_empty(), "shadow read as {:?}", ink.occluders);
+        assert_eq!(ink.segments.len(), 3);
+        // a gold outline 2 px wide round every rect: ink on its inside only
+        let (src, quad) = three_letters_over([212, 160, 23], 2, 0, 0, &[0, 1, 2, 3]);
+        let ink = line_ink(&src, quad);
+        assert!(ink.foreign.iter().filter(|f| **f).count() >= 3 * OCCLUDER_MIN_PX, "the outline is off the ink's line");
+        assert!(ink.occluders.is_empty(), "outline read as {:?}", ink.occluders);
+        assert_eq!(ink.segments.len(), 3);
+    }
+
+    #[test]
+    fn a_script_laid_over_the_feet_of_a_letter_and_reaching_away_from_it_is_an_occluder() {
+        // a bar, an arch (two stems under a cap) and a bar; a thick gold stroke covers the arch's feet and the gap
+        // between them and runs on below the line: it crosses no stem, but most of it is away from the ink
+        let mut src = solid(140, 70, [255, 255, 255]);
+        paint(&mut src, 20, 20, 6, 24, [0, 0, 0]);
+        paint(&mut src, 40, 20, 26, 5, [0, 0, 0]);
+        paint(&mut src, 40, 20, 6, 24, [0, 0, 0]);
+        paint(&mut src, 60, 20, 6, 24, [0, 0, 0]);
+        paint(&mut src, 80, 20, 6, 24, [0, 0, 0]);
+        paint(&mut src, 36, 36, 34, 20, [212, 160, 23]);
+        let quad = [[15.0, 18.0], [95.0, 18.0], [95.0, 46.0], [15.0, 46.0]];
+        let ink = line_ink(&src, quad);
+        assert_eq!(ink.segments.len(), 3, "{:?}", ink.segments);
+        assert_eq!(ink.occluders.len(), 1, "{:?}", ink.occluders);
+        assert!(delta_e(ink.occluders[0], [212, 160, 23]) < 6.0);
     }
 
     #[test]
