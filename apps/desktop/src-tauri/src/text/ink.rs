@@ -49,7 +49,8 @@ const CROSS_REACH: u32 = 3;
 /// letters (and so be something laid over them) rather than sit beside them.
 const CROSS_SHARE: f32 = 0.3;
 /// A blob that does not cross the letters but has ink past it on one side at this share of its pixels or more is a
-/// band hugging them (a drop shadow, an outline): never an occluder.
+/// band hugging them (a drop shadow, an outline), refused; one that falls in a narrow letter gap or a counter has ink
+/// on both sides and reads as a crossing (a known limit).
 const HUG_SHARE: f32 = 0.8;
 /// A blob with ink past it at under this share of its pixels does not touch the letters at all.
 const TOUCH_SHARE: f32 = 0.1;
@@ -505,30 +506,42 @@ pub fn decline(ink: &LineInk, string: &str, class: Class, quad: [[f32; 2]; 4]) -
 }
 
 /// The source with the inks' masks (dilated 1 px) filled from their nearest unmasked neighbours along the row and the
-/// column. A foreign pixel (another element's colour over or beside the letters, `LineInk::foreign`) is neither
-/// filled nor sampled: the walk to a neighbour goes past it to the backdrop, so a script laid over the letters keeps
-/// its own pixels and lends none of its colour to the hole.
+/// column. A foreign pixel (another element's colour over or beside the letters) is never sampled: the walk to a
+/// neighbour goes past it to the backdrop, so a script laid over the letters lends none of its colour to the hole;
+/// nor does the 1 px dilation reach it, so the script keeps its own pixels. A pixel is foreign only when it is off
+/// the backdrop-to-ink line of every line whose box holds it (`LineInk::foreign`): a line's own ink and its blended
+/// rim are on its own line, so another line's box reaching over them (a title set tight over a subtitle of another
+/// colour) never keeps them out of the paint-out. A line's own ink pixel is always painted out.
 pub fn paint_out(source: &Source, inks: &[&LineInk]) -> Vec<u8> {
     let (w, h) = (source.width as usize, source.height as usize);
     let mut masked = vec![false; w * h];
-    let mut foreign = vec![false; w * h];
+    // per pixel: some line sees it as foreign, and some line whose box holds it sees it on its own ink line
+    let mut off_line = vec![false; w * h];
+    let mut on_line = vec![false; w * h];
     for ink in inks {
-        for (i, _) in ink.foreign.iter().enumerate().filter(|(_, f)| **f) {
+        let known = ink.foreign.len() == (ink.width * ink.height) as usize;
+        for i in 0..(ink.width * ink.height) as usize {
             let (sx, sy) = (ink.left as usize + i % ink.width as usize, ink.top as usize + i / ink.width as usize);
-            if sx < w && sy < h {
-                foreign[sy * w + sx] = true;
+            if sx >= w || sy >= h {
+                continue;
+            }
+            if known && ink.foreign[i] {
+                off_line[sy * w + sx] = true;
+            } else {
+                on_line[sy * w + sx] = true;
             }
         }
     }
+    let foreign: Vec<bool> = (0..w * h).map(|j| off_line[j] && !on_line[j]).collect();
     for ink in inks {
         for y in 0..ink.height as usize {
             for x in 0..ink.width as usize {
                 if ink.mask[y * ink.width as usize + x] {
-                    // dilated by 1 px
+                    // dilated by 1 px, but not over a foreign pixel (the ink pixel itself is never foreign)
                     for dy in -1i64..=1 {
                         for dx in -1i64..=1 {
                             let (sx, sy) = (ink.left as i64 + x as i64 + dx, ink.top as i64 + y as i64 + dy);
-                            if sx >= 0 && sy >= 0 && (sx as usize) < w && (sy as usize) < h && !foreign[sy as usize * w + sx as usize] {
+                            if sx >= 0 && sy >= 0 && (sx as usize) < w && (sy as usize) < h && ((dx == 0 && dy == 0) || !foreign[sy as usize * w + sx as usize]) {
                                 masked[sy as usize * w + sx as usize] = true;
                             }
                         }
@@ -631,6 +644,30 @@ mod tests {
         assert!(delta_e([r, gg, b], [212, 160, 23]) < 6.0);
         // the bar's pixels are not ink: the segments are still three
         assert_eq!(ink.segments.len(), 3);
+    }
+
+    #[test]
+    fn two_lines_of_different_colours_whose_boxes_overlap_are_both_painted_out_whole() {
+        // a black line over a red one, set tight: the red caps' tops lie inside the black line's grown box, and the
+        // black line's feet inside the red one's; each is the other's foreign colour
+        let mut src = solid(120, 90, [255, 255, 255]);
+        for x in [20u32, 40, 60] {
+            paint(&mut src, x, 10, 6, 24, [0, 0, 0]);
+            paint(&mut src, x, 40, 6, 24, [220, 30, 30]);
+        }
+        let black = line_ink(&src, [[15.0, 8.0], [75.0, 8.0], [75.0, 36.0], [15.0, 36.0]]);
+        let red = line_ink(&src, [[15.0, 38.0], [75.0, 38.0], [75.0, 66.0], [15.0, 66.0]]);
+        assert!(black.top + black.height > 41 && red.top < 34, "the boxes overlap the other line's letters");
+        assert_eq!((black.colour, red.colour), ([0, 0, 0], [220, 30, 30]));
+        let out = paint_out(&src, &[&black, &red]);
+        for x0 in [20u32, 40, 60] {
+            for x in x0..x0 + 6 {
+                for y in (10..34u32).chain(40..64) {
+                    let i = ((y * 120 + x) * 4) as usize;
+                    assert!(out[i..i + 3].iter().all(|&c| c >= 240), "({x},{y}) left {:?}", &out[i..i + 3]);
+                }
+            }
+        }
     }
 
     #[test]

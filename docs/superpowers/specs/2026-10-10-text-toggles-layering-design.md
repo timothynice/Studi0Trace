@@ -77,9 +77,12 @@ merge. `TextLine.occluders` carries them (`[[r,g,b], …]`, usually empty). A bl
 the blob first) when at least 30 % of its pixels have ink past them on both sides along one axis (it crosses a
 stem: a bar, a script stroke across the letters), or, crossing nothing, when it touches the letters (10 % or
 more of its pixels have ink past them on some side) without hugging them (under 80 %): it overlaps their edge
-and reaches away, as the script "Awaits" does over the feet of ADVENTURE. A band hugging the letters on one side
-— a drop shadow, an outline — is never an occluder. The paint-out (`ink::paint_out`) neither fills nor samples
-the foreign pixels (`LineInk::foreign`): the walk to a pixel's nearest neighbours goes past them to the backdrop.
+and reaches away, as the script "Awaits" does over the feet of ADVENTURE. A drop shadow or an outline (a band
+hugging the letters on one side) is refused unless it falls in a narrow letter gap or a counter, where it has ink on
+both sides and reads as a crossing. The paint-out (`ink::paint_out`) never samples a foreign pixel (the walk to a
+pixel's nearest neighbours goes past it to the backdrop) and its 1 px dilation does not reach one; a pixel is
+foreign only when it is off the ink line of every line whose box holds it, so a line's own ink and rim, inside
+another line's box of another colour, are always painted out.
 
 Composition inserts a line's path before the first shape in document order (among the base's top-level
 shapes and those directly inside a top-level `<g>` other than the upsample root group) whose bounds intersect
@@ -186,9 +189,12 @@ over the letters. The rule as first written (30 % of the blob's pixels with ink 
 axis) dropped ADVENTURE's gold, which the gate asserts: the script overlaps ADVENTURE's feet and crosses no stem
 (4-17 % of each blob's pixels have ink on both sides, 41-62 % on one side). So the rule kept is "crosses (30 %), or
 touches (10 % or more with ink on some side) without hugging (under 80 %)"; shadows and outlines hug (about 100 %)
-and are refused. A known limit: an offset shadow of an i's dot falls into the gap between the dot and the stem, has
-letter on both sides and reads as crossing (the unit test shadows the bars only). The paint-out skips foreign
-pixels, both as holes and as samples. On the real images: ADVENTURE keeps `[[186,153,99]]` (0.56 ΔE from the
+and are refused. A known limit, accepted: a drop shadow or an outline is refused unless it falls in a narrow
+letter gap or a counter, where it has ink on both sides and reads as a crossing (an offset shadow of an i's dot
+falls between the dot and the stem; the unit test shadows the bars only). The paint-out never samples foreign
+pixels and does not dilate over them; foreign means off the ink line of every line whose box holds the pixel, so
+a matched line of another colour reaching into a line's grown box (a title set tight over a subtitle) is still
+painted out whole (a regression of the first version of this change, fixed in the same wave). On the real images: ADVENTURE keeps `[[186,153,99]]` (0.56 ΔE from the
 script), LUMORA none, HORIZON keeps `[[245,171,114]]` (the "Creative" swash crossing the Z's foot: 60 % of that
 blob crosses) and drops `[224,123,100]`, a 206 px blob that touches no letter. By eye (harness crops): the
 paint-out no longer smears the swash's orange along the Z's bar, and image 2's forced painted image keeps "Awaits"
