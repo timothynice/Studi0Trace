@@ -40,6 +40,13 @@ pub fn cache_name(font: &FontRef) -> String {
     format!("{}-{}{}.ttf", font.family, font.weight, if font.italic { "i" } else { "" })
 }
 
+/// Plain geometric and humanist sans families a line with no reader hints also tries, after its ranked shortlist:
+/// the faces AI-made logos are most often set in. The width ranking can miss them on a widely tracked line (a
+/// wordmark's few letters, uneven gaps), and without them such a line had only faces of the wrong kind to try.
+pub const SANS_FLOOR: [&str; 16] = [
+    "Montserrat", "Poppins", "Jost", "Josefin Sans", "Raleway", "Quicksand", "Nunito Sans", "Lato", "Inter", "Work Sans", "DM Sans", "Manrope", "Urbanist", "Outfit", "Red Hat Display", "Kumbh Sans",
+];
+
 /// Google's thickness 1–10 per weight is not used; the weight for a stem is found here and clamped to the
 /// family's variants by the caller.
 pub fn weight_for_stem(stem_over_cap: f32) -> u16 {
@@ -211,6 +218,21 @@ impl Catalog {
         scored.into_iter().map(|(_, f)| f).take(n).collect()
     }
 
+    /// The `SANS_FLOOR` families the catalogue holds, each at the upright weight nearest the stem's weight class,
+    /// in the list's order; one installed is listed as installed (it needs no download), as in the shortlist.
+    pub fn floor(&self, stem: f32) -> Vec<FontRef> {
+        let want = weight_for_stem(stem);
+        let installed = self.installed_families();
+        SANS_FLOOR
+            .iter()
+            .filter_map(|name| {
+                let source = if installed.iter().any(|f| f == name) { Source::Installed } else { Source::Google };
+                let weights = self.weights_of(name, source);
+                (!weights.is_empty()).then(|| FontRef { family: name.to_string(), weight: Self::nearest_weight(&weights, want), italic: false, source })
+            })
+            .collect()
+    }
+
     /// Prefix match over Google then installed family names, at the regular weight; a family in both is listed
     /// once, as installed.
     pub fn search(&self, query: &str, n: usize) -> Vec<FontRef> {
@@ -281,6 +303,17 @@ mod tests {
         let mut db = fontdb::Database::new();
         db.load_font_data(std::fs::read(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/text/fonts/Montserrat-Regular.ttf")).unwrap());
         db
+    }
+
+    #[test]
+    fn the_sans_floor_is_the_families_the_catalogue_holds_at_the_stem_s_weight() {
+        let widths = vec![60u8; 62];
+        let fam = |n: &str, ws: &[u16]| serde_json::json!({"name": n, "category": "Sans Serif", "variants": ws.iter().map(|w| serde_json::json!({"weight": w, "italic": false})).collect::<Vec<_>>(), "features": {"cap": 0.7, "x": 0.5, "stem": 0.1, "widths": widths}});
+        let json = serde_json::json!({"families": [fam("Jost", &[300, 400, 500]), fam("Alpha", &[400]), fam("Lato", &[100, 300, 400, 700])]}).to_string();
+        let cat = Catalog::from_index(&json, fontdb::Database::new());
+        let floor = cat.floor(0.05);
+        assert_eq!(floor.iter().map(|f| (f.family.as_str(), f.weight)).collect::<Vec<_>>(), [("Jost", 300), ("Lato", 300)], "in the list's order, at the hairline's 300, Alpha not in it");
+        assert_eq!(cat.floor(0.17).iter().map(|f| f.weight).collect::<Vec<_>>(), [500, 700]);
     }
 
     #[test]

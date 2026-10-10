@@ -288,6 +288,14 @@ async fn run(image_id: &str, source: Arc<Image>, deps: Deps, phase: &Arc<dyn Fn(
                                 shortlist.push(f);
                             }
                         }
+                        // a line the reader gave no hints also tries the plain sans faces, after its ranked ones
+                        if hints.is_empty() {
+                            for f in catalog.floor(stem) {
+                                if !shortlist.iter().any(|s| s.family == f.family) {
+                                    shortlist.push(f);
+                                }
+                            }
+                        }
                     }
                 }
                 text_lines.push(tl);
@@ -403,7 +411,13 @@ pub async fn set_line(source: Arc<Image>, planned: &Planned, line_id: &str, chan
             }
             // a line that has none (it was declined before any was fitted) starts from the shortlist
             if fonts.is_empty() {
-                fonts = catalog.shortlist(&line.string, &catalog::measured_widths(ink, &line.string), catalog::measured_stem(ink), SHORTLIST);
+                let stem = catalog::measured_stem(ink);
+                fonts = catalog.shortlist(&line.string, &catalog::measured_widths(ink, &line.string), stem, SHORTLIST);
+                for f in catalog.floor(stem) {
+                    if !fonts.iter().any(|s| s.family == f.family) {
+                        fonts.push(f);
+                    }
+                }
             }
             let any_located = fonts.iter().any(|f| catalog.locate(f, &cache_dir).is_some());
             let mut fitted = fit_candidates(&line.string, ink, &fonts, EAGER_FAMILIES, &catalog, &cache_dir);
