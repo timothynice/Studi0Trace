@@ -183,6 +183,23 @@ impl Plans {
         self.lock().entries.get(image).map(|e| e.painted.iter().map(|(k, _)| k.clone()).collect()).unwrap_or_default()
     }
 
+    /// The bytes a trace of `mask` is given: `original` for an empty mask, else, with Recognise text on and a plan
+    /// kept for these bytes, the image with the mask's lines painted out (`painted_for`). A mask that names lines
+    /// while no plan is kept for the bytes, Recognise text is off or the plan holds none of them is `expired`: the
+    /// frontend asks for a plan the app no longer has, and the original traced under a masked key would draw its text
+    /// twice once the frontend composes the glyphs over it.
+    pub fn trace_bytes(&self, image: &str, original: Arc<Vec<u8>>, recognise: bool, mask: &[String]) -> Result<Arc<Vec<u8>>, CommandError> {
+        if mask.is_empty() {
+            return Ok(original);
+        }
+        let hash = bytes_hash(&original);
+        if !recognise || self.get(image, &hash).is_none() {
+            return Err(CommandError::expired());
+        }
+        let source = Image::decode(&original)?;
+        self.painted_for(image, &hash, mask, &source)?.ok_or_else(CommandError::expired)
+    }
+
     /// A new plan of `image`: the one running is aborted. Answers this plan's generation.
     pub fn reserve(&self, image: &str) -> u64 {
         let generation = self.next.fetch_add(1, Ordering::Relaxed) + 1;
@@ -270,5 +287,27 @@ mod tests {
         assert!(kept.contains(&ids[0]), "asked for again, so kept: {kept:?}");
         assert!(!kept.contains(&ids[1]) && !kept.contains(&ids[2]) && !kept.contains(&ids[3]), "{kept:?}");
         assert_eq!(kept.last(), Some(&ids[PAINTED_MAX + 1]));
+    }
+
+    #[test]
+    fn a_masked_trace_without_a_plan_for_the_bytes_or_with_recognise_text_off_is_expired() {
+        let (p, source) = planned(3);
+        let original = Arc::new(crate::redraw::encode_png(&source.rgba, source.width, source.height, image::ExtendedColorType::Rgba8).unwrap());
+        let plans = Plans::default();
+        let mask = vec!["i-t01".to_string()];
+        let code = |r: Result<Arc<Vec<u8>>, CommandError>| r.err().and_then(|e| e.code().map(str::to_string));
+        // an empty mask is the original, plan or none
+        assert!(Arc::ptr_eq(&plans.trace_bytes("i", original.clone(), true, &[]).unwrap(), &original));
+        // no plan kept: expired, never the original under a masked key
+        assert_eq!(code(plans.trace_bytes("i", original.clone(), true, &mask)).as_deref(), Some("image_expired"));
+        plans.put("i", bytes_hash(&original), p);
+        // Recognise text off, or ids the plan does not hold: expired too
+        assert_eq!(code(plans.trace_bytes("i", original.clone(), false, &mask)).as_deref(), Some("image_expired"));
+        assert_eq!(code(plans.trace_bytes("i", original.clone(), true, &["i-t09".to_string()])).as_deref(), Some("image_expired"));
+        // the plan's line: the painted image
+        let painted = plans.trace_bytes("i", original.clone(), true, &mask).unwrap();
+        assert!(!Arc::ptr_eq(&painted, &original));
+        let decoded = Image::decode(&painted).unwrap();
+        assert_eq!(&decoded.rgba[4..8], &[0, 0, 0, 255], "a one-pixel strip has nothing to paint from: the pixel stays");
     }
 }

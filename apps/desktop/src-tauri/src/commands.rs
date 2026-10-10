@@ -91,23 +91,11 @@ use tauri::{Emitter, Manager};
 pub async fn vectorize(app: tauri::AppHandle, state: State<'_, AppState>, image_id: String, parameters: Value, auto: bool, job: String, mask: Vec<String>) -> Result<Value, CommandError> {
     let original = state.images.bytes(&image_id).ok_or_else(CommandError::expired)?;
     // with Recognise text on and a plan for these bytes, the worker traces the image with the lines of `mask` painted
-    // out (the frontend composes their glyphs over the answer); the hash and the paint-out run off the async runtime
+    // out (the frontend composes their glyphs over the answer); a mask with no plan behind it is `expired`. The hash
+    // and the paint-out run off the async runtime
     let recognise = settings::load(&app).recognise_text;
     let (handle, id) = (app.clone(), image_id.clone());
-    let bytes = redraw::blocking(move || {
-        if recognise && !mask.is_empty() {
-            let texts = handle.state::<TextState>();
-            let hash = text::bytes_hash(&original);
-            if texts.plans.get(&id, &hash).is_some() {
-                let source = Source::decode(&original)?;
-                if let Some(painted) = texts.plans.painted_for(&id, &hash, &mask, &source)? {
-                    return Ok(painted);
-                }
-            }
-        }
-        Ok(original)
-    })
-    .await?;
+    let bytes = redraw::blocking(move || handle.state::<TextState>().plans.trace_bytes(&id, original, recognise, &mask)).await?;
     let (emitter, job_id) = (app.clone(), job.clone());
     let rx = state.queue.submit(JobSpec { id: job, image_id, bytes, parameters, auto, test: None }, move || {
         let _ = emitter.emit("trace-phase", serde_json::json!({ "job": job_id, "phase": "tracing" }));
