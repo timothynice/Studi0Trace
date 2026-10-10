@@ -88,7 +88,7 @@ describe("composeSvg", () => {
     expect(on[2].textContent).toBe("AB");
   });
 
-  it("returns the base unchanged with no plan, no enabled line, or a declined line", () => {
+  it("returns the base unchanged with no plan, no enabled line, or a line with no chosen font", () => {
     const b = base(BACKDROP);
     const p = plan(line("a", box));
     expect(compose(b, null)).toBe(b);
@@ -96,6 +96,13 @@ describe("composeSvg", () => {
     const declined = { ...line("a", box), status: { kind: "declined", reason: "script" } as const, chosen: null };
     expect(compose(b, plan(declined))).toBe(b);
     expect(compose("<svg>", p)).toBe("<svg>");
+  });
+
+  it("composes an enabled line that still has a chosen font whatever its status (a string edit that declined it)", () => {
+    const b = base(BACKDROP);
+    const declined = { ...line("a", box), status: { kind: "declined", reason: "no_fit" } as const };
+    const out = children(compose(b, plan(declined)));
+    expect(out.map((e) => e.getAttribute("data-line"))).toEqual([null, "a"]);
   });
 
   it("puts a lower line beneath an earlier one that lies over it in the source", () => {

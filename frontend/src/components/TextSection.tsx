@@ -128,7 +128,7 @@ function LineRow({ line, n, on, onChange, onToggle, onHover, searchFonts }: { li
       <div className="flex items-center justify-between text-[11px] text-muted-foreground">
         {declined ? (
           <span>{declined}</span>
-        ) : line.status.kind === "off" ? (
+        ) : !on ? (
           <span>Traced as shapes</span>
         ) : line.fit ? (
           <span className="mac-tint inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 font-medium">Fit {fitPercent(line.fit.iou)}</span>

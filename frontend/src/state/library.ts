@@ -328,13 +328,14 @@ export function createLibrary(platform: LibraryPlatform, catalog: Catalog, initi
    * Every trace composed again from its base, each with its own key's mask. Without a plan (after a Revert, whose
    * kept traces carry their glyphs while the plan is gone) a trace with lines painted out keeps the vector it has:
    * its base alone would show the image with the text missing. With `only`, a line that alone changed, the traces
-   * whose mask does not hold it are left as they are (one parse per trace that sets it, not per trace kept).
+   * whose mask does not hold it are left as they are (one parse per trace that sets it, not per trace kept); a trace
+   * whose mask holds a line of `keep` (one that lost its font) keeps the vector it has too.
    */
-  const recomposed = (traces: Record<string, TraceAnswer>, plan: TextPlan | null, hiddenText = settings.hiddenText, only?: string) =>
+  const recomposed = (traces: Record<string, TraceAnswer>, plan: TextPlan | null, hiddenText = settings.hiddenText, only?: string, keep?: ReadonlySet<string>) =>
     Object.fromEntries(
       Object.entries(traces).map(([k, t]) => {
         const mask = maskOfKey(k);
-        if ((only !== undefined && !mask.includes(only)) || (!plan && mask.length)) return [k, t];
+        if ((only !== undefined && !mask.includes(only)) || (!plan && mask.length) || mask.some((m) => keep?.has(m))) return [k, t];
         return [k, { ...t, svg: composed(t.base, mask, plan, hiddenText) }];
       }),
     );
@@ -705,7 +706,8 @@ export function createLibrary(platform: LibraryPlatform, catalog: Catalog, initi
    * The image's plan is now `plan`: a line it matched that was not matched before is set in a font (the app never
    * changes a line's `enabled` once the plan has landed, so the store does), the traces are composed again from
    * their bases (only those that set `changed` when that line alone changed, every one for a new plan), and a mask
-   * that moved shows its cached trace or is traced.
+   * that moved shows its cached trace or is traced. A line that is declined with no font chosen (a string edit no
+   * font fits) is switched off, and the traces that painted it out keep their vector until a trace without it lands.
    */
   const applyPlan = (id: string, plan: TextPlan, changed?: string) => {
     const item = find(id);
@@ -714,8 +716,10 @@ export function createLibrary(platform: LibraryPlatform, catalog: Catalog, initi
     const wasMatched = new Set(matchedLines(t.plan).map((l) => l.id));
     const enabled = new Set(t.enabled);
     for (const l of matchedLines(plan)) if (!wasMatched.has(l.id)) enabled.add(l.id);
+    const fontless = new Set(plan.lines.filter((l) => l.status.kind === "declined" && l.chosen === null).map((l) => l.id));
+    for (const l of fontless) enabled.delete(l);
     const before = traceKey(item);
-    const traces = recomposed(item.traces, plan, settings.hiddenText, changed);
+    const traces = recomposed(item.traces, plan, settings.hiddenText, changed, fontless);
     patch(id, { traces, exported: keptExport(item, traces), text: { ...t, plan, enabled } });
     if (traceKey(find(id)!) !== before) showOrTrace(id);
   };

@@ -1359,6 +1359,22 @@ describe("library: traces by the painted set", () => {
     for (const k of shownKeys.slice(-12)) expect(item().traces[k]).toBeDefined();
   });
 
+  it("a string edit no font fits switches its line off; the traces that painted it out keep their glyphs until the new trace lands", async () => {
+    const { calls, answer, item, lib, platform } = await tracedOnBalanced();
+    await answer(calls[0]);
+    const full = item().traces[`${P}|a-t0,a-t1`].svg;
+    expect(full).toContain("M0 0h10v10z");
+    platform.textSetLine.mockImplementationOnce(async () => ({ plan: PLAN([{ ...T0, string: "€€€", status: { kind: "declined", reason: "no_fit" }, candidates: [], chosen: null, fit: null }, T1]) }));
+    await lib.setTextLine("a", "a-t0", { string: "€€€" });
+    expect([...textOf(item()).enabled]).toEqual(["a-t1"]);
+    expect(item().traces[`${P}|a-t0,a-t1`].svg).toBe(full);
+    expect(item().shown).toBe(`${P}|a-t0,a-t1`);
+    // the trace without it is a user trace
+    expect(currentJob(item())).toMatchObject({ key: `${P}|a-t1`, mask: ["a-t1"] });
+    await answer(calls[calls.length - 1]);
+    expect(item().shown).toBe(`${P}|a-t1`);
+  });
+
   it("a string edit recomposes every cached trace from its base", async () => {
     const { calls, answer, item, lib, platform } = await tracedOnBalanced();
     await answer(calls[0]);

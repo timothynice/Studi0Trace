@@ -43,6 +43,14 @@ describe("TextSection", () => {
     expect(screen.getByRole("switch", { name: /Re-set/ })).not.toBeChecked();
   });
 
+  it("a matched line switched off says it is traced as shapes in place of its fit", () => {
+    const off = item(plan([line()]));
+    render(<TextSection item={{ ...off, text: { ...off.text!, enabled: new Set() } }} {...props()} />);
+    expect(screen.getByText("Traced as shapes")).toBeInTheDocument();
+    expect(screen.queryByText("Fit 94 %")).toBeNull();
+    expect(screen.getByRole("switch", { name: /Re-set/ })).not.toBeChecked();
+  });
+
   it("a declined line's switch is disabled: it has no font to set until one is chosen", () => {
     const p = props();
     const declined = line({ status: { kind: "declined", reason: "script" }, enabled: false, chosen: null, fit: null });

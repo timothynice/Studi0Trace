@@ -40,10 +40,15 @@ export function insertionIndex(doc: SvgDoc, line: TextLine): number | null {
   return null;
 }
 
-/** The base trace with every enabled, matched line's chosen candidate inserted where the source stacks it. Returns `base` unchanged when nothing composes. */
+/**
+ * The base trace with every enabled line's chosen candidate inserted where the source stacks it, whatever the line's
+ * status: `enabled` is the trace's own mask, and a line it painted out is set in its font for as long as it has one (a
+ * string edit that just declined it leaves the cached trace as it was until the new trace lands). Returns `base`
+ * unchanged when nothing composes.
+ */
 export function composeSvg(base: string, { plan, enabled, hiddenText }: ComposeInput): string {
   if (!plan) return base;
-  const lines = plan.lines.filter((l) => enabled.has(l.id) && l.status.kind === "matched" && l.chosen !== null && l.candidates[l.chosen]);
+  const lines = plan.lines.filter((l) => enabled.has(l.id) && l.chosen !== null && l.candidates[l.chosen]);
   if (!lines.length) return base;
   const doc = parseSvg(base);
   const dom = doc && svgDom(doc);
