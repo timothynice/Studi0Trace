@@ -3,7 +3,7 @@
 //! <dir>/out/N-plan.json, N-painted.png and N-text.svg (the group the frontend composes from the chosen candidates' paths, and the
 //! painted image of the full mask), and renders the text group over the painted image to
 //! N-check.png (over white: N-text.png) for a look. With `STUDI0TRACE_TEXT_FORCE=1` every declined line that has a
-//! candidate is also set in its best candidate, to N-forced-plan.json and N-forced-check.png. Nothing of this is in git.
+//! candidate is also set in its best candidate, to N-forced-plan.json, N-forced-painted.png and N-forced-check.png. Nothing of this is in git.
 use std::path::PathBuf;
 use std::sync::Arc;
 use studi0trace_desktop::redraw::Source;
@@ -103,6 +103,8 @@ fn plans_the_example_images() {
             let overlay = format!("<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 {} {}\">{}</svg>", source.width, source.height, group);
             let top = studi0trace_core::render::render(&overlay, source.width, source.height, false).unwrap();
             let mut base = painted_image(&source, &cur, &mask);
+            // the forced plan's full mask painted out, to be traced and composed over (the layering check)
+            std::fs::write(out.join(format!("{n}-forced-painted.png")), png(base.clone().into_raw(), source.width, source.height)).unwrap();
             image::imageops::overlay(&mut base, &image::RgbaImage::from_raw(source.width, source.height, top).unwrap(), 0, 0);
             std::fs::write(out.join(format!("{n}-forced-check.png")), png(base.into_raw(), source.width, source.height)).unwrap();
         }

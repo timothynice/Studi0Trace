@@ -69,13 +69,20 @@ fidelity bench. Read `README.md` first — it has the run/test/API reference.
   with AI; never handed an image Vision found no text in) → `ink.rs` measures each line's ink and declines what it
   cannot set (script, gradient, rotated, mismatch) → `catalog.rs` shortlists Google and installed families →
   `fit.rs` (on `glyphs.rs`'s shaping and outlines) fits size, baseline, tracking and per-glyph nudges → the matched
-  lines are painted out of what the trace sees (`plan.rs`) → `commands::vectorize` hands the worker the painted
-  bytes → `compose.rs` writes the `<g id="text">` group (one path per line, and always the hidden `<text>`, which
-  the frontend's `lib/textsvg.ts` leaves out when the setting is off) that the frontend composes before `</svg>`.
-  Progress is the `text-phase` event (`{id, phase}`); `plans.rs` keeps a plan per image by the SHA-256 of its bytes
-  with generations (a cancel, a newer plan or a close refuses a late result; an edit is stored only while the
-  bytes are the same, `put_if`), at most two plans run at once, and an edit answers `repainted` when it changed
-  the painted bytes (the frontend traces again then, else recomposes). Google Fonts are downloaded on demand
+  lines are painted out of what the trace sees (`plan.rs`; spec `2026-10-10-text-toggles-layering-design.md` from here)
+  → `vectorize(…, mask)` names the lines to paint out, `Plans::painted_for` builds (and caches) that painted PNG and
+  the worker traces it (an empty mask traces the original bytes). Rust writes no group: every candidate carries its
+  own `fit`, outline `path` and hidden `text` (`compose.rs`), and the frontend composes (`lib/textsvg.ts`
+  `composeSvg(base, {plan, enabled, hiddenText})`), inserting each enabled line's path before the first traced shape
+  that overlaps it and is painted in one of the line's `occluders` (`ink.rs`: the colours of what lay over the letters
+  in the source, so the gold script "Awaits" stays over ADVENTURE), else at the end, and a placed line is an occluder
+  for the lines after it. `enabled` and a font pick are frontend state, so toggling or switching font is a recompose;
+  traces are cached by `paramsKey|mask` (`state/library.ts`): the full mask first, then the empty one, then every
+  "all but one" mask in the background while no user job runs. Progress is the `text-phase` event (`{id, phase}`);
+  `plans.rs` keeps a plan per image by the SHA-256 of its bytes with generations (a cancel, a newer plan or a close
+  refuses a late result; an edit is stored only while the bytes are the same, `put_if`), at most two plans run at
+  once, and an edit (`set_line`: a string refits every candidate, a known font only moves `chosen`, a new font is
+  fitted and appended) answers `{plan}` alone. The Text controls live in the Inspect tab beside Layers. Google Fonts are downloaded on demand
   into the app data dir's `fonts/` (`fonts.rs`). The two network files are `fonts.rs` (Google, family names only)
   and `reader_openai.rs` (OpenAI, the user's key, `store: false`); `STUDI0TRACE_GFONTS_BASE` and
   `STUDI0TRACE_OPENAI_BASE` point them at the tests' mock servers. Fixture suites: `cargo test --release --test

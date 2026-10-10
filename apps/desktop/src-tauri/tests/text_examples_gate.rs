@@ -3,13 +3,14 @@
 //! plans Tim's three example images with Vision, the real catalogue and real Google downloads (into <dir>/fonts)
 //! and holds what the text re-setting must do on them: every tracked all-caps tagline Matched in the ink's weight,
 //! under the string with its word spaces put back, the scripts and the gradient declined, and image 3 planned in
-//! under 25 s. It writes <dir>/out/N-plan.json and N-check.png (the group the frontend composes from the chosen candidates' paths, over the full mask's painted image) as the harness
+//! under 25 s, and the layering: image 2's ADVENTURE reports the gold script's colour among its occluders, image 1's LUMORA none. It writes <dir>/out/N-plan.json and N-check.png (the group the frontend composes from the chosen candidates' paths, over the full mask's painted image) as the harness
 //! does: the gate is also the eye's, and every Matched line's crop is to be looked at against the source.
 use std::path::PathBuf;
 use std::sync::Arc;
 use studi0trace_desktop::redraw::Source;
 use studi0trace_desktop::text::catalog::Catalog;
 use studi0trace_desktop::text::fonts::GoogleFonts;
+use studi0trace_desktop::text::ink::delta_e;
 use studi0trace_desktop::text::plan::stroke_agrees;
 use studi0trace_desktop::text::vision::Vision;
 use studi0trace_desktop::text::{paint_mask, plan, Deps, Status, TextLine, TextPlan};
@@ -119,6 +120,42 @@ fn the_taglines_are_matched_and_the_scripts_declined() {
             let words = serif_words.iter().filter(|w| find(w).is_some_and(|l| l.status == Status::Matched)).count();
             if words < 6 {
                 failures.push(format!("2: {words} of the 7 serif small words Matched, under 6"));
+            }
+        }
+        // the layering: ADVENTURE's letters lie under the gold script "Awaits", and the plan must say so (the frontend
+        // composes the line under that colour's shapes); LUMORA's have nothing over them
+        if n == "2" {
+            // the script's own colour, sampled: the commonest colour well off the page's in the window round the A of Awaits
+            let px = |x: u32, y: u32| -> [u8; 3] { let i = ((y * source.width + x) * 4) as usize; [source.rgba[i], source.rgba[i + 1], source.rgba[i + 2]] };
+            let page = px(470, 440);
+            let mut counts: std::collections::HashMap<[u8; 3], u32> = std::collections::HashMap::new();
+            for y in 440..500 {
+                for x in 470..520 {
+                    if delta_e(px(x, y), page) > 25.0 {
+                        *counts.entry(px(x, y)).or_default() += 1;
+                    }
+                }
+            }
+            let gold = counts.into_iter().max_by_key(|&(c, k)| (k, c)).map(|(c, _)| c).unwrap();
+            match find("ADVENTURE") {
+                Some(l) => {
+                    eprintln!("  ADVENTURE ({:?}) occluders {:?}, the script's colour sampled at {gold:?}: {:?}", l.status, l.occluders, l.occluders.iter().map(|&o| delta_e(o, gold)).collect::<Vec<_>>());
+                    if !l.occluders.iter().any(|&o| delta_e(o, gold) <= 12.0) {
+                        failures.push(format!("2: ADVENTURE's occluders {:?} hold nothing within 12 delta-E of the script's {gold:?}", l.occluders));
+                    }
+                }
+                None => failures.push("2: no line reads \"ADVENTURE\"".into()),
+            }
+        }
+        if n == "1" {
+            match find("LUMORA") {
+                Some(l) => {
+                    eprintln!("  LUMORA occluders {:?}", l.occluders);
+                    if !l.occluders.is_empty() {
+                        failures.push(format!("1: LUMORA reports occluders {:?}", l.occluders));
+                    }
+                }
+                None => failures.push("1: no line reads \"LUMORA\"".into()),
             }
         }
         for l in lines.iter().filter(|l| l.status == Status::Matched) {

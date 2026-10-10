@@ -5,6 +5,9 @@ this all"). Branch `claude/svg-text-handling-fbf2c8`. Three engine follow-ups ha
 `2026-10-09-thin-stroke-seeding-design.md`, `2026-10-09-soft-disc-merge-design.md`,
 `2026-10-09-text-as-shapes-design.md`.
 
+Superseded in three places by `2026-10-10-text-toggles-layering-design.md`: the Text controls live in the Inspect tab, a
+trace is keyed by the painted set (`mask`), and the frontend composes each line where the source stacks it (no `text_group`).
+
 ## Why
 
 Small text is the worst thing Vexel draws. On three of Tim's inputs (AI-made logos, 1254–1536 px,

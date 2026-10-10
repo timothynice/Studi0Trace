@@ -111,3 +111,45 @@ header with "Off in Settings".
 
 Precomputing every mask combination; layering by anything other than colour evidence (no depth model);
 text inside the upsample group; a weight select in the row.
+
+## Status
+
+2026-10-10, after Tasks 1-7.
+
+**Real-image gate** (`tests/text_examples_gate.rs`, Vision, no key, fonts cached): passes, 19 matched of 25 as before
+(1: 2, 2: 14, 3: 3). It now also asserts the layering evidence: ADVENTURE (Declined NoFit, as before) reports
+`occluders [[186,153,99]]`, 0.56 delta-E from the script's colour sampled out of the image ([186,152,98], the
+commonest off-page colour round the A of "Awaits"; limit 12), and LUMORA reports none. Plan times: image 1 7.0 s,
+image 2 23.1 s, image 3 6.8 s (36.9 s in all).
+
+**By eye** (`STUDI0TRACE_TEXT_FORCE=1` harness, which now also writes `N-forced-painted.png`; the compose script is
+a scratchpad `tsx` run of the real `composeSvg` under jsdom). Image 2's plan with ADVENTURE forced matched (Manrope
+700, IoU 0.40: a poor fit, which is why it is declined) and every matched line enabled, the forced plan's full mask
+painted out, traced by the Rust engine (balanced) and composed: `insertionIndex` puts ADVENTURE before shape 1 of 66,
+the gold `#bb9862` script, and the render shows "Awaits" lying over the caps, as in the source. With ADVENTURE's
+occluders emptied (control) the same composition appends it and the caps cover the script's top. The forced font's
+shapes are wrong (it is declined for that), and where the gold crossed the painted-out letters the painted image
+leaves a pale smear in the base; neither occurs in the app, which does not paint out a declined line.
+
+**Suites.** `frontend`: 329 tests in 38 files, `tsc --noEmit` and `npm run build` clean. `apps/desktop/src-tauri`:
+`cargo test --release` green (174 unit tests and every integration binary). `cargo clippy --release --all-targets
+--no-deps -p studi0trace-desktop` reports nothing from `apps/desktop` once `fit_candidates` (8 arguments since it
+gained the line id) is allowed `too_many_arguments`; `vexel-rs` has its own pre-existing warnings and one error, as on `main`.
+
+**Trace times** (Rust engine, balanced, the cost of the prefetch; a trace of the painted image is the cheaper one
+since the text is no longer in it): image 1 original 9.3 s (first run), full mask 3.7 s; image 2 original 30.3 s, full
+mask 15.6 s. So on image 1 (2 lines) the full, empty and two all-but-one masks are about 4 + 9 + 2 x ~6 s of
+background tracing after the first result; image 2's 14 all-but-one masks are not prefetched quickly (about 15-30 s each),
+which is why the prefetch yields to any user job and stops on an edit.
+
+**Deviations.** Hidden shapes (Layers) do not survive a line toggle, because the base trace changes with the mask and
+shape indices with it. A line whose status is declined has its switch disabled (it has no candidate to set). With
+Recognise text off the Text section shows its header with "Off in Settings". The spec's gate assertion (the path
+inserted before the "Awaits" shapes) is the occluder-colour assertion above plus the by-eye render, since the gate
+has no trace. The occluder check is on a declined line; no matched line of the three images has occluders.
+
+**Not verified.** The running app. The dev app was built and launched (`npm run dev`, debug build, no panic in its
+output) but this environment grants no accessibility or screen-recording access, so no window could be seen or
+driven: the Inspect tab's Text / Layers / Clean up, the instant tagline toggle after the second `vectorize`, the
+instant font pick, the lines in Layers and the light and dark screenshots are unchecked, and the prefetch timings above are
+the engine's, not read from the app's console. Needs Tim's eyes on the real app (both themes).

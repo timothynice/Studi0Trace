@@ -111,6 +111,7 @@ fn candidate(font: FontRef, fit: Fit, string: &str, line_id: &str, shaped: &glyp
 /// while no fit of the ink's weight reaches `FIT_SURE`, stopping as soon as one does (a fit of the wrong weight
 /// does not stop it). A font that is never fitted is not a candidate; one that cannot be located or loaded is
 /// left out.
+#[allow(clippy::too_many_arguments)]
 fn fit_candidates(string: &str, line_id: &str, ink: &ink::LineInk, fonts: &[FontRef], eager: usize, catalog: &catalog::Catalog, cache_dir: &Path, full: bool) -> Vec<Candidate> {
     let caps = all_caps(string);
     let mut out: Vec<Candidate> = Vec::new();
