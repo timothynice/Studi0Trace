@@ -484,3 +484,17 @@ no `App.text.test.tsx`: the wiring is covered by `library.test.ts`, `TextSection
 
 **The gate** (`text_examples_gate`, fonts cached): passes, 19 of 25 lines matched as before — image 1 2/2 (7.5 s),
 image 2 14/19 (24.7 s), image 3 3/4 (6.7 s), the same faces, weights and IoUs as after Task 16.
+
+**Deferred after the final review** (real, small, nothing downstream builds on them): `retryText` re-traces only
+when traces already exist, so a trace started after a plan failure and still running when the retried plan
+lands finishes without the group; the edit length cap (3× the current string + 16) compounds across edits —
+store the first-read length; `Plans::put_if` checks the bytes' hash, not the plan an edit started from
+(accept → revert → fresh plan → late edit can overwrite it); the Auto preset card shows "running" during the
+text job because `autoRunning` keys on `job.key`; `Deps.hidden_text` is no longer read; turning Recognise
+text back on does not drop the traces made without a group, so editing a string then composes glyphs over a
+trace that still holds the text as shapes; `CLAUDE.md`'s fixture-suite command omits `text_vision`; the
+search returns a family's nearest-400 weight only (no weight select in the row); `FIT_SURE` 0.84 makes the
+early stop rare on real sources (≈30 fonts screened per line, a cold run downloads ≈40 TTFs; the font cache
+has no eviction); `SPACE_EXCESS` 0.35 sits at a typical word-space width, so an ordinary dropped space may
+not be restored; `colour_range` cannot see a second ink under 10 % of the flat pixels; the hidden `<text>`'s
+x-list assumes one glyph per code point; the stroke check is weak on lowercase lines.
