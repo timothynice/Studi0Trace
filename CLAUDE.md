@@ -86,8 +86,8 @@ fidelity bench. Read `README.md` first — it has the run/test/API reference.
   full mask kept). Progress is the `text-phase` event (`{id, phase}`);
   `plans.rs` keeps a plan per image by the SHA-256 of its bytes with generations (a cancel, a newer plan or a close
   refuses a late result; an edit is stored only while the bytes are the same, `put_if`), at most two plans run at
-  once, and an edit (`set_line`: a string refits every candidate, a known font only moves `chosen`, a new font is
-  fitted and appended) answers `{plan}` alone. The Text controls live in the Inspect tab beside Layers. Google Fonts are downloaded on demand
+  once, and an edit (`set_line`: a string refits every candidate, a known font only moves `chosen` when its fit is
+  the full one (`refined`) and is fitted in full first when it was only screened, a new font is fitted and appended) answers `{plan}` alone. The Text controls live in the Inspect tab beside Layers. Google Fonts are downloaded on demand
   into the app data dir's `fonts/` (`fonts.rs`). The two network files are `fonts.rs` (Google, family names only)
   and `reader_openai.rs` (OpenAI, the user's key, `store: false`); `STUDI0TRACE_GFONTS_BASE` and
   `STUDI0TRACE_OPENAI_BASE` point them at the tests' mock servers. Fixture suites: `cargo test --release --test

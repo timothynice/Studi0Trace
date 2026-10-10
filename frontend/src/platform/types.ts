@@ -300,7 +300,7 @@ export interface Platform {
   revertRedraw(id: string): Promise<OpenedImage>;
   /** Text re-setting (the Mac app; a browser answers "not available"). Finds, reads and matches the image's text; aborting the signal abandons it. */
   textPlan(id: string, opts: TextOptions): Promise<TextPlan>;
-  /** Changes one line (its string, its font or whether it is set) and answers the new plan with the text group to compose. */
+  /** Changes one line (its string or its font) and answers the new plan; the frontend composes the traces from it. */
   textSetLine(id: string, lineId: string, change: TextLineChange): Promise<TextLineAnswer>;
   /** Fonts whose family matches the query, for the line's font picker. */
   textSearchFonts(query: string): Promise<FontRef[]>;

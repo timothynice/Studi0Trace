@@ -18,10 +18,15 @@ under it.
 A trace names the lines painted out of the image it traces. The frontend sends `mask: string[]` — the
 sorted ids of the matched lines to paint out — with every `vectorize` call, and caches the answer under
 `paramsKey(params) + "|" + mask.join(",")` (`traces` in `state/library.ts`, with `shown` chosen by the
-current params and the current enabled set). Rust's `Plans` keeps one painted PNG per mask per image
-(`painted: HashMap<MaskKey, Arc<Vec<u8>>>`, built on demand from the kept inks — painting out is
+current params and the current enabled set). On Auto the full mask is Auto's own run (`auto|mask`); once its
+pick is known (an Auto run leaves the pick's params in `item.params`), every other mask is traced with
+`auto: false` and kept under the pick's params key, exactly as Auto's candidates are, so a toggle under Auto
+traces one mask (or shows a prefetched one), never a whole Auto run; before the pick is known another mask can
+only be an Auto run of its own. Rust's `Plans` keeps the painted PNG of the masks asked for per image (an LRU of
+at most `PAINTED_MAX` = 16 that never drops the full mask; built on demand from the kept inks — painting out is
 milliseconds) and `vectorize(image_id, parameters, auto, job, mask)` hands the worker that one; an empty
-mask traces the original bytes. `for_trace` and `group_for` go: `vectorize` no longer returns `text_group`
+mask traces the original bytes, and a mask that names lines with no plan kept for the bytes (or Recognise
+text off) answers `image_expired`. `for_trace` and `group_for` go: `vectorize` no longer returns `text_group`
 (section 2). The line switches change nothing in Rust: `set_line` with `enabled` is no longer called —
 `enabled` is frontend state (`TextLine.enabled` in the plan is read at plan time only and then owned by the
 store), and `repainted` is gone with it.
@@ -29,12 +34,18 @@ store), and `repainted` is gone with it.
 Scheduling (`state/library.ts`): when a plan lands, the first trace uses the full mask (every matched line).
 When it returns, the store queues the empty mask (the untouched image) so the all-type ↔ all-shapes
 compare is instant. Then, while no user-initiated job is running for any image, it prefetches "all but one"
-masks in line order (`fullMask without line i`), one at a time, under the current params; a prefetch is
-aborted when the user traces, changes a parameter or a preset, edits a string, or when the image is closed,
-and never runs with Auto (Auto's candidates are cached by the same key, but only the full mask is traced for
-them). A mask that is not cached when a switch asks for it is traced on demand like any trace (the button
-shows it busy; the switch stays where the user put it). `Job` gains `mask` and `prefetch: boolean`; a
-prefetch shows no busy state in the Viewer and its failure is silent.
+masks in line order (`fullMask without line i`), one at a time, under the current params (on Auto, the
+pick's) — only when the plan has at most `PREFETCH_MAX_LINES` = 8 matched lines; above that only the empty
+mask is prefetched. Only the selected image prefetches: a selection change stops the previous image's running
+prefetch and puts it back at the head of the queue, where it waits until that image is selected again. A
+prefetch is aborted when the user traces, changes a parameter or a preset, edits a string, uses or reverts a
+redraw, or when the image is closed; settings that land on a cached trace start it again only after they have
+rested `PREFETCH_SETTLE_MS` = 1 s (a slider's ticks do not start and kill workers). A mask that is not cached
+when a switch asks for it is traced on demand like any trace (the button shows it busy; the switch stays where
+the user put it). `Job` gains `mask` and `prefetch: boolean`; a prefetch shows no busy state in the Viewer and
+its failure is silent. Per image the store keeps at most `MASKED_TRACES_MAX` = 24 traces of a masked image per
+settings key, dropping the least recently shown first and never the full mask's, the untouched image's, the
+one on screen or the one last exported.
 
 ## 2. Composition on the frontend, every candidate precomputed
 
@@ -42,12 +53,16 @@ prefetch shows no busy state in the Viewer and its failure is silent.
 source pixels) and `text` (its hidden `<text …>…</text>` element), written by `plan.rs`/`compose.rs` for
 every fitted candidate; `TextLine.fit` stays as the chosen candidate's. `set_line` with a string change
 refits every candidate and returns the new paths; `set_line` with a font that is already a candidate only
-moves `chosen` (no fit); a font not among the candidates (a search pick) is fitted and appended. The frontend
-sets `chosen` locally and recomposes at once, then tells Rust in the background (`textSetLine({font})`,
-answer discarded unless it carries a newly fitted candidate, which is merged in).
+moves `chosen` when that candidate's fit is the full one (`Candidate.refined`), and fits it in full in its place
+first when it was only screened; a font not among the candidates (a search pick) is fitted and appended. The
+frontend sets `chosen` locally and recomposes at once (only the traces whose mask sets that line), then tells
+Rust in the background (`textSetLine({font})`, answer discarded unless it carries a newly fitted candidate or a
+new path for the chosen one, which is merged in).
 
 `lib/textsvg.ts` becomes `composeSvg(base, plan, enabled: ReadonlySet<lineId>, settings)`: it parses the base
-with `svgdoc.parseSvg` (DOM), inserts each enabled matched line's `<path d fill data-line>` (plus its `text`
+with `svgdoc.parseSvg` (DOM), inserts each enabled line's chosen `<path d fill data-line>`, whatever its status
+(a line a string edit leaves with no font is switched off by the store, and the traces that painted it out keep
+their vector until a trace without it lands) (plus its `text`
 element when `settings.hiddenText`) at the position section 3 gives, and serialises. `TraceAnswer` keeps
 `base` and `svg`; `textGroup` goes. Everything that reads a trace (viewer, Layers, export, Auto candidates,
 stats) reads the composed `svg` as today; a text line's path is a shape in `svgdoc` and so in Layers.
@@ -56,8 +71,15 @@ stats) reads the composed `svg` as today; a text line's path is a shape in `svgd
 
 `ink.rs` reports per line `occluders: Vec<[u8; 3]>`: the pixels inside the characters' boxes that the
 off-colour rule excluded from the ink, grouped into 8-connected blobs, every blob of at least
-`OCCLUDER_MIN_PX` (12) px giving its median colour; blobs within 6 ΔE of each other merge. `TextLine.occluders`
-carries them (`[[r,g,b], …]`, usually empty).
+`OCCLUDER_MIN_PX` (12) px that lies over the letters giving its median colour; blobs within 6 ΔE of each other
+merge. `TextLine.occluders` carries them (`[[r,g,b], …]`, usually empty). A blob lies over the letters
+(`ink::lies_over`; ink "past" a pixel means a mask pixel within 3 px beyond the blob's edge, walking through
+the blob first) when at least 30 % of its pixels have ink past them on both sides along one axis (it crosses a
+stem: a bar, a script stroke across the letters), or, crossing nothing, when it touches the letters (10 % or
+more of its pixels have ink past them on some side) without hugging them (under 80 %): it overlaps their edge
+and reaches away, as the script "Awaits" does over the feet of ADVENTURE. A band hugging the letters on one side
+— a drop shadow, an outline — is never an occluder. The paint-out (`ink::paint_out`) neither fills nor samples
+the foreign pixels (`LineInk::foreign`): the walk to a pixel's nearest neighbours goes past them to the backdrop.
 
 Composition inserts a line's path before the first shape in document order (among the base's top-level
 shapes and those directly inside a top-level `<g>` other than the upsample root group) whose bounds intersect
@@ -82,10 +104,10 @@ header with "Off in Settings".
 
 ## Data and contract changes
 
-- Rust: `Candidate { font, iou, stroke, fit: Fit, path: String, text: String }`; `TextLine.occluders`;
+- Rust: `Candidate { font, iou, stroke, fit: Fit, path: String, text: String, refined: bool }`; `TextLine.occluders`;
   `vectorize(…, mask: Vec<String>)`; `Plans::painted_for(image, &hash, &mask) -> Option<Arc<Vec<u8>>>`
   (builds and caches); `LineChange.enabled` and `LineAnswer.repainted` removed; `LineAnswer { plan }`.
-- TS: `TextCandidate { font, iou, stroke, fit, path, text }`, `TextLine.occluders: [number, number, number][]`,
+- TS: `TextCandidate { font, iou, stroke, fit, path, text, refined? }`, `TextLine.occluders: [number, number, number][]`,
   `TraceRequest.mask: string[]`, `VectorizeResponse.text_group` removed, `TraceAnswer.textGroup` removed,
   `Job.mask`, `Job.prefetch`; `Library.setTextLine(id, lineId, { string? | font? })`,
   `Library.toggleTextLine(id, lineId, on)` (frontend-only), `composeSvg(base, plan, enabled, settings)`.

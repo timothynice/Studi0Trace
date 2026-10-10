@@ -125,7 +125,9 @@ fn the_taglines_are_matched_and_the_scripts_declined() {
         // the layering: ADVENTURE's letters lie under the gold script "Awaits", and the plan must say so (the frontend
         // composes the line under that colour's shapes); LUMORA's have nothing over them
         if n == "2" {
-            // the script's own colour, sampled: the commonest colour well off the page's in the window round the A of Awaits
+            // the script's own colour, sampled: the commonest colour well off the page's in the window round the A of
+            // Awaits. The window (x 470-520, y 440-500, the page sampled at 470,440) is hardcoded for this one image
+            // (1536 x 1024), where the A of "Awaits" lies; another 2.png needs it chosen again
             let px = |x: u32, y: u32| -> [u8; 3] { let i = ((y * source.width + x) * 4) as usize; [source.rgba[i], source.rgba[i + 1], source.rgba[i + 2]] };
             let page = px(470, 440);
             let mut counts: std::collections::HashMap<[u8; 3], u32> = std::collections::HashMap::new();
