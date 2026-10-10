@@ -17,8 +17,12 @@ pub mod vision;
 use crate::error::CommandError;
 use serde::{Deserialize, Serialize};
 
-/// A line whose best fit scores under this is traced as shapes (set from the fixture set, tests/text_fit.rs).
-pub const FIT_ACCEPT: f32 = 0.79;
+/// A line whose best fit scores under this IoU is traced as shapes. Set on real sources (AI-made logos, hairline
+/// strokes, see the spec's Status): a right face there scores 0.67-0.83 where the crisp fixtures score 0.84 up, so
+/// the IoU is a floor and the weight is judged by the stroke (`STROKE_AGREE`).
+pub const FIT_ACCEPT: f32 = 0.6;
+/// A fit whose drawn stroke differs from the ink's by more than this share is the wrong weight, and not accepted.
+pub const STROKE_AGREE: f32 = 0.35;
 /// 90th-percentile ΔE of the covered pixels from the ink colour above which the ink is a gradient.
 pub const INK_SPREAD_MAX: f32 = 8.0;
 /// The share by which the ink's segment count may differ from the string's non-space characters.
@@ -83,6 +87,9 @@ pub struct Fit {
     pub tracking: f32,
     pub nudges: Vec<f32>,
     pub iou: f32,
+    /// The drawn stroke's width over the ink's (`fit::stroke_ratio`): 1 is the ink's weight, 0 unmeasured.
+    #[serde(default)]
+    pub stroke: f32,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

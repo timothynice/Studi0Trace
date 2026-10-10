@@ -36,7 +36,7 @@ fn plans_the_example_images() {
         eprintln!("{n}: {} lines in {:.1}s", planned.plan.lines.len(), t0.elapsed().as_secs_f32());
         for l in &planned.plan.lines {
             let top: Vec<String> = l.candidates.iter().take(3).map(|c| format!("{} {} {:.3}", c.font.family, c.font.weight, c.iou)).collect();
-            eprintln!("  {:?} {:?} {:?} {:?}", l.string, l.status, l.fit.as_ref().map(|f| (f.size, f.iou)), top);
+            eprintln!("  {:?} {:?} {:?} {:?}", l.string, l.status, l.fit.as_ref().map(|f| (f.size, f.iou, f.stroke)), top);
         }
         std::fs::write(out.join(format!("{n}-plan.json")), serde_json::to_string_pretty(&planned.plan).unwrap()).unwrap();
         if let Some(p) = &planned.painted {
@@ -64,6 +64,11 @@ fn plans_the_example_images() {
             for id in ids {
                 let d = Deps { finder: Arc::new(Vision), reader: None, catalog: catalog.clone(), fonts: Some(fonts.clone()), cache_dir: cache.clone(), hidden_text: false };
                 cur = tauri::async_runtime::block_on(set_line(source.clone(), &cur, &id, LineChange { enabled: Some(true), ..Default::default() }, d)).unwrap();
+            }
+            for l in &cur.plan.lines {
+                if let (Some(f), Some(c)) = (&l.fit, l.chosen.and_then(|i| l.candidates.get(i))) {
+                    eprintln!("  forced {:?}: {} {} iou {:.3} stroke {:.2}", l.string, c.font.family, c.font.weight, f.iou, f.stroke);
+                }
             }
             std::fs::write(out.join(format!("{n}-forced-plan.json")), serde_json::to_string_pretty(&cur.plan).unwrap()).unwrap();
             let overlay = format!("<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 {} {}\">{}</svg>", source.width, source.height, cur.group);

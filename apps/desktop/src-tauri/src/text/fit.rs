@@ -286,7 +286,7 @@ fn ink_layout(shaped: &Shaped, ink: &LineInk, segs: &[Option<(u32, u32)>], size:
     for &(i, want, model) in &placed {
         nudges[i as usize] = want - (x + model + tracking * i);
     }
-    Fit { size, baseline, x, tracking, nudges, iou: 0.0 }
+    Fit { size, baseline, x, tracking, nudges, iou: 0.0, stroke: 0.0 }
 }
 
 /// Coordinate descent on size, baseline and the shift of an ink layout.
@@ -355,6 +355,7 @@ pub fn fit_line(shaped: &Shaped, ink: &LineInk, all_caps: bool) -> Option<Fit> {
             tracking: tracking.max(-size * 0.1),
             nudges: vec![0.0; shaped.glyphs.len()],
             iou: 0.0,
+            stroke: 0.0,
         };
         descend(shaped, ink, &goal, &mut fit, &[2.0, 1.0, 0.5], true);
         descend(shaped, ink, &goal, &mut fit, &[0.5], false);
@@ -390,7 +391,60 @@ pub fn fit_line(shaped: &Shaped, ink: &LineInk, all_caps: bool) -> Option<Fit> {
             out = Some(fit);
         }
     }
-    out
+    let mut fit = out?;
+    fit.stroke = stroke_ratio(shaped, &fit, ink);
+    Some(fit)
+}
+
+/// The rows a stroke is measured on: 40 % to 60 % of the ink's height, at least one.
+fn stroke_rows(ink: &LineInk) -> Option<std::ops::Range<usize>> {
+    let (_, t, _, b) = ink.ink_bounds?;
+    let h = (b - t) as f32;
+    let (lo, hi) = (t as usize + (h * 0.4) as usize, t as usize + (h * 0.6) as usize);
+    Some(lo..hi.max(lo + 1).min(ink.height as usize))
+}
+
+/// The median horizontal stroke width across `rows` of a coverage buffer, in px: each run of pixels covered more
+/// than 0.05 that is somewhere covered at least half is one stroke crossing, and its width is its summed coverage,
+/// so a 1.4 px hairline reads 1.4 and not the two or three pixels its anti-aliased edge touches. Rows at mid-height
+/// cross the vertical stems (and a few bars); the ink and a candidate drawn on it cross the same strokes, so the
+/// two medians compare like with like.
+pub fn stroke_px(coverage: &[f32], width: usize, rows: std::ops::Range<usize>) -> Option<f32> {
+    let mut widths = Vec::new();
+    for row in rows.filter_map(|y| coverage.get(y * width..(y + 1) * width)) {
+        let (mut sum, mut peak) = (0f32, 0f32);
+        for &c in row.iter().chain(std::iter::once(&0.0)) {
+            if c > 0.05 {
+                sum += c;
+                peak = peak.max(c);
+            } else if sum > 0.0 {
+                if peak >= 0.5 {
+                    widths.push(sum);
+                }
+                (sum, peak) = (0.0, 0.0);
+            }
+        }
+    }
+    if widths.is_empty() {
+        return None;
+    }
+    widths.sort_by(f32::total_cmp);
+    Some(widths[widths.len() / 2])
+}
+
+/// The ink's stroke width in px (`stroke_px` over its clean coverage).
+pub fn ink_stroke(ink: &LineInk) -> Option<f32> {
+    stroke_px(&target_of(ink), ink.width as usize, stroke_rows(ink)?)
+}
+
+/// The stroke of the string drawn at `fit` over the ink's: above 1 the candidate is heavier than the source, below
+/// lighter; 0 when either has no stroke to measure. IoU on a hairline source is edge-dominated (a stroke a pixel
+/// off scores far below what the eye sees, and a 500 can outscore the 300 the source is), so the acceptance and
+/// the choice between near-equal candidates read the weight from this.
+pub fn stroke_ratio(shaped: &Shaped, fit: &Fit, ink: &LineInk) -> f32 {
+    let Some(rows) = stroke_rows(ink) else { return 0.0 };
+    let (Some(want), Some(drawn)) = (ink_stroke(ink), stroke_px(&render_coverage(shaped, fit, ink), ink.width as usize, rows)) else { return 0.0 };
+    if want > 0.0 { drawn / want } else { 0.0 }
 }
 
 fn fmt(v: f32) -> String {
@@ -455,15 +509,20 @@ mod tests {
         let mut pb = tiny_skia::PathBuilder::new();
         pb.push_rect(tiny_skia::Rect::from_ltrb(0.0, 0.0, 0.5, 0.7).unwrap());
         let shaped = Shaped { glyphs: vec![ShapedGlyph { ch: 'I', path: pb.finish(), advance: 0.6, x_offset: 0.0 }], cap_height: 0.7, x_height: 0.5 };
-        let fit = Fit { size: 10.0, baseline: 20.0, x: 5.0, tracking: 0.0, nudges: vec![0.0], iou: 1.0 };
+        let fit = Fit { size: 10.0, baseline: 20.0, x: 5.0, tracking: 0.0, nudges: vec![0.0], iou: 1.0, stroke: 0.0 };
         assert_eq!(path_data(&shaped, &fit), "M5 20L10 20L10 13L5 13Z");
     }
 
     /// `string` in the fixture Montserrat drawn black on white at `truth` (nudges included), with the quad Vision
     /// would give, through the real ink reader.
     pub(super) fn drawn(string: &str, truth: &Fit, w: u32, h: u32) -> (super::super::glyphs::Font, LineInk) {
+        drawn_in("Montserrat-Regular.ttf", string, truth, w, h)
+    }
+
+    /// The same in one of the fixture fonts.
+    pub(super) fn drawn_in(file: &str, string: &str, truth: &Fit, w: u32, h: u32) -> (super::super::glyphs::Font, LineInk) {
         use super::super::glyphs::Font;
-        let font = Font::load(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/text/fonts/Montserrat-Regular.ttf"), 0).unwrap();
+        let font = Font::load(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/text/fonts").join(file), 0).unwrap();
         let shaped = font.shape(string);
         let page = LineInk { left: 0, top: 0, width: w, height: h, coverage: Vec::new(), mask: Vec::new(), backdrop: [255; 3], colour: [0; 3], spread: 0.0, segments: Vec::new(), ink_bounds: None };
         let cov = render_coverage(&shaped, truth, &page);
@@ -481,7 +540,7 @@ mod tests {
         let string = "LIFE IS GOOD";
         let mut nudges = vec![0.0, 3.0, -2.5, 3.5, 0.0, 14.0, 17.5, 0.0, 28.0, 25.0, 31.5, 28.0];
         nudges[4] = 0.0;
-        let truth = Fit { size: 40.0, baseline: 60.0, x: 10.0, tracking: 6.0, nudges, iou: 1.0 };
+        let truth = Fit { size: 40.0, baseline: 60.0, x: 10.0, tracking: 6.0, nudges, iou: 1.0, stroke: 0.0 };
         let (font, ink) = drawn(string, &truth, 560, 80);
         let shaped = font.shape(string);
         assert_eq!(ink.segments.len(), 10);
@@ -493,6 +552,32 @@ mod tests {
                 assert!((a - b).abs() < 0.75, "glyph {i} at {a}, drawn at {b}");
             }
         }
+    }
+
+    #[test]
+    fn a_stroke_is_its_summed_coverage_across_the_row() {
+        // two strokes per row: a 1.4 px hairline (0.7, 0.7) and a 3 px stem (0.5, 1, 1, 0.5); faint noise is no stroke
+        let row = [0.0, 0.7, 0.7, 0.0, 0.0, 0.5, 1.0, 1.0, 0.5, 0.0, 0.04, 0.3, 0.0];
+        let buf: Vec<f32> = row.iter().chain(row.iter()).chain(row.iter()).copied().collect();
+        let w = stroke_px(&buf, row.len(), 0..3).unwrap();
+        assert!((w - 3.0).abs() < 1e-5, "{w}");
+        assert_eq!(stroke_px(&buf[..6], 6, 0..1), Some(1.4));
+        assert_eq!(stroke_px(&[0.0, 0.3, 0.0], 3, 0..1), None);
+    }
+
+    #[test]
+    fn a_heavy_candidate_on_a_hairline_reads_heavier_than_the_ink_and_the_true_one_reads_even() {
+        // drawn in Josefin Sans Light at 40 px: fitted with its own font the stroke is the ink's, with Montserrat
+        // Regular (a 400 with twice the stem) it is far heavier, though the IoU alone would not say how much
+        let truth = Fit { size: 40.0, baseline: 60.0, x: 10.0, tracking: 6.0, nudges: vec![0.0; 7], iou: 1.0, stroke: 0.0 };
+        let (light, ink) = drawn_in("JosefinSans-Light.ttf", "HILLTOP", &truth, 400, 80);
+        let own = fit_line(&light.shape("HILLTOP"), &ink, true).unwrap();
+        assert!((own.stroke - 1.0).abs() < 0.12, "the true font: {}", own.stroke);
+        let hair = ink_stroke(&ink).unwrap();
+        assert!((1.5..3.5).contains(&hair), "Josefin Sans Light's stem at 40 px: {hair}");
+        let (regular, _) = drawn("HILLTOP", &truth, 400, 80);
+        let heavy = fit_line(&regular.shape("HILLTOP"), &ink, true).unwrap();
+        assert!(heavy.stroke > 1.35, "Montserrat Regular on Josefin Light: {}", heavy.stroke);
     }
 
     #[test]

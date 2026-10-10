@@ -16,7 +16,7 @@ fn cache_with_fixture_font() -> (PathBuf, FontRef) {
 }
 
 fn plan(font: &FontRef, enabled: bool, status: Status) -> TextPlan {
-    let fit = Fit { size: 40.0, baseline: 60.0, x: 10.0, tracking: 2.0, nudges: vec![0.0; 9], iou: 0.95 };
+    let fit = Fit { size: 40.0, baseline: 60.0, x: 10.0, tracking: 2.0, nudges: vec![0.0; 9], iou: 0.95, stroke: 1.0 };
     TextPlan {
         image: "img".into(),
         reader: ReaderKind::Vision,
@@ -160,6 +160,7 @@ mod round1 {
     use studi0trace_desktop::text::catalog::{cache_name, Catalog};
     use studi0trace_desktop::text::compose::compose_group;
     use studi0trace_desktop::text::reader::{Finder, LineBox, ReadFuture, Reader, Reading};
+    use studi0trace_desktop::text::plan::FIT_SURE;
     use studi0trace_desktop::text::{bytes_hash, plan, set_line, Class, Deps, FontRef, LineChange, Phase, Plans, Source, Status, FIT_ACCEPT};
 
     const FONTS: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/text/fonts");
@@ -281,8 +282,8 @@ mod round1 {
     }
 
     // Names sort in the shortlist's order (every width is zero). The first four positions are always fitted; then
-    // a family is fitted only while the best so far is under FIT_ACCEPT + 0.05. An unlocatable family still holds
-    // its place.
+    // a family is fitted only while no fit of the ink's weight has reached FIT_SURE. An unlocatable family still
+    // holds its place.
     fn pruning_dir() -> (PathBuf, Catalog) {
         let dir = cache(&[("Montserrat-Regular.ttf", "A Montserrat", 400), ("JosefinSans-Light.ttf", "F Josefin Sans", 300), ("PlayfairDisplay-Regular.ttf", "G Playfair Display", 400)]);
         let cat = index(&[("A Montserrat", 400), ("B Gap", 400), ("C Gap", 400), ("D Gap", 400), ("E Gap", 400), ("F Josefin Sans", 300), ("G Playfair Display", 400)]);
@@ -296,7 +297,7 @@ mod round1 {
         let d = deps(Arc::new(FixtureFinder(vec![line_box(&img, 14.0, 58.0)])), None, cat, &dir);
         let planned = run_plan(&img, &d);
         let line = &planned.plan.lines[0];
-        assert!(line.fit.as_ref().unwrap().iou >= FIT_ACCEPT + 0.05, "{line:?}");
+        assert!(line.fit.as_ref().unwrap().iou >= FIT_SURE, "{line:?}");
         let names: Vec<&str> = line.candidates.iter().map(|c| c.font.family.as_str()).collect();
         assert_eq!(names, ["A Montserrat"], "the later families were never fitted");
         // and when the first does not fit well, the later ones are fitted
