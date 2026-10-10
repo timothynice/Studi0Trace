@@ -437,3 +437,50 @@ the Keychain state was not read.
 trying the weight neighbours and widening the shortlist for wide-tracked lines, a word-gap parameter in the fit,
 and a speed budget for large lines each want their own task and a bench of real sources; none was changed here
 because the threshold and the shortlist are what keep a wrong face off the canvas.
+
+## Final fix wave
+
+2026-10-09, after the whole-branch review (commits 44e88fc..120a319).
+
+**What changed.**
+
+- *Re-trace on the answer.* `set_line`'s answer carries `repainted` (`text::repainted`: the painted PNG before and
+  after differ), and the store traces again exactly when it is true, else composes again. A font picked for a
+  declined or Off line used to recompose over traces that still held the old pixels, drawing the text twice.
+- *The AI reader is never handed an image Vision found no text in* (it cannot add a line).
+- *Stale text.* A finished trace reads its group again (`Plans::group_for`: the group now, while the painted bytes
+  are still the ones it traced), so an edit made while it ran lands; `text_set_line` hashes off the async runtime
+  and stores with `Plans::put_if` (only while the entry still has the bytes' hash; otherwise `expired`), and the
+  store drops an answer whose image object changed while it was awaited.
+- *Load.* At most two plans run at once (`TextState::plan_permits`, held by the plan's task); a font is written to
+  a `.part` of its own and renamed into place, stale parts are swept when the cache is made, and one `ensure`
+  fetches six fonts at a time (offline on any transport failure, missing in the order asked).
+- *Progress, cancel and retry.* While the plan runs the image holds a job of phase `text` (the trace button busy
+  with Cancel, the canvas "Reading text…"); a cancel lets the next trace ask again; a failed plan shows its error
+  and Try again (`retryText`, which also traces again when the new plan re-sets a line, since the traces on screen
+  were made without it); an untraced image's Text header says "Trace to read the text".
+- *Settings reach cached work.* The group always carries the hidden `<text>`; `composeSvg(base, group,
+  { hiddenText })` leaves it out when the setting is off, and a change of the setting recomposes every trace.
+  Turning Recognise text off drops every trace that carries a group.
+- *Validation and hygiene.* Control characters XML cannot carry are dropped from the readers' strings, from an
+  edit and in `escape_text`. `set_line` refuses (`bad_request`) a Google font the index does not hold, an installed
+  one this Mac does not have and a string over 3 × the line's length + 16. A string edit of a line with no
+  candidates downloads its shortlist before the fit. Vision runs in an autorelease pool, and a failed request is
+  `text_failed` ("Text recognition failed."), not "needs macOS 10.15". `TextFit.stroke` is in the frontend's type.
+- *Docs and copy.* The privacy sentence names "the image you are tracing", the README names the update check,
+  CLAUDE.md describes the text module and the 520×850 window, the fixture fonts' OFL.txt carries all three
+  copyright lines.
+
+**Deviations from the design, recorded.** There is no weight select in the font picker: the search answers each
+family at its weight nearest 400, and a candidate's weight is whatever the fit chose. A trace's stats are not
+recomputed with `svgStats` after the group is composed (the counts are the engine's, without the text). There is
+no `App.text.test.tsx`: the wiring is covered by `library.test.ts`, `TextSection.test.tsx` and
+`TraceButton.test.tsx`. The Settings window is 520×850, not the 520×900 above, and its sheet scrolls.
+
+**Suites.** `frontend`: 304 tests in 38 files, `tsc --noEmit` and `npm run build` clean. `apps/desktop/src-tauri`:
+`cargo test --release` green (173 unit tests, `text_compose` 20, `text_fonts` 7, `text_fit` 65 s). `cargo clippy
+--release --all-targets -p studi0trace-desktop` reports nothing from `apps/desktop`; it stops on `backend/vexel-rs`'s
+`eq_op` (`rects.rs:109`, deny-by-default in clippy 1.98, not on this branch) unless that lint is allowed.
+
+**The gate** (`text_examples_gate`, fonts cached): passes, 19 of 25 lines matched as before — image 1 2/2 (7.5 s),
+image 2 14/19 (24.7 s), image 3 3/4 (6.7 s), the same faces, weights and IoUs as after Task 16.
