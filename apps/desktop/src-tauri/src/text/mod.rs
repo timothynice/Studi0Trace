@@ -1,6 +1,6 @@
 //! Text re-setting: the lines of text in an image are found and read (vision.rs, reader_openai.rs), the font is
 //! matched (catalog.rs, fonts.rs) and fitted (glyphs.rs, ink.rs, fit.rs), the text is painted out of what the
-//! trace sees (ink.rs) and the glyph outlines are composed on top (compose.rs). Nothing here is seen by the
+//! trace sees (ink.rs) and each candidate font carries the glyph outlines the frontend composes on top (compose.rs). Nothing here is seen by the
 //! engine, the core or the worker.
 pub mod catalog;
 pub mod compose;
@@ -163,8 +163,8 @@ pub fn error(code: &'static str) -> CommandError {
     }
 }
 
-pub use plan::{plan, repainted, set_line, Deps, LineChange, Planned};
-pub use plans::{bytes_hash, Entry, Plans};
+pub use plan::{paint_mask, plan, set_line, Deps, LineChange, Planned};
+pub use plans::{bytes_hash, Entry, MaskKey, Plans};
 
 #[cfg(test)]
 mod tests {

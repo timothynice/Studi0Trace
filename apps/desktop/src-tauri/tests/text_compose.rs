@@ -1,8 +1,9 @@
-//! The text group: one path per matched, enabled line in the ink colour, the hidden <text> when asked, source
-//! pixel coordinates, and the core's renderer draws the paths and nothing for the <text>.
+//! What a candidate carries to be composed (its path and its hidden <text>, in source pixel coordinates; the core's
+//! renderer draws the path and nothing for the <text>), the plan, the edits of a line and the painted image per mask.
 use std::path::PathBuf;
 use studi0trace_desktop::text::catalog::{cache_name, Catalog};
-use studi0trace_desktop::text::compose::text_group;
+use studi0trace_desktop::text::compose::{candidate_path, candidate_text};
+use studi0trace_desktop::text::glyphs::Font;
 use studi0trace_desktop::text::{Candidate, Class, Fit, FontRef, ReaderKind, Source, Status, TextLine, TextPlan};
 
 fn cache_with_fixture_font() -> (PathBuf, FontRef) {
@@ -39,17 +40,28 @@ fn catalog() -> Catalog {
     Catalog::from_index(r#"{"families":[{"name":"Montserrat","category":"Sans Serif","variants":[{"weight":400,"italic":false}],"features":{"cap":0.7,"x":0.5,"stem":0.1,"widths":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]}}]}"#, fontdb::Database::new())
 }
 
+/// The group the frontend composes for the sample plan's line: its path in the ink colour, and the hidden text when asked.
+fn group(dir: &std::path::Path, font: &FontRef, hidden_text: bool) -> String {
+    let plan = plan(font, true, Status::Matched);
+    let line = &plan.lines[0];
+    let shaped = Font::load(&dir.join(cache_name(font)), 0).unwrap().shape(&line.string);
+    let fit = line.fit.clone().unwrap();
+    let [r, g, b] = line.colour;
+    let mut out = format!("<g id=\"text\"><path d=\"{}\" fill=\"#{r:02x}{g:02x}{b:02x}\" data-line=\"{}\"/>", candidate_path(&shaped, &fit), line.id);
+    if hidden_text {
+        out.push_str(&candidate_text(&line.id, &line.string, &font.family, &shaped, &fit));
+    }
+    out.push_str("</g>");
+    out
+}
+
 #[test]
-fn one_path_per_line_in_the_ink_colour_with_hidden_text_when_asked() {
+fn a_candidates_path_and_hidden_text_are_in_source_pixels() {
     let (dir, font) = cache_with_fixture_font();
-    let cat = catalog();
-    let with = text_group(&plan(&font, true, Status::Matched), true, &cat, &dir);
-    assert!(with.starts_with("<g id=\"text\">") && with.ends_with("</g>"), "{with}");
-    assert_eq!(with.matches("<path ").count(), 1);
-    assert!(with.contains("fill=\"#181c2c\"") && with.contains("data-line=\"img-t0\""));
+    let shaped = Font::load(&dir.join(cache_name(&font)), 0).unwrap().shape("EST. 2026");
+    let fit = plan(&font, true, Status::Matched).lines[0].fit.clone().unwrap();
     // the hidden text carries one x per character, each glyph's origin: 10, then the advances at 40 px plus the
     // tracking of 2, and the nudge of the "2" after the space (12 px) on it alone
-    let shaped = studi0trace_desktop::text::glyphs::Font::load(&dir.join(cache_name(&font)), 0).unwrap().shape("EST. 2026");
     let mut at = 10.0f32;
     let mut xs = Vec::new();
     for (i, g) in shaped.glyphs.iter().enumerate() {
@@ -58,17 +70,10 @@ fn one_path_per_line_in_the_ink_colour_with_hidden_text_when_asked() {
     }
     assert_eq!(xs.len(), 9);
     let want = format!("<text x=\"{}\" y=\"60\" font-family=\"Montserrat\" font-size=\"40\" fill=\"none\" pointer-events=\"none\" data-line=\"img-t0\">EST. 2026</text>", xs.join(" "));
-    assert!(with.contains(&want), "{with}\nwanted {want}");
-    // the per-candidate helpers write exactly what the group does
-    let fit = plan(&font, true, Status::Matched).lines[0].fit.clone().unwrap();
-    assert_eq!(studi0trace_desktop::text::compose::candidate_text("img-t0", "EST. 2026", "Montserrat", &shaped, &fit), want);
-    let d = studi0trace_desktop::text::compose::candidate_path(&shaped, &fit);
-    assert!(with.contains(&format!("<path d=\"{d}\" fill=\"#181c2c\" data-line=\"img-t0\"/>")), "{with}");
-    let without = text_group(&plan(&font, true, Status::Matched), false, &cat, &dir);
-    assert!(!without.contains("<text"));
-    assert_eq!(text_group(&plan(&font, false, Status::Off), true, &cat, &dir), "<g id=\"text\"></g>");
+    assert_eq!(candidate_text("img-t0", "EST. 2026", "Montserrat", &shaped, &fit), want);
     // the path starts near the fit: an M within the line's box
-    let d = with.split("<path d=\"").nth(1).unwrap();
+    let d = candidate_path(&shaped, &fit);
+    assert!(d.starts_with('M'));
     let m: Vec<f32> = d[1..].split(|c: char| !c.is_ascii_digit() && c != '.' && c != '-').take(2).map(|v| v.parse().unwrap()).collect();
     assert!(m[0] >= 10.0 && m[0] < 60.0 && m[1] > 20.0 && m[1] <= 60.5, "{m:?}");
     let _ = std::fs::remove_dir_all(&dir);
@@ -77,10 +82,9 @@ fn one_path_per_line_in_the_ink_colour_with_hidden_text_when_asked() {
 #[test]
 fn the_core_renders_the_paths_and_nothing_for_the_text() {
     let (dir, font) = cache_with_fixture_font();
-    let cat = catalog();
     let svg = |group: &str| format!("<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 240 80\"><rect width=\"240\" height=\"80\" fill=\"#fff\"/>{group}</svg>");
-    let with = studi0trace_core::render::render(&svg(&text_group(&plan(&font, true, Status::Matched), true, &cat, &dir)), 240, 80, false).unwrap();
-    let without = studi0trace_core::render::render(&svg(&text_group(&plan(&font, true, Status::Matched), false, &cat, &dir)), 240, 80, false).unwrap();
+    let with = studi0trace_core::render::render(&svg(&group(&dir, &font, true)), 240, 80, false).unwrap();
+    let without = studi0trace_core::render::render(&svg(&group(&dir, &font, false)), 240, 80, false).unwrap();
     assert_eq!(with, without, "the hidden text draws nothing");
     let inked = with.chunks(4).filter(|p| p[0] < 128).count();
     assert!(inked > 200, "the glyphs are drawn: {inked} dark pixels");
@@ -102,10 +106,10 @@ impl studi0trace_desktop::text::reader::Finder for FixtureFinder {
 }
 
 #[test]
-fn plans_a_fixture_line_end_to_end_and_an_edit_recomposes() {
+fn plans_a_fixture_line_end_to_end_and_an_edit_refits_its_candidates() {
     use studi0trace_desktop::redraw::Source as Img;
     use studi0trace_desktop::text::reader::LineBox;
-    use studi0trace_desktop::text::{plan, set_line, Deps, LineChange, Phase};
+    use studi0trace_desktop::text::{paint_mask, plan, set_line, Deps, LineChange, Phase};
     use std::sync::{Arc, Mutex};
     let (dir, font) = cache_with_fixture_font();
     let img = Arc::new(Img::decode(&std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/text/montserrat-est-30-t0-white.png")).unwrap()).unwrap());
@@ -127,24 +131,20 @@ fn plans_a_fixture_line_end_to_end_and_an_edit_recomposes() {
         assert!(c.text.contains(">EST. 2026</text>") && c.text.contains("data-line=\"img-t0\""), "{}", c.text);
         assert_eq!(c.fit.iou, c.iou);
     }
-    assert!(planned.group.contains(&format!("<path d=\"{}\"", line.candidates[line.chosen.unwrap()].path)));
     assert_eq!(line.candidates[line.chosen.unwrap()].fit, *line.fit.as_ref().unwrap());
     assert!(line.occluders.is_empty());
-    assert!(planned.painted.is_some() && planned.group.contains("<path "));
-    // painted out: the ink pixels are gone
-    let painted = Img::decode(planned.painted.as_ref().unwrap()).unwrap();
+    // painted out by mask: the ink pixels are gone
+    let painted = Img::decode(&paint_mask(&img, &planned, &["img-t0".to_string()]).unwrap().unwrap()).unwrap();
     assert!(painted.rgba.chunks(4).all(|p| p[0] > 200), "no dark pixel remains");
-    // an edit: the string changes and the group follows
+    // an edit: the string changes and every candidate's text follows
     let edited = tauri::async_runtime::block_on(set_line(img.clone(), &planned, "img-t0", LineChange { string: Some("EST. 2027".into()), ..Default::default() }, deps.clone())).unwrap();
-    assert!(edited.group.contains(">EST. 2027</text>"));
-    let off = tauri::async_runtime::block_on(set_line(img, &edited, "img-t0", LineChange { enabled: Some(false), ..Default::default() }, deps)).unwrap();
-    assert_eq!(off.plan.lines[0].status, Status::Off);
-    assert!(off.painted.is_none() && off.group == "<g id=\"text\"></g>");
+    assert!(edited.plan.lines[0].candidates.iter().all(|c| c.text.contains(">EST. 2027</text>")));
+    assert_ne!(edited.plan.lines[0].candidates[0].path, line.candidates[0].path, "the outlines are refitted to the new string");
     let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
-fn an_unknown_line_is_a_404_a_forced_font_is_matched_and_plans_are_kept_by_hash() {
+fn an_unknown_line_is_a_404_a_known_font_is_chosen_and_plans_are_kept_by_hash() {
     use studi0trace_desktop::redraw::Source as Img;
     use studi0trace_desktop::text::reader::LineBox;
     use studi0trace_desktop::text::{bytes_hash, plan, set_line, Deps, LineChange, Plans};
@@ -156,24 +156,20 @@ fn an_unknown_line_is_a_404_a_forced_font_is_matched_and_plans_are_kept_by_hash(
     let finder = Arc::new(FixtureFinder(vec![LineBox { quad: [[20.0, 14.0], [w - 20.0, 14.0], [w - 20.0, 58.0_f32.min(h)], [20.0, 58.0_f32.min(h)]], string: "EST. 2026".into(), confidence: 0.9 }]));
     let deps = Deps { finder, reader: None, catalog: Arc::new(catalog()), fonts: None, cache_dir: dir.clone(), hidden_text: false };
     let planned = tauri::async_runtime::block_on(plan("img", img.clone(), deps.clone(), Arc::new(|_| {}))).unwrap();
-    assert!(planned.group.contains("<text"), "the hidden text is always written: the frontend leaves it out when the setting is off");
+    assert!(planned.plan.lines[0].candidates.iter().all(|c| c.text.contains("<text")), "the hidden text is always written: the frontend leaves it out when the setting is off");
     let err = tauri::async_runtime::block_on(set_line(img.clone(), &planned, "img-t9", LineChange::default(), deps.clone())).err().unwrap();
     assert_eq!((err.status, err.code()), (404, Some("no_line")));
-    // off, then a font asked for: back on with that font chosen
-    let off = tauri::async_runtime::block_on(set_line(img.clone(), &planned, "img-t0", LineChange { enabled: Some(false), ..Default::default() }, deps.clone())).unwrap();
-    let forced = tauri::async_runtime::block_on(set_line(img, &off, "img-t0", LineChange { font: Some(font.clone()), ..Default::default() }, deps)).unwrap();
+    // a font that is already a candidate is chosen, and the line's enabled flag is the plan's own
+    let forced = tauri::async_runtime::block_on(set_line(img, &planned, "img-t0", LineChange { font: Some(font.clone()), ..Default::default() }, deps)).unwrap();
     let line = &forced.plan.lines[0];
-    assert!(line.status == Status::Matched && line.enabled && line.candidates[line.chosen.unwrap()].font == font);
-    assert!(forced.painted.is_some());
-    // the plans: found by image and hash, a trace gets the painted bytes and the group
+    assert!(line.status == Status::Matched && line.enabled == planned.plan.lines[0].enabled && line.candidates[line.chosen.unwrap()].font == font);
+    // the plans: found by image and hash
     let hash = bytes_hash(&bytes);
     let plans = Plans::default();
     assert!(plans.get("img", &hash).is_none());
     let kept = plans.put("img", hash, forced);
     assert!(Arc::ptr_eq(&plans.get("img", &hash).unwrap(), &kept));
-    assert!(plans.get("img", &bytes_hash(b"other")).is_none() && plans.for_trace("img", &bytes_hash(b"other")).is_none());
-    let (png, group) = plans.for_trace("img", &hash).unwrap();
-    assert!(Arc::ptr_eq(&png, kept.painted.as_ref().unwrap()) && group == kept.group);
+    assert!(plans.get("img", &bytes_hash(b"other")).is_none());
     plans.forget("img");
     assert!(plans.get("img", &hash).is_none());
     // generations: a new reservation supersedes the old, an armed abort runs once on cancel
@@ -195,7 +191,6 @@ mod round1 {
     use std::sync::{Arc, Mutex};
     use studi0trace_desktop::redraw::Source as Img;
     use studi0trace_desktop::text::catalog::{cache_name, Catalog};
-    use studi0trace_desktop::text::compose::compose_group;
     use studi0trace_desktop::text::reader::{Finder, LineBox, ReadFuture, Reader, Reading};
     use studi0trace_desktop::text::plan::FIT_SURE;
     use studi0trace_desktop::text::{bytes_hash, plan, set_line, Class, Deps, FontRef, LineChange, Phase, Plans, Source, Status, FIT_ACCEPT};
@@ -252,7 +247,7 @@ mod round1 {
         let make = || {
             let mut p = sample_plan(&f, true, Status::Matched);
             p.image = "img".into();
-            studi0trace_desktop::text::Planned { plan: p, inks: Vec::new(), painted: None, group: "<g id=\"text\"></g>".into() }
+            studi0trace_desktop::text::Planned { plan: p, inks: Vec::new() }
         };
         let _ = (&cat, &dir);
         let plans = Plans::default();
@@ -282,24 +277,6 @@ mod round1 {
     }
 
     #[test]
-    fn an_off_line_given_a_string_and_a_font_is_matched_and_enabled() {
-        let dir = cache(&[("Montserrat-Regular.ttf", "Montserrat", 400)]);
-        let img = image("montserrat-est-30-t0-white.png");
-        let d = deps(Arc::new(FixtureFinder(vec![line_box(&img, 14.0, 58.0)])), None, index(&[("Montserrat", 400)]), &dir);
-        let planned = run_plan(&img, &d);
-        let off = edit(&img, &planned, "img-t0", LineChange { enabled: Some(false), ..Default::default() }, &d);
-        // a string alone keeps it off
-        let still = edit(&img, &off, "img-t0", LineChange { string: Some("EST. 2027".into()), ..Default::default() }, &d);
-        assert_eq!(still.plan.lines[0].status, Status::Off);
-        // a string and a font together turn it on
-        let both = edit(&img, &off, "img-t0", LineChange { string: Some("EST. 2027".into()), font: Some(font("Montserrat", 400)), ..Default::default() }, &d);
-        let line = &both.plan.lines[0];
-        assert!(line.status == Status::Matched && line.enabled && line.string == "EST. 2027", "{line:?}");
-        assert!(both.group.contains("<path "));
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
     fn a_string_edit_keeps_the_font_the_user_forced_even_when_it_scores_under_the_accept() {
         let dir = cache(&[("Montserrat-Regular.ttf", "Montserrat", 400), ("JosefinSans-Light.ttf", "Josefin Sans", 300)]);
         let img = image("montserrat-est-30-t0-white.png");
@@ -314,7 +291,7 @@ mod round1 {
         let edited = edit(&img, &forced, "img-t0", LineChange { string: Some("EST. 2027".into()), ..Default::default() }, &d);
         let l = &edited.plan.lines[0];
         assert!(l.status == Status::Matched && l.enabled && l.candidates[l.chosen.unwrap()].font == jos, "{l:?}");
-        assert!(edited.group.contains("<path ") && edited.painted.is_some());
+        assert!(l.candidates.iter().all(|c| c.path.starts_with('M')));
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -429,56 +406,12 @@ mod round1 {
         let d = deps(Arc::new(Opaque(line_box(&img, 14.0, 58.0))), None, index(&[("Montserrat", 400)]), &dir);
         let planned = run_plan(&img, &d);
         assert_eq!(planned.plan.lines[0].status, Status::Matched);
-        let painted = Img::decode(planned.painted.as_ref().unwrap()).unwrap();
+        let painted = Img::decode(&studi0trace_desktop::text::paint_mask(&img, &planned, &["img-t0".to_string()]).unwrap().unwrap()).unwrap();
         assert_eq!(painted.rgba[3], 0, "the painted image keeps the transparent corner");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    #[test]
-    fn a_line_whose_font_is_not_in_the_cache_is_neither_composed_nor_painted_out() {
-        let dir = cache(&[("Montserrat-Regular.ttf", "Montserrat", 400)]);
-        let img = image("montserrat-est-30-t0-white.png");
-        let d = deps(Arc::new(FixtureFinder(vec![line_box(&img, 14.0, 58.0)])), None, index(&[("Montserrat", 400)]), &dir);
-        let planned = run_plan(&img, &d);
-        assert_eq!(compose_group(&planned.plan, false, &d.catalog, &dir).lines, ["img-t0"]);
-        assert!(planned.painted.is_some());
-        // the same plan against a cache that has lost the file
-        let empty = cache(&[]);
-        let composed = compose_group(&planned.plan, false, &d.catalog, &empty);
-        assert!(composed.lines.is_empty() && composed.group == "<g id=\"text\"></g>");
-        let lost = Deps { cache_dir: empty.clone(), ..d.clone() };
-        let again = edit(&img, &planned, "img-t0", LineChange { enabled: Some(true), ..Default::default() }, &lost);
-        assert!(again.painted.is_none(), "the text is not painted out when nothing is drawn in its place");
-        assert_eq!(again.group, "<g id=\"text\"></g>");
-        let _ = std::fs::remove_dir_all(&dir);
-        let _ = std::fs::remove_dir_all(&empty);
-    }
-
     // ---- final fix wave ----
-
-    #[test]
-    fn a_font_picked_for_a_declined_line_is_a_repaint_and_a_string_edit_of_a_matched_line_is_not() {
-        use studi0trace_desktop::text::repainted;
-        // only Josefin Light is offered: it scores under the accept on Montserrat ink, so the line is declined
-        let dir = cache(&[("Montserrat-Regular.ttf", "Montserrat", 400), ("JosefinSans-Light.ttf", "Josefin Sans", 300)]);
-        let img = image("montserrat-est-30-t0-white.png");
-        let d = deps(Arc::new(FixtureFinder(vec![line_box(&img, 14.0, 58.0)])), None, index(&[("Josefin Sans", 300), ("Montserrat", 400)]), &dir);
-        let only_josefin = Deps { catalog: Arc::new(index(&[("Josefin Sans", 300)])), ..d.clone() };
-        let declined = run_plan(&img, &only_josefin);
-        assert!(matches!(declined.plan.lines[0].status, Status::Declined(_)), "{:?}", declined.plan.lines[0]);
-        assert!(declined.painted.is_none());
-        let picked = edit(&img, &declined, "img-t0", LineChange { font: Some(font("Montserrat", 400)), ..Default::default() }, &d);
-        assert_eq!(picked.plan.lines[0].status, Status::Matched);
-        assert!(repainted(&declined, &picked), "the line is now painted out: the trace must be redone");
-        // a string edit of the matched line paints out the same ink
-        let restrung = edit(&img, &picked, "img-t0", LineChange { string: Some("EST. 2027".into()), ..Default::default() }, &d);
-        assert_eq!(restrung.plan.lines[0].status, Status::Matched);
-        assert!(!repainted(&picked, &restrung), "same composed lines, same painted bytes");
-        // and switching it off is a repaint again
-        let off = edit(&img, &restrung, "img-t0", LineChange { enabled: Some(false), ..Default::default() }, &d);
-        assert!(repainted(&restrung, &off));
-        let _ = std::fs::remove_dir_all(&dir);
-    }
 
     struct Panicking;
     impl Reader for Panicking {
@@ -502,40 +435,25 @@ mod round1 {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    fn planned_with(painted: Option<Vec<u8>>, group: &str) -> studi0trace_desktop::text::Planned {
-        let p = sample_plan(&font("Montserrat", 400), true, Status::Matched);
-        studi0trace_desktop::text::Planned { plan: p, inks: Vec::new(), painted: painted.map(Arc::new), group: group.into() }
+    fn planned_with(string: &str) -> studi0trace_desktop::text::Planned {
+        let mut p = sample_plan(&font("Montserrat", 400), true, Status::Matched);
+        p.lines[0].string = string.into();
+        studi0trace_desktop::text::Planned { plan: p, inks: Vec::new() }
     }
 
     #[test]
     fn an_edit_is_stored_only_while_the_image_keeps_the_bytes_it_was_made_for() {
         let plans = Plans::default();
         let (hash, other) = (bytes_hash(b"one"), bytes_hash(b"two"));
-        assert!(plans.put_if("img", hash, planned_with(None, "<g id=\"text\"></g>")).is_none(), "no entry: nothing stored");
+        assert!(plans.put_if("img", hash, planned_with("x")).is_none(), "no entry: nothing stored");
         assert!(plans.get("img", &hash).is_none());
-        plans.put("img", hash, planned_with(None, "a"));
-        assert!(plans.put_if("img", other, planned_with(None, "b")).is_none(), "the bytes were swapped while the edit ran");
-        assert_eq!(plans.get("img", &hash).unwrap().group, "a");
-        let kept = plans.put_if("img", hash, planned_with(None, "c")).unwrap();
+        plans.put("img", hash, planned_with("a"));
+        assert!(plans.put_if("img", other, planned_with("b")).is_none(), "the bytes were swapped while the edit ran");
+        assert_eq!(plans.get("img", &hash).unwrap().plan.lines[0].string, "a");
+        let kept = plans.put_if("img", hash, planned_with("c")).unwrap();
         assert!(Arc::ptr_eq(&plans.get("img", &hash).unwrap(), &kept));
         plans.forget("img");
-        assert!(plans.put_if("img", hash, planned_with(None, "d")).is_none(), "closed while the edit ran");
-    }
-
-    #[test]
-    fn a_finished_trace_takes_the_group_of_an_edit_that_kept_its_painted_bytes() {
-        let plans = Plans::default();
-        let hash = bytes_hash(b"one");
-        let submitted = plans.put("img", hash, planned_with(Some(vec![1, 2, 3]), "old")).painted.clone().unwrap();
-        // a string edit: a new group, the same painted bytes (encoded again, so another allocation)
-        plans.put_if("img", hash, planned_with(Some(vec![1, 2, 3]), "new")).unwrap();
-        assert_eq!(plans.group_for("img", &hash, &submitted).as_deref(), Some("new"));
-        // an edit that repainted: the trace keeps what it was submitted with
-        plans.put_if("img", hash, planned_with(Some(vec![9]), "other")).unwrap();
-        assert!(plans.group_for("img", &hash, &submitted).is_none());
-        plans.put_if("img", hash, planned_with(None, "none")).unwrap();
-        assert!(plans.group_for("img", &hash, &submitted).is_none());
-        assert!(plans.group_for("img", &bytes_hash(b"two"), &submitted).is_none(), "other bytes");
+        assert!(plans.put_if("img", hash, planned_with("d")).is_none(), "closed while the edit ran");
     }
 
     #[test]
@@ -546,8 +464,9 @@ mod round1 {
         let planned = run_plan(&img, &d);
         let edited = edit(&img, &planned, "img-t0", LineChange { string: Some("EST.\u{0} 2027\u{1b}".into()), ..Default::default() }, &d);
         assert_eq!(edited.plan.lines[0].string, "EST. 2027");
-        assert!(!edited.group.chars().any(|c| (c as u32) < 0x20 || c as u32 == 0x7f), "{:?}", edited.group);
-        assert!(edited.group.contains(">EST. 2027</text>"));
+        let c = &edited.plan.lines[0].candidates[0];
+        assert!(!c.text.chars().any(|c| (c as u32) < 0x20 || c as u32 == 0x7f), "{:?}", c.text);
+        assert!(c.text.contains(">EST. 2027</text>"));
         // and from a reader
         let reader = Failing(Ok(vec![Reading { string: "EST.\u{7}\u{0} 2026".into(), hints: Vec::new(), class: Class::Type }]));
         let d = deps(Arc::new(FixtureFinder(vec![line_box(&img, 14.0, 58.0)])), Some(Arc::new(reader)), index(&[("Montserrat", 400)]), &dir);
@@ -604,8 +523,8 @@ mod round1 {
         assert_eq!(*count.lock().unwrap(), 2, "the stylesheet and the file");
         assert!(dir.join(cache_name(&font("Montserrat", 400))).exists());
         let line = &edited.plan.lines[0];
-        assert!(line.status == Status::Matched && line.enabled && line.string == "EST. 2027", "{line:?}");
-        assert!(!edited.plan.fonts_offline && edited.painted.is_some());
+        assert!(line.status == Status::Matched && line.string == "EST. 2027", "{line:?}");
+        assert!(!edited.plan.fonts_offline && line.candidates[0].text.contains(">EST. 2027</text>"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -625,6 +544,70 @@ mod round1 {
         assert_eq!(refused(LineChange { string: Some("E".repeat(44)), ..Default::default() }), bad);
         assert_eq!(refused(LineChange { string: Some("EST. 2027".into()), ..Default::default() }), None);
         assert_eq!(refused(LineChange { font: Some(font("Montserrat", 400)), ..Default::default() }), None);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_painted_image_is_built_per_mask_and_cached() {
+        let dir = cache(&[("Montserrat-Regular.ttf", "Montserrat", 400)]);
+        let bytes = std::fs::read(format!("{FIXTURES}/montserrat-est-30-t0-white.png")).unwrap();
+        let img = Arc::new(Img::decode(&bytes).unwrap());
+        let d = deps(Arc::new(FixtureFinder(vec![line_box(&img, 14.0, 58.0)])), None, index(&[("Montserrat", 400)]), &dir);
+        let planned = run_plan(&img, &d);
+        let (plans, hash) = (Plans::default(), bytes_hash(&bytes));
+        let names = |ids: &[&str]| -> Vec<String> { ids.iter().map(|s| s.to_string()).collect() };
+        assert!(plans.painted_for("img", &hash, &names(&["img-t0"]), &img).unwrap().is_none(), "no plan is kept yet");
+        plans.put("img", hash, planned);
+        let first = plans.painted_for("img", &hash, &names(&["img-t0"]), &img).unwrap().unwrap();
+        let painted = Img::decode(&first).unwrap();
+        assert!(painted.rgba.chunks(4).all(|p| p[0] > 200), "no dark pixel remains");
+        // the same mask is the same bytes, not painted again
+        assert!(Arc::ptr_eq(&first, &plans.painted_for("img", &hash, &names(&["img-t0"]), &img).unwrap().unwrap()));
+        // an empty mask is the original (and nothing is cached for it); an id the plan lacks is ignored
+        assert!(plans.painted_for("img", &hash, &[], &img).unwrap().is_none());
+        assert!(plans.painted_for("img", &hash, &names(&["img-t9"]), &img).unwrap().is_none());
+        let with_unknown = plans.painted_for("img", &hash, &names(&["img-t9", "img-t0"]), &img).unwrap().unwrap();
+        assert!(Arc::ptr_eq(&first, &with_unknown), "the unknown id changes nothing");
+        // other bytes have no plan; an edit of the plan keeps the cache (the inks are the same)
+        assert!(plans.painted_for("img", &bytes_hash(b"other"), &names(&["img-t0"]), &img).unwrap().is_none());
+        let edited = edit(&img, &plans.get("img", &hash).unwrap(), "img-t0", LineChange { string: Some("EST. 2027".into()), ..Default::default() }, &d);
+        plans.put_if("img", hash, edited).unwrap();
+        assert!(Arc::ptr_eq(&first, &plans.painted_for("img", &hash, &names(&["img-t0"]), &img).unwrap().unwrap()));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_known_font_is_only_chosen_a_new_one_is_fitted_and_a_string_refits_every_candidate() {
+        let dir = cache(&[("Montserrat-Regular.ttf", "Montserrat", 400), ("JosefinSans-Light.ttf", "Josefin Sans", 300)]);
+        let img = image("montserrat-est-30-t0-white.png");
+        let d = deps(Arc::new(FixtureFinder(vec![line_box(&img, 14.0, 58.0)])), None, index(&[("Josefin Sans", 300), ("Montserrat", 400)]), &dir);
+        let planned = run_plan(&img, &d);
+        let line = &planned.plan.lines[0];
+        assert!(line.candidates.len() >= 2, "{:?}", line.candidates.iter().map(|c| &c.font.family).collect::<Vec<_>>());
+        let other = (0..line.candidates.len()).find(|i| Some(*i) != line.chosen).unwrap();
+        let picked = edit(&img, &planned, "img-t0", LineChange { font: Some(line.candidates[other].font.clone()), ..Default::default() }, &d);
+        let p = &picked.plan.lines[0];
+        assert_eq!((p.chosen, p.status, p.enabled), (Some(other), Status::Matched, line.enabled));
+        assert_eq!(p.fit.as_ref(), Some(&line.candidates[other].fit));
+        let before: Vec<&str> = line.candidates.iter().map(|c| c.path.as_str()).collect();
+        let after: Vec<&str> = p.candidates.iter().map(|c| c.path.as_str()).collect();
+        assert_eq!(before, after, "no refit: the same paths in the same order");
+        // a string: every candidate's text carries it and its outline follows
+        let edited = edit(&img, &planned, "img-t0", LineChange { string: Some("EST. 2027".into()), ..Default::default() }, &d);
+        let e = &edited.plan.lines[0];
+        assert!(!e.candidates.is_empty() && e.candidates.iter().all(|c| c.text.contains("EST. 2027")), "{e:?}");
+        assert_ne!(e.candidates[0].path, line.candidates[0].path);
+        // a font that is not a candidate (a search pick) is fitted, appended and chosen
+        let mut fresh = d.clone();
+        fresh.catalog = Arc::new(index(&[("Montserrat", 400)]));
+        let only = run_plan(&img, &fresh);
+        let n = only.plan.lines[0].candidates.len();
+        let both = Deps { catalog: d.catalog.clone(), ..fresh };
+        let added = edit(&img, &only, "img-t0", LineChange { font: Some(font("Josefin Sans", 300)), ..Default::default() }, &both);
+        let a = &added.plan.lines[0];
+        assert_eq!(a.candidates.len(), n + 1);
+        assert_eq!(a.candidates[a.chosen.unwrap()].font, font("Josefin Sans", 300));
+        assert!(a.candidates[a.chosen.unwrap()].path.starts_with('M'));
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

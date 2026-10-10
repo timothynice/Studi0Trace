@@ -3,7 +3,7 @@
 //! plans Tim's three example images with Vision, the real catalogue and real Google downloads (into <dir>/fonts)
 //! and holds what the text re-setting must do on them: every tracked all-caps tagline Matched in the ink's weight,
 //! under the string with its word spaces put back, the scripts and the gradient declined, and image 3 planned in
-//! under 25 s. It writes <dir>/out/N-plan.json and N-check.png (the group over the painted image) as the harness
+//! under 25 s. It writes <dir>/out/N-plan.json and N-check.png (the group the frontend composes from the chosen candidates' paths, over the full mask's painted image) as the harness
 //! does: the gate is also the eye's, and every Matched line's crop is to be looked at against the source.
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -12,12 +12,27 @@ use studi0trace_desktop::text::catalog::Catalog;
 use studi0trace_desktop::text::fonts::GoogleFonts;
 use studi0trace_desktop::text::plan::stroke_agrees;
 use studi0trace_desktop::text::vision::Vision;
-use studi0trace_desktop::text::{plan, Deps, Status, TextLine};
+use studi0trace_desktop::text::{paint_mask, plan, Deps, Status, TextLine, TextPlan};
 
 fn png(rgba: Vec<u8>, w: u32, h: u32) -> Vec<u8> {
     let mut out = std::io::Cursor::new(Vec::new());
     image::RgbaImage::from_raw(w, h, rgba).unwrap().write_to(&mut out, image::ImageFormat::Png).unwrap();
     out.into_inner()
+}
+
+/// The group the frontend composes (every matched, enabled line's chosen candidate path in the ink's colour) and the
+/// mask of those lines' ids.
+fn group_and_mask(plan: &TextPlan) -> (String, Vec<String>) {
+    let mut group = String::from("<g id=\"text\">");
+    let mut mask = Vec::new();
+    for l in plan.lines.iter().filter(|l| l.status == Status::Matched && l.enabled) {
+        let Some(c) = l.chosen.and_then(|i| l.candidates.get(i)) else { continue };
+        let [r, g, b] = l.colour;
+        group.push_str(&format!("<path d=\"{}\" fill=\"#{r:02x}{g:02x}{b:02x}\" data-line=\"{}\"/>", c.path, l.id));
+        mask.push(l.id.clone());
+    }
+    group.push_str("</g>");
+    (group, mask)
 }
 
 fn chosen(l: &TextLine) -> String {
@@ -116,10 +131,11 @@ fn the_taglines_are_matched_and_the_scripts_declined() {
             failures.push(format!("3: planned in {secs:.1} s, not under 25"));
         }
         std::fs::write(out.join(format!("{n}-plan.json")), serde_json::to_string_pretty(&planned.plan).unwrap()).unwrap();
-        let overlay = format!("<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 {} {}\">{}</svg>", source.width, source.height, planned.group);
+        let (group, mask) = group_and_mask(&planned.plan);
+        let overlay = format!("<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 {} {}\">{}</svg>", source.width, source.height, group);
         let top = studi0trace_core::render::render(&overlay, source.width, source.height, false).unwrap();
-        let mut base = match &planned.painted {
-            Some(p) => image::load_from_memory(p).unwrap().to_rgba8(),
+        let mut base = match paint_mask(&source, &planned, &mask).unwrap() {
+            Some(p) => image::load_from_memory(&p).unwrap().to_rgba8(),
             None => image::RgbaImage::from_raw(source.width, source.height, source.rgba.clone()).unwrap(),
         };
         image::imageops::overlay(&mut base, &image::RgbaImage::from_raw(source.width, source.height, top).unwrap(), 0, 0);

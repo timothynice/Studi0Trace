@@ -1,6 +1,6 @@
-//! The orchestration: `plan` finds, reads, matches and fits every line of an image, paints the matched ones out
-//! and composes the group; `set_line` changes one line and rebuilds both. Everything that is pixels runs on the
-//! blocking pool.
+//! The orchestration: `plan` finds, reads, matches and fits every line of an image; `set_line` changes one line;
+//! `paint_mask` paints a set of lines out of the source (what a trace sees). Everything that is pixels runs on
+//! the blocking pool.
 use super::*;
 use crate::redraw::Source as Image;
 use std::path::{Path, PathBuf};
@@ -38,7 +38,7 @@ pub struct Deps {
     pub catalog: Arc<catalog::Catalog>,
     pub fonts: Option<Arc<fonts::GoogleFonts>>,
     pub cache_dir: PathBuf,
-    /// The setting as it stood when the plan was asked, for the plan's own use. The group always carries the hidden
+    /// The setting as it stood when the plan was asked, for the plan's own use. Every candidate carries its hidden
     /// text: the frontend leaves it out while the setting is off (`composeSvg`), so turning it on or off reaches
     /// every cached plan and every trace without planning again.
     pub hidden_text: bool,
@@ -47,17 +47,12 @@ pub struct Deps {
 pub struct Planned {
     pub plan: TextPlan,
     pub inks: Vec<Arc<ink::LineInk>>,
-    /// The source with the matched, enabled lines painted out, as PNG; None when no line is. Shared, so a trace
-    /// takes it without a copy.
-    pub painted: Option<Arc<Vec<u8>>>,
-    pub group: String,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct LineChange {
     pub string: Option<String>,
     pub font: Option<FontRef>,
-    pub enabled: Option<bool>,
 }
 
 fn all_caps(s: &str) -> bool {
@@ -238,22 +233,15 @@ fn finish_line(line: &mut TextLine, mut fitted: Vec<Candidate>, full: usize, any
     }
 }
 
-/// The painted PNG (when a line is composed) and the group.
-type Painted = (Option<Arc<Vec<u8>>>, String);
-
-/// The group, with the hidden text always (see `Deps::hidden_text`), and the source with painted out only the lines
-/// the group carries: a matched line whose font cannot be located is not composed, so its pixels stay in what the
-/// trace sees.
-fn paint_and_group(source: &Image, plan: &TextPlan, inks: &[Arc<ink::LineInk>], catalog: &catalog::Catalog, cache_dir: &Path) -> Result<Painted, CommandError> {
-    let composed = compose::compose_group(plan, true, catalog, cache_dir);
-    let used: Vec<&ink::LineInk> = plan.lines.iter().zip(inks).filter(|(l, _)| composed.lines.contains(&l.id)).map(|(_, i)| i.as_ref()).collect();
-    let painted = if used.is_empty() {
-        None
-    } else {
-        let rgba = ink::paint_out(source, &used);
-        Some(Arc::new(crate::redraw::encode_png(&rgba, source.width, source.height, image::ExtendedColorType::Rgba8)?))
-    };
-    Ok((painted, composed.group))
+/// The source with the lines of `mask` (ids) painted out, as PNG: what a trace of that mask sees. None for an empty
+/// mask, or one that names no line of the plan (an id not in the plan is ignored).
+pub fn paint_mask(source: &Image, planned: &Planned, mask: &[String]) -> Result<Option<Vec<u8>>, CommandError> {
+    let used: Vec<&ink::LineInk> = planned.plan.lines.iter().zip(&planned.inks).filter(|(l, _)| mask.contains(&l.id)).map(|(_, i)| i.as_ref()).collect();
+    if used.is_empty() {
+        return Ok(None);
+    }
+    let rgba = ink::paint_out(source, &used);
+    Ok(Some(crate::redraw::encode_png(&rgba, source.width, source.height, image::ExtendedColorType::Rgba8)?))
 }
 
 /// The source on white with alpha 255: what Vision and the AI reader are shown, since light ink on a transparent
@@ -267,7 +255,7 @@ fn flattened(source: &Image) -> Image {
     Image { rgba, width: source.width, height: source.height }
 }
 
-/// Finds, reads, matches and fits every line of `source`, paints the matched ones out and composes the group.
+/// Finds, reads, matches and fits every line of `source`.
 /// Reports each phase; ends with `Done`, or `Failed` when it returns an error.
 pub async fn plan(image_id: &str, source: Arc<Image>, deps: Deps, phase: Arc<dyn Fn(Phase) + Send + Sync>) -> Result<Planned, CommandError> {
     let planned = run(image_id, source, deps, &phase).await;
@@ -414,22 +402,14 @@ async fn run(image_id: &str, source: Arc<Image>, deps: Deps, phase: &Arc<dyn Fn(
             winners.truncate(MAX_WINNERS);
         }
     }
-    let src = source;
-    let catalog = deps.catalog.clone();
-    let cache_dir = deps.cache_dir.clone();
-    let image = image_id.to_string();
-    crate::redraw::blocking(move || {
-        let plan = TextPlan { image, reader: reader_kind, lines: text_lines, ai_error, fonts_offline };
-        let (painted, group) = paint_and_group(&src, &plan, &inks, &catalog, &cache_dir)?;
-        Ok(Planned { plan, inks, painted, group })
-    })
-    .await
+    Ok(Planned { plan: TextPlan { image: image_id.to_string(), reader: reader_kind, lines: text_lines, ai_error, fonts_offline }, inks })
 }
 
-/// One line changed: a new string refits the line's candidates, a font the user asked for is chosen and the line
-/// matched and enabled whatever its score, `enabled` switches it. The painted image and the group are rebuilt.
-/// An unknown line is a 404 `no_line`.
-pub async fn set_line(source: Arc<Image>, planned: &Planned, line_id: &str, change: LineChange, deps: Deps) -> Result<Planned, CommandError> {
+/// One line changed: a new string refits every candidate (the paths and texts with them), a font the user asked for
+/// is chosen and the line matched whatever its score: one that is already a candidate is only chosen (no fit), one
+/// that is not is fitted and appended. A line's `enabled` is the plan's own and is never changed here (the frontend
+/// owns it once the plan lands). An unknown line is a 404 `no_line`.
+pub async fn set_line(_source: Arc<Image>, planned: &Planned, line_id: &str, change: LineChange, deps: Deps) -> Result<Planned, CommandError> {
     let mut plan = planned.plan.clone();
     let inks = planned.inks.clone();
     let at = plan.lines.iter().position(|l| l.id == line_id).ok_or_else(|| CommandError::new(404, "no_line", "There is no such line of text."))?;
@@ -466,7 +446,7 @@ pub async fn set_line(source: Arc<Image>, planned: &Planned, line_id: &str, chan
         let ink = &inks[at];
         let line = &mut plan.lines[at];
         let id = line.id.clone();
-        let was_off = line.status == Status::Off;
+        let enabled = line.enabled;
         let was_chosen = matches!(line.status, Status::Matched | Status::Off);
         let mut restring = false;
         if let Some(s) = change.string {
@@ -501,63 +481,25 @@ pub async fn set_line(source: Arc<Image>, planned: &Planned, line_id: &str, chan
             }
             let (fitted, full) = refine(&line.string, &id, ink, fitted, &catalog, &cache_dir);
             finish_line(line, fitted, full, any_located, keep.as_ref());
-            // a line the user switched off stays off, unless this call asks for a font or for it on
-            if was_off && change.enabled != Some(true) && change.font.is_none() && line.status == Status::Matched {
-                line.status = Status::Off;
-                line.enabled = false;
-            }
         } else if let Some(f) = &change.font {
-            // the string stands: only the asked-for font is fitted, the others keep their scores
-            if let Some(c) = refit_one(&line.string, &id, ink, f, &catalog, &cache_dir) {
-                line.candidates.retain(|c| c.font != *f);
+            // the string stands. A font that is already a candidate is only chosen, with the fit it has; any
+            // other is fitted, and the others keep their scores
+            if let Some(at) = line.candidates.iter().position(|c| c.font == *f) {
+                line.fit = Some(line.candidates[at].fit.clone());
+                line.chosen = Some(at);
+                line.status = Status::Matched;
+            } else if let Some(c) = refit_one(&line.string, &id, ink, f, &catalog, &cache_dir) {
                 line.fit = Some(c.fit.clone());
                 line.candidates.push(c);
                 line.candidates.sort_by(|a, b| b.iou.total_cmp(&a.iou));
                 line.chosen = line.candidates.iter().position(|c| c.font == *f);
                 line.status = Status::Matched;
-                line.enabled = true;
             }
         }
-        if let Some(on) = change.enabled {
-            match (on, line.chosen) {
-                (true, Some(_)) => {
-                    line.status = Status::Matched;
-                    line.enabled = true;
-                }
-                (true, None) => {
-                    // forcing a declined line on: its best candidate, if it has one
-                    if let Some(first) = line.candidates.first().map(|c| c.font.clone()) {
-                        if let Some(c) = refit_one(&line.string, &id, ink, &first, &catalog, &cache_dir) {
-                            line.chosen = Some(0);
-                            line.fit = Some(c.fit.clone());
-                            line.candidates[0] = c;
-                            line.status = Status::Matched;
-                            line.enabled = true;
-                        }
-                    }
-                }
-                (false, _) => {
-                    line.status = Status::Off;
-                    line.enabled = false;
-                }
-            }
-        }
-        let (painted, group) = paint_and_group(&source, &plan, &inks, &catalog, &cache_dir)?;
-        Ok(Planned { plan, inks, painted, group })
+        line.enabled = enabled;
+        Ok(Planned { plan, inks })
     })
     .await
-}
-
-/// Whether an edit changed what the trace sees: the painted image `after` differs from `before`'s (a line composed or
-/// no longer composed — a font picked for a declined or Off line, a line switched on or off, a font that cannot be
-/// located). A string or font edit of a line that stays composed paints out the same ink and is not a repaint:
-/// the traces are composed again, not traced again.
-pub fn repainted(before: &Planned, after: &Planned) -> bool {
-    match (&before.painted, &after.painted) {
-        (None, None) => false,
-        (Some(a), Some(b)) => !(Arc::ptr_eq(a, b) || a == b),
-        _ => true,
-    }
 }
 
 /// How long an edited string may be: `EDIT_GROWTH` times the line's string and `EDIT_SLACK` characters more.
