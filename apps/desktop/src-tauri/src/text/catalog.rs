@@ -233,6 +233,12 @@ impl Catalog {
         out
     }
 
+    /// A Google family's category ("Sans Serif", "Serif", "Display", "Handwriting", "Monospace"); None for a
+    /// family the index does not hold.
+    pub fn category(&self, family: &str) -> Option<&str> {
+        self.google.iter().find(|f| f.name == family).map(|f| f.category.as_str())
+    }
+
     pub fn weights_of(&self, family: &str, source: Source) -> Vec<u16> {
         let mut w: Vec<u16> = match source {
             Source::Google => self.google.iter().find(|f| f.name == family).map(|f| f.variants.iter().filter(|v| !v.italic).map(|v| v.weight).collect()).unwrap_or_default(),
