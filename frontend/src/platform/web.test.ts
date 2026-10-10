@@ -47,7 +47,7 @@ describe("web platform", () => {
     const p = webPlatform();
     const [o] = await p.openFiles([png()]);
     if (!("ok" in o)) throw new Error("expected ok");
-    const res = await p.vectorize({ imageId: o.ok.id, parameters: { detail: 7 }, auto: false, job: "j" }, { signal: new AbortController().signal });
+    const res = await p.vectorize({ imageId: o.ok.id, parameters: { detail: 7 }, auto: false, job: "j", mask: [] }, { signal: new AbortController().signal });
     expect(res.results.vexel.svg).toBe("<svg/>");
     expect(uploads).toBe(2);
     expect(forms[1].get("engines")).toBe("vexel");

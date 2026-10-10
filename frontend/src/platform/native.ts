@@ -133,7 +133,7 @@ export function nativePlatform(): Platform {
         if (signal.aborted) throw new ApiError("cancelled", "The trace was cancelled", 499);
         // an abort that lands before the app has the job is remembered there (the queue's tombstones)
         signal.addEventListener("abort", abort, { once: true });
-        return await call<VectorizeResponse>("vectorize", { imageId: req.imageId, parameters: req.parameters, auto: req.auto, job: req.job });
+        return await call<VectorizeResponse>("vectorize", { imageId: req.imageId, parameters: req.parameters, auto: req.auto, job: req.job, mask: req.mask });
       } finally {
         offPhase();
         signal.removeEventListener("abort", abort);

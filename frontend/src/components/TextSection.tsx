@@ -11,6 +11,8 @@ export interface TextSectionProps {
   /** Settings ▸ Text ▸ Recognise text. */
   enabled: boolean;
   onChange: (lineId: string, change: TextLineChange) => void;
+  /** A line's switch; frontend-only (Task 5 of the text-toggles plan gives it its real behaviour). */
+  onToggle: (lineId: string, on: boolean) => void;
   onHover: (lineId: string | null) => void;
   onCancel: () => void;
   /** Asks for the plan again after it failed. */
@@ -96,7 +98,7 @@ function FontPicker({ line, onPick, searchFonts }: { line: TextLine; onPick: (fo
   );
 }
 
-function LineRow({ line, n, onChange, onHover, searchFonts }: { line: TextLine; n: number; onChange: (c: TextLineChange) => void; onHover: (id: string | null) => void; searchFonts: (q: string) => Promise<FontRef[]> }) {
+function LineRow({ line, n, onChange, onToggle, onHover, searchFonts }: { line: TextLine; n: number; onChange: (c: TextLineChange) => void; onToggle: (on: boolean) => void; onHover: (id: string | null) => void; searchFonts: (q: string) => Promise<FontRef[]> }) {
   const [draft, setDraft] = useState(line.string);
   useEffect(() => setDraft(line.string), [line.string]);
   const commit = () => {
@@ -120,7 +122,7 @@ function LineRow({ line, n, onChange, onHover, searchFonts }: { line: TextLine; 
             if (e.key === "Escape") setDraft(line.string);
           }}
         />
-        <Switch aria-label={`Re-set line ${n} in a font`} checked={line.enabled} onCheckedChange={(on) => onChange({ enabled: on })} />
+        <Switch aria-label={`Re-set line ${n} in a font`} checked={line.enabled} onCheckedChange={(on) => onToggle(on)} />
       </div>
       <FontPicker line={line} onPick={(font) => onChange({ font })} searchFonts={searchFonts} />
       <div className="flex items-center justify-between text-[11px] text-muted-foreground">
@@ -137,7 +139,7 @@ function LineRow({ line, n, onChange, onHover, searchFonts }: { line: TextLine; 
 }
 
 /** The inspector's Text: the lines found in the image, each with its string, its font, how well it fits and whether it is re-set. */
-export function TextSection({ item, enabled, onChange, onHover, onCancel, onRetry, searchFonts }: TextSectionProps) {
+export function TextSection({ item, enabled, onChange, onToggle, onHover, onCancel, onRetry, searchFonts }: TextSectionProps) {
   if (!enabled) return null;
   const t = textOf(item);
   const count = t.plan?.lines.length ?? 0;
@@ -188,7 +190,7 @@ export function TextSection({ item, enabled, onChange, onHover, onCancel, onRetr
       {t.plan && count > 0 && (
         <div className="-mx-2 space-y-0.5">
           {t.plan.lines.map((l, i) => (
-            <LineRow key={l.id} line={l} n={i + 1} onChange={(c) => onChange(l.id, c)} onHover={onHover} searchFonts={searchFonts} />
+            <LineRow key={l.id} line={l} n={i + 1} onChange={(c) => onChange(l.id, c)} onToggle={(on) => onToggle(l.id, on)} onHover={onHover} searchFonts={searchFonts} />
           ))}
         </div>
       )}

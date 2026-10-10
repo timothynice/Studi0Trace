@@ -50,7 +50,7 @@ describe("native platform", () => {
       return null;
     });
     const p = nativePlatform();
-    await expect(p.vectorize({ imageId: "i", parameters: { detail: "x" }, auto: false, job: "j1" }, { signal: new AbortController().signal })).rejects.toMatchObject({
+    await expect(p.vectorize({ imageId: "i", parameters: { detail: "x" }, auto: false, job: "j1", mask: [] }, { signal: new AbortController().signal })).rejects.toMatchObject({
       code: "validation_error",
       message: "vexel.detail: Input should be a valid number",
       status: 422,
@@ -67,7 +67,7 @@ describe("native platform", () => {
     const p = nativePlatform();
     const phases: string[] = [];
     const ctl = new AbortController();
-    const done = p.vectorize({ imageId: "i", parameters: {}, auto: true, job: "j2" }, { signal: ctl.signal, onPhase: (ph) => phases.push(ph) });
+    const done = p.vectorize({ imageId: "i", parameters: {}, auto: true, job: "j2", mask: ["a-t0"] }, { signal: ctl.signal, onPhase: (ph) => phases.push(ph) });
     await new Promise((r) => setTimeout(r, 0));
     await emit("trace-phase", { job: "other", phase: "tracing" });
     await emit("trace-phase", { job: "j2", phase: "tracing" });
@@ -76,7 +76,7 @@ describe("native platform", () => {
     await done;
     expect(phases).toEqual(["tracing"]);
     expect(calls.find((c) => c.cmd === "cancel_trace")?.payload).toEqual({ job: "j2" });
-    expect(calls.find((c) => c.cmd === "vectorize")?.payload).toEqual({ imageId: "i", parameters: {}, auto: true, job: "j2" });
+    expect(calls.find((c) => c.cmd === "vectorize")?.payload).toEqual({ imageId: "i", parameters: {}, auto: true, job: "j2", mask: ["a-t0"] });
   });
 
   it("sends an export's bytes and returns the written path", async () => {
@@ -189,7 +189,7 @@ describe("native platform", () => {
       return fast(cmd, ...rest);
     };
     const phases: string[] = [];
-    await nativePlatform().vectorize({ imageId: "i", parameters: {}, auto: false, job: "j3" }, { signal: new AbortController().signal, onPhase: (ph) => phases.push(ph) });
+    await nativePlatform().vectorize({ imageId: "i", parameters: {}, auto: false, job: "j3", mask: [] }, { signal: new AbortController().signal, onPhase: (ph) => phases.push(ph) });
     expect(phases).toEqual(["tracing"]);
   });
 
@@ -197,7 +197,7 @@ describe("native platform", () => {
     ipc(() => null);
     const ctl = new AbortController();
     ctl.abort();
-    await expect(nativePlatform().vectorize({ imageId: "i", parameters: {}, auto: false, job: "j4" }, { signal: ctl.signal })).rejects.toMatchObject({ code: "cancelled" });
+    await expect(nativePlatform().vectorize({ imageId: "i", parameters: {}, auto: false, job: "j4", mask: [] }, { signal: ctl.signal })).rejects.toMatchObject({ code: "cancelled" });
     expect(calls.filter((c) => c.cmd === "vectorize")).toEqual([]);
   });
 
@@ -350,10 +350,10 @@ describe("native platform", () => {
   });
 
   it("textSetLine and textSearchFonts pass camelCase keys", async () => {
-    ipc((cmd) => (cmd === "text_set_line" ? { plan: { image: "i1", reader: "vision", lines: [], aiError: null, fontsOffline: false }, textGroup: "<g/>" } : []));
+    ipc((cmd) => (cmd === "text_set_line" ? { plan: { image: "i1", reader: "vision", lines: [], aiError: null, fontsOffline: false } } : []));
     const p = nativePlatform();
-    await expect(p.textSetLine("i1", "l1", { enabled: false })).resolves.toMatchObject({ textGroup: "<g/>" });
-    expect(calls[0]).toEqual({ cmd: "text_set_line", payload: { imageId: "i1", lineId: "l1", change: { enabled: false } } });
+    await expect(p.textSetLine("i1", "l1", { string: "EST." })).resolves.toMatchObject({ plan: { image: "i1" } });
+    expect(calls[0]).toEqual({ cmd: "text_set_line", payload: { imageId: "i1", lineId: "l1", change: { string: "EST." } } });
     await expect(p.textSearchFonts("jos")).resolves.toEqual([]);
     expect(calls[1]).toEqual({ cmd: "text_search_fonts", payload: { query: "jos" } });
   });

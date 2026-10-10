@@ -32,6 +32,8 @@ export interface TraceRequest {
   auto: boolean;
   /** Names the job, so it can be cancelled and its phase reported. */
   job: string;
+  /** Sorted ids of the text lines painted out of the image before it is traced. */
+  mask: string[];
 }
 
 export interface TraceOptions {
@@ -63,6 +65,12 @@ export interface TextFit {
 export interface TextCandidate {
   font: FontRef;
   iou: number;
+  stroke: number;
+  fit: TextFit;
+  /** The candidate's glyph outlines, as the `d` of one path. */
+  path: string;
+  /** The candidate's hidden `<text>` element. */
+  text: string;
 }
 export interface TextLine {
   id: string;
@@ -75,6 +83,8 @@ export interface TextLine {
   chosen: number | null;
   enabled: boolean;
   fit: TextFit | null;
+  /** The colours of the shapes that lie over this line in the source: its glyphs go beneath the first of them. */
+  occluders: [number, number, number][];
 }
 /** What the app reports while it plans an image's text; `done` and `failed` come as the answer does. */
 export type TextPhase = "finding" | "reading" | "matching" | "done" | "failed";
@@ -88,13 +98,10 @@ export interface TextPlan {
 export interface TextLineChange {
   string?: string;
   font?: FontRef;
-  enabled?: boolean;
 }
-/** A line edit's answer: the new plan, the group to compose, and whether what the trace sees changed (a line now painted out or no longer): then every trace of the image is stale and is traced again. */
+/** A line edit's answer: the new plan. The traces are composed from it on the frontend. */
 export interface TextLineAnswer {
   plan: TextPlan;
-  textGroup: string;
-  repainted: boolean;
 }
 export interface TextOptions {
   signal: AbortSignal;

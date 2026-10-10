@@ -136,8 +136,10 @@ export interface Library {
   discardRedraw(id: string): void;
   /** The original is the source again, with its traces. */
   revertRedraw(id: string): Promise<void>;
-  /** A line's string, font or switch changed. When the answer says what the trace sees changed (`repainted`), every trace of the image is dropped and traced again; otherwise the traces are composed again and nothing traces. */
+  /** A line's string or font changed: the plan answers, and the traces are composed again (Task 5 of the text-toggles plan reworks this). */
   setTextLine(id: string, lineId: string, change: TextLineChange): Promise<void>;
+  /** A line's switch. Frontend-only; for now it only flips the line's `enabled` in the plan (Task 5 gives it its real behaviour). */
+  toggleTextLine(id: string, lineId: string, on: boolean): void;
   /** Abandons the text plan being asked, and the trace waiting for it; the next trace asks again. */
   cancelText(id: string): void;
   /** Asks for the text plan again after it failed; traces made without it are traced again when it re-sets a line. */
@@ -244,7 +246,7 @@ export function createLibrary(platform: LibraryPlatform, catalog: Catalog, initi
   const answerOf = (res: VectorizeResponse): TraceAnswer | ApiError => {
     const r = res.results[ENGINE];
     if (!r || r.error || !r.svg) return new ApiError(r?.error?.code ?? "engine_failed", r?.error?.message ?? "The engine returned no vector");
-    return { svg: composeSvg(r.svg, res.text_group, settings), base: r.svg, textGroup: res.text_group ?? null, elapsedMs: r.elapsed_ms ?? 0, stats: r.stats ?? {} };
+    return { svg: r.svg, base: r.svg, textGroup: null, elapsedMs: r.elapsed_ms ?? 0, stats: r.stats ?? {} };
   };
 
   const finish = (id: string, jobId: string, key: string, res: VectorizeResponse) => {
@@ -263,7 +265,7 @@ export function createLibrary(platform: LibraryPlatform, catalog: Catalog, initi
     if (auto) {
       for (const c of auto.candidates) {
         const preset = presetById.get(c.preset);
-        if (preset && c.svg) traces[paramsKey(resolve(preset.params))] = { svg: composeSvg(c.svg, res.text_group, settings), base: c.svg, textGroup: res.text_group ?? null, elapsedMs: c.elapsed_ms ?? 0, stats: c.stats ?? {} };
+        if (preset && c.svg) traces[paramsKey(resolve(preset.params))] = { svg: c.svg, base: c.svg, textGroup: null, elapsedMs: c.elapsed_ms ?? 0, stats: c.stats ?? {} };
       }
       const pick = auto.pick ? presetById.get(auto.pick) : undefined;
       if (pick && current) params = resolve(pick.params);
@@ -369,7 +371,7 @@ export function createLibrary(platform: LibraryPlatform, catalog: Catalog, initi
     const auto = key === "auto";
     platform
       .vectorize(
-        { imageId: id, parameters: auto ? {} : item.params, auto, job: jobId },
+        { imageId: id, parameters: auto ? {} : item.params, auto, job: jobId, mask: [] },
         {
           signal: controller.signal,
           onPhase: (phase) => {
@@ -650,17 +652,9 @@ export function createLibrary(platform: LibraryPlatform, catalog: Catalog, initi
         const now = find(id);
         // a redraw used or a revert while the edit ran swapped the image: the answer is about bytes it no longer has
         if (!now || now.image !== before.image) return;
-        if (answer.repainted) {
-          // what is painted out changed (a line switched on or off, a font picked for a declined or Off line): every
-          // trace of this image holds the old pixels under the new glyphs, and is traced again
-          abortJob(now);
-          clearTimer(id);
-          patch(id, { traces: {}, shown: null, exported: null, auto: null, job: null, error: null, errorKey: null, text: { ...textOf(now), plan: answer.plan } });
-          generate(id);
-          return;
-        }
         // the words changed, so what was exported no longer is what is on screen
-        const traces = Object.fromEntries(Object.entries(now.traces).map(([k, t]) => [k, { ...t, svg: composeSvg(t.base, answer.textGroup, settings), textGroup: answer.textGroup }]));
+        // (Task 5 of the text-toggles plan: composed from the plan's candidates; until then no group is composed)
+        const traces = Object.fromEntries(Object.entries(now.traces).map(([k, t]) => [k, { ...t, svg: composeSvg(t.base, null, settings), textGroup: null }]));
         patch(id, { traces, exported: null, text: { ...textOf(now), plan: answer.plan } });
       };
       // one edit after another, in order: a failed edit does not stop the ones behind it
@@ -671,6 +665,13 @@ export function createLibrary(platform: LibraryPlatform, catalog: Catalog, initi
       } finally {
         if (editQueue.get(id) === mine) editQueue.delete(id);
       }
+    },
+
+    toggleTextLine(id, lineId, on) {
+      const item = find(id);
+      const plan = item ? textOf(item).plan : null;
+      if (!item || !plan) return;
+      patchText(id, { plan: { ...plan, lines: plan.lines.map((l) => (l.id === lineId ? { ...l, enabled: on } : l)) } });
     },
 
     cancelText(id) {

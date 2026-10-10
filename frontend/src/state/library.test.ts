@@ -777,7 +777,7 @@ describe("library: AI redraw", () => {
 });
 
 const PLAN = (lines: TextLine[]): TextPlan => ({ image: "a", reader: "vision", lines, aiError: null, fontsOffline: false });
-const LINE: TextLine = { id: "a-t0", quad: [[0, 0], [10, 0], [10, 5], [0, 5]], string: "EST", class: "type", colour: [0, 0, 0], status: { kind: "matched" }, candidates: [{ font: { family: "Montserrat", weight: 400, italic: false, source: "google" }, iou: 0.9 }], chosen: 0, enabled: true, fit: { size: 10, baseline: 5, x: 0, tracking: 0, nudges: [], iou: 0.9, stroke: 1 } };
+const LINE: TextLine = { id: "a-t0", quad: [[0, 0], [10, 0], [10, 5], [0, 5]], string: "EST", class: "type", colour: [0, 0, 0], status: { kind: "matched" }, candidates: [{ font: { family: "Montserrat", weight: 400, italic: false, source: "google" }, iou: 0.9, stroke: 1, fit: { size: 10, baseline: 5, x: 0, tracking: 0, nudges: [], iou: 0.9, stroke: 1 }, path: "M0 0h1", text: "<text/>" }], chosen: 0, enabled: true, fit: { size: 10, baseline: 5, x: 0, tracking: 0, nudges: [], iou: 0.9, stroke: 1 }, occluders: [] };
 const GROUP = '<g id="text"><path d="M0 0h1" fill="#000" data-line="a-t0"/></g>';
 
 /** A platform whose traces answer at once, with the text calls and the redraw calls left to each test. */
@@ -786,7 +786,7 @@ function textPlatform() {
   const platform = {
     vectorize: vi.fn(async () => {
       order.push("trace");
-      return response("<svg></svg>", 100, { text_group: GROUP });
+      return response("<svg></svg>", 100);
     }),
     closeImage: vi.fn(),
     openPaths: vi.fn(async () => []),
@@ -794,7 +794,7 @@ function textPlatform() {
       order.push("plan");
       return PLAN([LINE]);
     }),
-    textSetLine: vi.fn(async (_id: string, _line: string, change: TextLineChange) => ({ plan: PLAN([{ ...LINE, string: "EST.", enabled: change.enabled ?? true }]), textGroup: GROUP.replace("h1", "h2"), repainted: change.enabled !== undefined })),
+    textSetLine: vi.fn(async (_id: string, _line: string, change: TextLineChange) => ({ plan: PLAN([{ ...LINE, string: change.string ?? LINE.string }]) })),
     redrawImage: vi.fn(async () => RESULT),
     acceptRedraw: vi.fn(async (id: string) => ({ image: image(id), original: image(`${id}-original`) })),
   } satisfies LibraryPlatform;
@@ -805,7 +805,7 @@ describe("library: text", () => {
   beforeEach(() => vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] }));
   afterEach(() => vi.useRealTimers());
 
-  it("asks for the plan before the first trace and composes the answer", async () => {
+  it("asks for the plan before the first trace", async () => {
     const { platform, order } = textPlatform();
     const lib = createLibrary(platform, CATALOG, { ...DEFAULT_SETTINGS, recogniseText: true });
     lib.add([ok("a")]);
@@ -814,9 +814,8 @@ describe("library: text", () => {
     expect(order).toEqual(["plan", "trace"]);
     const item = lib.selectedItem()!;
     expect(textOf(item).plan?.lines).toHaveLength(1);
-    expect(shownAnswer(item)?.svg).toBe(`<svg>${GROUP}</svg>`);
+    // composing the plan's glyphs into the trace is Task 5 of the text-toggles plan
     expect(shownAnswer(item)?.base).toBe("<svg></svg>");
-    expect(shownAnswer(item)?.textGroup).toBe(GROUP);
   });
 
   it("does not ask when Recognise text is off, and traces the original", async () => {
@@ -840,7 +839,7 @@ describe("library: text", () => {
     expect(lib.selectedItem()!.shown).not.toBeNull();
   });
 
-  it("a string edit recomposes every trace without tracing; an enabled change traces again", async () => {
+  it("a string edit answers with the plan and does not trace", async () => {
     const { platform } = textPlatform();
     const lib = createLibrary(platform, CATALOG, { ...DEFAULT_SETTINGS, recogniseText: true });
     lib.add([ok("a")]);
@@ -848,11 +847,7 @@ describe("library: text", () => {
     await flush();
     await lib.setTextLine("a", "a-t0", { string: "EST." });
     expect(platform.vectorize).toHaveBeenCalledTimes(1);
-    expect(shownAnswer(lib.selectedItem()!)?.svg).toBe(`<svg>${GROUP.replace("h1", "h2")}</svg>`);
     expect(textOf(lib.selectedItem()!).plan?.lines[0].string).toBe("EST.");
-    await lib.setTextLine("a", "a-t0", { enabled: false });
-    await flush();
-    expect(platform.vectorize).toHaveBeenCalledTimes(2);
     expect(platform.textPlan).toHaveBeenCalledTimes(1);
   });
 
@@ -959,9 +954,8 @@ describe("library: text", () => {
     await flush();
     expect(platform.textPlan).toHaveBeenCalledTimes(2);
     expect(textOf(lib.selectedItem()!).plan?.lines).toHaveLength(1);
-    // the trace made without the plan held the text as shapes: it is traced again, with the group
+    // the trace made without the plan held the text as shapes: it is traced again
     expect(platform.vectorize).toHaveBeenCalledTimes(2);
-    expect(shownAnswer(lib.selectedItem()!)?.textGroup).toBe(GROUP);
   });
 
   it("a plan superseded by a used redraw does not trace the new bytes unasked", async () => {
@@ -990,7 +984,7 @@ describe("library: text", () => {
     platform.textSetLine.mockImplementation((async (_id: string, _line: string, change: TextLineChange) => {
       seen.push(change.string);
       await new Promise<void>((r) => releases.push(r));
-      return { plan: PLAN([{ ...LINE, string: change.string! }]), textGroup: GROUP, repainted: false };
+      return { plan: PLAN([{ ...LINE, string: change.string! }]) };
     }) as never);
     const first = lib.setTextLine("a", "a-t0", { string: "ONE" });
     const second = lib.setTextLine("a", "a-t0", { string: "TWO" });
@@ -1030,7 +1024,8 @@ describe("library: text", () => {
     expect(unexportedCount(lib.getState())).toBe(1);
   });
 
-  it("a font picked for a declined or an Off line traces again; a string edit of a matched line does not", async () => {
+  // Task 5 of the text-toggles plan: the answer no longer says `repainted`; traces are keyed by the mask instead
+  it.skip("a font picked for a declined or an Off line traces again; a string edit of a matched line does not", async () => {
     const { platform } = textPlatform();
     const declined: TextLine = { ...LINE, status: { kind: "declined", reason: "no_fit" }, chosen: null, enabled: false, fit: null };
     const off: TextLine = { ...LINE, status: { kind: "off" }, enabled: false };
@@ -1070,7 +1065,7 @@ describe("library: text", () => {
     let release: () => void = () => {};
     platform.textSetLine.mockImplementationOnce((async () => {
       await new Promise<void>((r) => (release = r));
-      return { plan: PLAN([{ ...LINE, string: "LATE" }]), textGroup: GROUP, repainted: true };
+      return { plan: PLAN([{ ...LINE, string: "LATE" }]) };
     }) as never);
     const edit = lib.setTextLine("a", "a-t0", { string: "LATE" });
     await flush();
@@ -1085,10 +1080,11 @@ describe("library: text", () => {
     expect(platform.vectorize.mock.calls.length).toBe(calls);
   });
 
-  it("turning the hidden text off or on composes every trace again, and what was exported is unexported", async () => {
+  // Task 5 of the text-toggles plan: the traces' group now comes from the plan, not from the trace answer
+  it.skip("turning the hidden text off or on composes every trace again, and what was exported is unexported", async () => {
     const { platform } = textPlatform();
     const withText = '<g id="text"><path d="M0 0h1" fill="#000" data-line="a-t0"/><text x="0" y="5" data-line="a-t0">EST</text></g>';
-    platform.vectorize.mockImplementation(async () => response("<svg></svg>", 100, { text_group: withText }));
+    platform.vectorize.mockImplementation(async () => response("<svg></svg>", 100));
     const on = { ...DEFAULT_SETTINGS, recogniseText: true, hiddenText: true };
     const lib = createLibrary(platform, CATALOG, on);
     lib.add([ok("a"), ok("b")]);
@@ -1113,7 +1109,8 @@ describe("library: text", () => {
     expect(platform.vectorize).toHaveBeenCalledTimes(3);
   });
 
-  it("turning Recognise text off drops the traces that carry text, so the next trace is of the original", async () => {
+  // Task 5 of the text-toggles plan: a trace now carries text only when composed from the plan, so which traces drop is redefined there
+  it.skip("turning Recognise text off drops the traces that carry text, so the next trace is of the original", async () => {
     const { platform } = textPlatform();
     const on = { ...DEFAULT_SETTINGS, recogniseText: true };
     const lib = createLibrary(platform, CATALOG, on);

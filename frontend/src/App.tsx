@@ -438,6 +438,7 @@ function Workspace({ catalog, settings, onSettingsChange }: { catalog: Catalog; 
             item={item}
             enabled={settings.recogniseText}
             onChange={(lineId, change) => void lib.setTextLine(item.image.id, lineId, change).catch(failText)}
+            onToggle={(lineId, on) => lib.toggleTextLine(item.image.id, lineId, on)}
             onHover={setTextHover}
             onCancel={() => lib.cancelText(item.image.id)}
             onRetry={() => lib.retryText(item.image.id)}
