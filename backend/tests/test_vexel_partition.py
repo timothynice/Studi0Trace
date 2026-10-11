@@ -280,7 +280,7 @@ def test_a_stroke_touching_a_seed_of_its_own_colour_is_left_to_that_seed():
 
 
 def test_a_stroke_touching_a_seed_of_another_colour_keeps_its_own():
-    ridge, smooth, feats = _with_body(60.0)
+    ridge, smooth, feats = _with_body(28.0)  # 8 levels from the ink: another colour at detail 6, though a mean blended with the stroke's own valley would be within 6
     assert stroke_seeds(ridge, smooth, feats, 6.0, FLOOR)[18:21, 5:36].all()
 
 
@@ -290,6 +290,20 @@ def test_a_stroke_on_the_border_is_left_to_the_flood():
     ridge = np.ascontiguousarray(ridge[18:])
     smooth = np.ascontiguousarray(smooth[18:])
     assert not stroke_seeds(ridge, smooth, feats, 6.0, FLOOR).any()
+
+
+def test_the_beyond_sample_off_the_image_counts_as_ridge():
+    ridge, smooth, feats = _stroke_scene()
+    # the ridge is the image's top row: the sample beyond it is off the image, so no seed
+    r, s, f = (np.ascontiguousarray(a[17:]) for a in (ridge, smooth, feats))
+    assert r[0].any() and not stroke_seeds(r, s, f, 6.0, FLOOR).any()
+    # one ground row above the ridge: the same stroke has a sample beyond it and is seeded
+    pad = np.ones((1, 40), bool)
+    r = np.ascontiguousarray(np.concatenate([~pad, ridge[17:]]))
+    f = np.ascontiguousarray(np.concatenate([np.concatenate([np.full((1, 40, 1), 95.0, np.float32), feats[17:18, :, 1:]], axis=2), feats[17:]]))
+    s = np.ascontiguousarray(~ndimage.binary_dilation(r))
+    assert r[1].any() and not r[0].any()
+    assert stroke_seeds(r, s, f, 6.0, FLOOR)[2:5, 5:36].all()
 
 
 def test_a_tiny_image_has_no_stroke_seeds():

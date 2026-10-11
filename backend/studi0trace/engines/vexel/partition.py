@@ -172,7 +172,7 @@ def seed_mask(features: np.ndarray, grad: np.ndarray, g_low: float, g_seed: floa
 # those two sides agree within `detail` (the rim a sharpening leaves inside an
 # edge, a JPEG ringing line and a drop shadow's band each lie between a shape
 # and its ground, which do not agree), and does not touch a kept seed of its
-# own colour (an acute wedge's tip, the gap between two letters in the ground's
+# own colour, read off the seed's pixels outside the stroke candidates (an acute wedge's tip, the gap between two letters in the ground's
 # colour: the flood from that seed is the right answer there). Its pixels join
 # the seed mask before the floor, its component is kept whatever its size, and
 # its basin is exempt from `_absorb_small`. A crisp stroke exactly two pixels
@@ -263,8 +263,14 @@ def stroke_seeds(ridge: np.ndarray, smooth: np.ndarray, features: np.ndarray, de
     kflat = kept.ravel()
     nk = int(kept.max()) + 1
     ksize = np.bincount(kflat, minlength=nk)
-    kmean = np.stack([np.bincount(kflat, weights=feats[..., c].ravel(), minlength=nk) for c in range(nc)], axis=1) / np.maximum(ksize, 1)[:, None]
-    big = ksize >= floor
+    # a kept seed's colour is read off its pixels outside the stroke candidates: a
+    # stroke's own valley line is smooth and may join the neighbouring seed in one
+    # component, and blending it in would pull that seed's colour toward the stroke's
+    own = (smooth & ~cand).ravel()
+    kcount = np.bincount(kflat, weights=own.astype(np.float64), minlength=nk).astype(np.int64)
+    ksum = np.stack([np.bincount(kflat, weights=np.where(own, feats[..., c].ravel(), 0.0), minlength=nk) for c in range(nc)], axis=1)
+    kmean = ksum / np.maximum(kcount, 1)[:, None]
+    big = (ksize >= floor) & (kcount > 0)  # a component of the stroke's own pixels alone has no other colour to compare
     big[0] = False
     touching = np.zeros(n, bool)
     pairs = []
