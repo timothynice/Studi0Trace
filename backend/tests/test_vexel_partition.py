@@ -21,7 +21,7 @@ from skimage.measure import label as cc_label
 
 from studi0trace.engines.vexel import engine as vexel
 from studi0trace.engines.vexel.engine import VexelEngine, VexelParams
-from studi0trace.engines.vexel.partition import discontinuity, initial_labels, seed_markers
+from studi0trace.engines.vexel.partition import discontinuity, initial_labels, seed_markers, seed_mask, seed_parts, stroke_seeds
 from studi0trace.engines.vexel.prepare import prepare
 from studi0trace.imaging.intake import load_upload
 
@@ -195,3 +195,116 @@ def test_the_engines_split_seeds_alike(detail):
     py = initial_labels(discontinuity(p.features), p.features, min_region=6, detail=detail)
     rs = np.asarray(vexel._vexel_rs._stage_labels0(a.tobytes(), 256, 256, 6, detail), np.int32).reshape(256, 256)
     assert np.array_equal(py, rs)
+
+
+# --- stroke seeds ---------------------------------------------------------------
+
+
+FLOOR = 40  # the kept-seed floor in these scenes: above the stroke's own 31 px valley line, below the ground
+
+
+def _stroke_scene(cols=(5, 36), ink_l=20.0, above_l=95.0, below_l=95.0, size=(40, 40)):
+    """A 3 px horizontal stroke (rows 18–20, columns cols[0]..cols[1]-1) of L*
+    `ink_l` with ridge pixels on the rows and columns round it; the ground is
+    `above_l` above it and `below_l` below. The seed mask is everything more
+    than one pixel from the ridge, as a crisp scene's is: the stroke's middle
+    row is seed too (a valley line of 31 px, under FLOOR)."""
+    h, w = size
+    feats = np.zeros((h, w, 4), np.float32)
+    feats[..., 3] = 100.0
+    feats[:19, :, 0] = above_l
+    feats[19:, :, 0] = below_l
+    c0, c1 = cols
+    feats[18:21, c0:c1, 0] = ink_l
+    ridge = np.zeros((h, w), bool)
+    ridge[17, c0 - 1:c1 + 1] = True
+    ridge[21, c0 - 1:c1 + 1] = True
+    ridge[17:22, c0 - 1] = True
+    ridge[17:22, c1] = True
+    smooth = ~ndimage.binary_dilation(ridge)
+    return ridge, smooth, feats
+
+
+def test_a_three_pixel_stroke_is_a_stroke_seed():
+    ridge, smooth, feats = _stroke_scene()
+    s = stroke_seeds(ridge, smooth, feats, 6.0, FLOOR)
+    assert s[18:21, 5:36].all()
+    assert s.sum() == 3 * 31, "the stroke's own pixels and nothing else"
+
+
+def test_a_short_stroke_is_not():
+    ridge, smooth, feats = _stroke_scene(cols=(5, 11))  # 6 px long: 18 pixels over a mean width near 2
+    assert not stroke_seeds(ridge, smooth, feats, 6.0, FLOOR).any()
+
+
+def test_short_dashes_seed_nothing():
+    ridge, smooth, feats = _stroke_scene(cols=(5, 11))
+    for c0 in (14, 23, 32):
+        r2, s2, _ = _stroke_scene(cols=(c0, c0 + 6))
+        ridge |= r2
+        smooth &= s2
+        feats[18:21, c0:c0 + 6, 0] = 20.0
+    assert not stroke_seeds(ridge, smooth, feats, 6.0, FLOOR).any()
+
+
+def test_a_band_between_two_different_grounds_is_declined():
+    # a sharpened edge's rim, a JPEG ringing line: between a shape and its ground
+    ridge, smooth, feats = _stroke_scene(above_l=95.0, below_l=50.0)
+    assert not stroke_seeds(ridge, smooth, feats, 6.0, FLOOR).any()
+
+
+def test_a_stroke_whose_colour_ramps_is_declined():
+    ridge, smooth, feats = _stroke_scene()
+    feats[18:21, 5:36, 0] = np.linspace(20.0, 60.0, 31)[None, :]
+    assert not stroke_seeds(ridge, smooth, feats, 6.0, FLOOR).any()
+
+
+def _with_body(colour: float):
+    """The scene with a body of L* `colour` at rows 10–29, columns 36–39, joined
+    to the stroke's right end (the end ridge is gone, the body's own edges are
+    ridge): a wedge's tip meeting its body, or a stem meeting a bowl."""
+    ridge, smooth, feats = _stroke_scene()
+    feats[10:30, 36:, 0] = colour
+    ridge[17:22, 36] = False
+    ridge[9, 35:] = True
+    ridge[30, 35:] = True
+    ridge[10:17, 35] = True
+    ridge[22:30, 35] = True
+    smooth = ~ndimage.binary_dilation(ridge)
+    return ridge, smooth, feats
+
+
+def test_a_stroke_touching_a_seed_of_its_own_colour_is_left_to_that_seed():
+    ridge, smooth, feats = _with_body(20.0)
+    assert not stroke_seeds(ridge, smooth, feats, 6.0, FLOOR).any()
+
+
+def test_a_stroke_touching_a_seed_of_another_colour_keeps_its_own():
+    ridge, smooth, feats = _with_body(60.0)
+    assert stroke_seeds(ridge, smooth, feats, 6.0, FLOOR)[18:21, 5:36].all()
+
+
+def test_a_stroke_on_the_border_is_left_to_the_flood():
+    ridge, smooth, feats = _stroke_scene()
+    feats = np.ascontiguousarray(feats[18:])  # the stroke's top row is the image's top row
+    ridge = np.ascontiguousarray(ridge[18:])
+    smooth = np.ascontiguousarray(smooth[18:])
+    assert not stroke_seeds(ridge, smooth, feats, 6.0, FLOOR).any()
+
+
+def test_a_tiny_image_has_no_stroke_seeds():
+    feats = np.zeros((4, 4, 4), np.float32)
+    feats[..., 3] = 100.0
+    ridge = np.zeros((4, 4), bool)
+    ridge[1] = True
+    assert not stroke_seeds(ridge, ~ridge, feats, 6.0, FLOOR).any()
+
+
+def test_seed_parts_agrees_with_seed_mask():
+    data, _, _ = _disc_cut_by_an_edge(8.0)
+    a = np.ascontiguousarray(np.asarray(Image.open(io.BytesIO(data)).convert("RGBA")))
+    p = prepare(a)
+    grad = discontinuity(p.features)
+    smooth, ridge = seed_parts(p.features, grad, 1.5)
+    assert np.array_equal(smooth, seed_mask(p.features, grad, 1.5))
+    assert ridge.dtype == bool and ridge.shape == smooth.shape and ridge.any()

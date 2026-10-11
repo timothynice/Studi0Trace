@@ -129,8 +129,10 @@ def edge_mask(features: np.ndarray, grad: np.ndarray, g_low: float) -> np.ndarra
     return ndimage.binary_dilation(ridge, _CROSS)
 
 
-def seed_mask(features: np.ndarray, grad: np.ndarray, g_low: float, g_seed: float = 8.0) -> np.ndarray:
-    """Seeds: pixels clear of the ridge band, or valley pixels, that also have a
+def seed_parts(features: np.ndarray, grad: np.ndarray, g_low: float, g_seed: float = 8.0) -> tuple[np.ndarray, np.ndarray]:
+    """(smooth, ridge): the seed mask and the ridge mask it was cut by.
+
+    Seeds: pixels clear of the ridge band, or valley pixels, that also have a
     low gradient. NMS loses ridge pixels at T-junctions (where two edges meet the
     orientation estimate flips); those gap pixels still carry a high gradient, so
     the gradient test keeps neighbouring regions from leaking into one seed."""
@@ -144,7 +146,140 @@ def seed_mask(features: np.ndarray, grad: np.ndarray, g_low: float, g_seed: floa
     near_band = ndimage.binary_dilation(band, _CROSS, iterations=2)
     g_seed_eff = threshold_at(g_seed, G_SEED_MIN, floor, features)
     leaky = near_band & (grad >= g_seed_eff)
-    return (~band & ~leaky) | valley
+    return (~band & ~leaky) | valley, ridge
+
+
+def seed_mask(features: np.ndarray, grad: np.ndarray, g_low: float, g_seed: float = 8.0) -> np.ndarray:
+    """The seed mask alone (`seed_parts`)."""
+    return seed_parts(features, grad, g_low, g_seed)[0]
+
+
+# A 2–4 px stroke loses its seed: the band exclusion above reaches two pixels
+# past the ridge on either side, so a stroke narrower than about five pixels
+# keeps only fragments of valley, and `seed_markers`' floor zeroes them (6
+# under Balanced, 16 under Logo). The watershed then floods the stroke from
+# its neighbours: a closed counter's backdrop takes the ring, a bowl joins
+# the stem's backdrop. Pooling small fragments and lowering the floor both
+# admitted noise everywhere (the wave-lockup plan's try9 and D1); what a thin
+# stroke needs is specific to a thin stroke. So after the seed mask, the
+# non-ridge pixels that lie between two ridge pixels within `STROKE_SEED_W`
+# along one of the four axes — the medial pixels of a thin feature, never the
+# halo beside a thick edge, which has a ridge on one side only — are formed
+# into 4-connected components, and a component is a stroke seed when it is
+# `STROKE_SEED_LEN` long (its pixels over its mean width), one colour (RMS
+# spread of its features under `detail`), a different colour from the first
+# non-ridge pixel beyond the ridge on both sides by more than `detail` while
+# those two sides agree within `detail` (the rim a sharpening leaves inside an
+# edge, a JPEG ringing line and a drop shadow's band each lie between a shape
+# and its ground, which do not agree), and does not touch a kept seed of its
+# own colour (an acute wedge's tip, the gap between two letters in the ground's
+# colour: the flood from that seed is the right answer there). Its pixels join
+# the seed mask before the floor, its component is kept whatever its size, and
+# its basin is exempt from `_absorb_small`. A crisp stroke exactly two pixels
+# wide is all ridge (both of its pixels peak) and has no medial pixel: it is
+# left to the rescue, as before. Spec: 2026-10-09-thin-stroke-seeding-design.md.
+STROKE_SEED_W = 5
+STROKE_SEED_LEN = 12
+_AXES = ((0, 1), (1, 0), (1, 1), (1, -1))  # (dr, dc): the order ties between equally narrow axes break in
+
+
+def _shift(a: np.ndarray, k: int, dr: int, dc: int, fill) -> np.ndarray:
+    """out[r, c] = a[r + k·dr, c + k·dc]; `fill` off the image."""
+    h, w = a.shape[:2]
+    out = np.full_like(a, fill)
+    r0, r1 = max(0, -k * dr), min(h, h - k * dr)
+    c0, c1 = max(0, -k * dc), min(w, w - k * dc)
+    if r0 < r1 and c0 < c1:
+        out[r0:r1, c0:c1] = a[r0 + k * dr:r1 + k * dr, c0 + k * dc:c1 + k * dc]
+    return out
+
+
+def _ridge_reach(ridge: np.ndarray, dr: int, dc: int) -> tuple[np.ndarray, np.ndarray]:
+    """Per pixel, along +(dr, dc): the distance 1..W to the nearest ridge pixel
+    (0: none within W) and the distance to the first non-ridge pixel on the
+    image past that ridge's run, within W more (0: none)."""
+    dist = np.zeros(ridge.shape, np.int32)
+    for k in range(STROKE_SEED_W, 0, -1):
+        dist = np.where(_shift(ridge, k, dr, dc, False), k, dist)
+    beyond = np.zeros(ridge.shape, np.int32)
+    for k in range(2 * STROKE_SEED_W, 1, -1):
+        clear = ~_shift(ridge, k, dr, dc, True)  # off the image counts as ridge: no sample there
+        beyond = np.where(clear & (dist > 0) & (k > dist) & (k <= dist + STROKE_SEED_W), k, beyond)
+    return dist, beyond
+
+
+def stroke_seeds(ridge: np.ndarray, smooth: np.ndarray, features: np.ndarray, detail: float, floor: int) -> np.ndarray:
+    """The pixels of every stroke seed (the comment above `STROKE_SEED_W`).
+    `smooth` is the seed mask, whose components of `floor` pixels or more are
+    the kept seeds a stroke must not touch in its own colour."""
+    h, w = ridge.shape
+    nc = features.shape[-1]
+    feats = features.astype(np.float64)
+    width = np.zeros((h, w), np.int32)  # the narrowest axis's width; 0: not between two ridges
+    rows, cols = np.mgrid[0:h, 0:w]
+    out_r = [np.zeros((h, w), np.int64), np.zeros((h, w), np.int64)]  # the samples beyond the + and - ridges
+    out_c = [np.zeros((h, w), np.int64), np.zeros((h, w), np.int64)]
+    has_out = np.zeros((h, w), bool)
+    for dr, dc in _AXES:
+        dp, bp = _ridge_reach(ridge, dr, dc)
+        dm, bm = _ridge_reach(ridge, -dr, -dc)
+        wd = dp + dm - 1
+        between = (dp > 0) & (dm > 0) & (wd <= STROKE_SEED_W) & ~ridge
+        better = between & ((width == 0) | (wd < width))
+        width = np.where(better, wd, width)
+        has_out = np.where(better, (bp > 0) & (bm > 0), has_out)
+        out_r[0] = np.where(better, rows + bp * dr, out_r[0])
+        out_c[0] = np.where(better, cols + bp * dc, out_c[0])
+        out_r[1] = np.where(better, rows - bm * dr, out_r[1])
+        out_c[1] = np.where(better, cols - bm * dc, out_c[1])
+    cand = width > 0
+    if not cand.any():
+        return cand
+    comps = cc_label(cand, connectivity=1)
+    flat = comps.ravel()
+    n = int(comps.max()) + 1
+    size = np.bincount(flat, minlength=n).astype(np.int64)
+    d2 = detail * detail
+    # long: pixels over mean width, i.e. size² against the width sum, in integers
+    wsum = np.bincount(flat, weights=width.ravel().astype(np.float64), minlength=n).astype(np.int64)
+    long_enough = size * size >= STROKE_SEED_LEN * wsum
+    # one colour: RMS spread of the features about the component's mean
+    sums = np.stack([np.bincount(flat, weights=feats[..., c].ravel(), minlength=n) for c in range(nc)], axis=1)
+    mean = sums / np.maximum(size, 1)[:, None]
+    dev = feats - mean[comps]
+    sq = np.bincount(flat, weights=np.sum(dev * dev, axis=2).ravel(), minlength=n)
+    one_colour = sq / np.maximum(size, 1) < d2
+    # two-sided: the pixel differs from both samples beyond the ridges, which agree
+    sel = cand & has_out
+    ys, xs = np.nonzero(sel)
+    fp = feats[ys, xs]
+    fa = feats[out_r[0][ys, xs], out_c[0][ys, xs]]
+    fb = feats[out_r[1][ys, xs], out_c[1][ys, xs]]
+    ok = (np.sum((fp - fa) ** 2, axis=1) > d2) & (np.sum((fp - fb) ** 2, axis=1) > d2) & (np.sum((fa - fb) ** 2, axis=1) < d2)
+    passing = np.bincount(comps[ys, xs], weights=ok.astype(np.float64), minlength=n).astype(np.int64)
+    two_sided = 2 * passing > size
+    # not touching a kept seed of its own colour
+    kept = cc_label(smooth, connectivity=1)
+    kflat = kept.ravel()
+    nk = int(kept.max()) + 1
+    ksize = np.bincount(kflat, minlength=nk)
+    kmean = np.stack([np.bincount(kflat, weights=feats[..., c].ravel(), minlength=nk) for c in range(nc)], axis=1) / np.maximum(ksize, 1)[:, None]
+    big = ksize >= floor
+    big[0] = False
+    touching = np.zeros(n, bool)
+    pairs = []
+    for dr, dc in ((0, 0), (0, 1), (0, -1), (1, 0), (-1, 0)):
+        near = _shift(kept, 1, dr, dc, 0) if (dr, dc) != (0, 0) else kept
+        m = cand & (near > 0) & big[near]
+        pairs.append(comps[m].astype(np.int64) * nk + near[m])
+    for key in np.unique(np.concatenate(pairs)):
+        comp, k = int(key // nk), int(key % nk)
+        d = mean[comp] - kmean[k]
+        if float(np.sum(d * d)) < d2:
+            touching[comp] = True
+    accept = long_enough & one_colour & two_sided & ~touching
+    accept[0] = False
+    return accept[comps]
 
 
 def _absorb_small(labels: np.ndarray, grad: np.ndarray, min_region: int, rounds: int = 3) -> np.ndarray:
