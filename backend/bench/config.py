@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 
-CLASSES: tuple[str, ...] = ("logo", "flat", "gradient", "shadow")
+CLASSES: tuple[str, ...] = ("logo", "flat", "gradient", "shadow", "text")
 
 
 @dataclass(frozen=True)

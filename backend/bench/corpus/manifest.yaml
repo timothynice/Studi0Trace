@@ -931,3 +931,171 @@ items:
   - size:512
   - degraded:downsample
   truth_svg: synthetic/shadow/transparent-bg.svg
+- id: text/sans-2-gradient-128
+  class: text
+  png: synthetic/text/sans-2-gradient-128.png
+  width: 128
+  height: 128
+  tags:
+  - synthetic
+  - size:128
+  truth_svg: synthetic/text/sans-2-gradient.svg
+- id: text/sans-2-gradient-512
+  class: text
+  png: synthetic/text/sans-2-gradient-512.png
+  width: 512
+  height: 512
+  tags:
+  - synthetic
+  - size:512
+  truth_svg: synthetic/text/sans-2-gradient.svg
+- id: text/sans-2-gradient-512-ds
+  class: text
+  png: synthetic/text/sans-2-gradient-512-ds.png
+  width: 512
+  height: 512
+  tags:
+  - synthetic
+  - size:512
+  - degraded:downsample
+  truth_svg: synthetic/text/sans-2-gradient.svg
+- id: text/sans-2-white-128
+  class: text
+  png: synthetic/text/sans-2-white-128.png
+  width: 128
+  height: 128
+  tags:
+  - synthetic
+  - size:128
+  truth_svg: synthetic/text/sans-2-white.svg
+- id: text/sans-2-white-512
+  class: text
+  png: synthetic/text/sans-2-white-512.png
+  width: 512
+  height: 512
+  tags:
+  - synthetic
+  - size:512
+  truth_svg: synthetic/text/sans-2-white.svg
+- id: text/sans-2-white-512-ds
+  class: text
+  png: synthetic/text/sans-2-white-512-ds.png
+  width: 512
+  height: 512
+  tags:
+  - synthetic
+  - size:512
+  - degraded:downsample
+  truth_svg: synthetic/text/sans-2-white.svg
+- id: text/sans-3-gradient-128
+  class: text
+  png: synthetic/text/sans-3-gradient-128.png
+  width: 128
+  height: 128
+  tags:
+  - synthetic
+  - size:128
+  truth_svg: synthetic/text/sans-3-gradient.svg
+- id: text/sans-3-gradient-512
+  class: text
+  png: synthetic/text/sans-3-gradient-512.png
+  width: 512
+  height: 512
+  tags:
+  - synthetic
+  - size:512
+  truth_svg: synthetic/text/sans-3-gradient.svg
+- id: text/sans-3-gradient-512-ds
+  class: text
+  png: synthetic/text/sans-3-gradient-512-ds.png
+  width: 512
+  height: 512
+  tags:
+  - synthetic
+  - size:512
+  - degraded:downsample
+  truth_svg: synthetic/text/sans-3-gradient.svg
+- id: text/sans-3-white-128
+  class: text
+  png: synthetic/text/sans-3-white-128.png
+  width: 128
+  height: 128
+  tags:
+  - synthetic
+  - size:128
+  truth_svg: synthetic/text/sans-3-white.svg
+- id: text/sans-3-white-512
+  class: text
+  png: synthetic/text/sans-3-white-512.png
+  width: 512
+  height: 512
+  tags:
+  - synthetic
+  - size:512
+  truth_svg: synthetic/text/sans-3-white.svg
+- id: text/sans-3-white-512-ds
+  class: text
+  png: synthetic/text/sans-3-white-512-ds.png
+  width: 512
+  height: 512
+  tags:
+  - synthetic
+  - size:512
+  - degraded:downsample
+  truth_svg: synthetic/text/sans-3-white.svg
+- id: text/sans-4-gradient-128
+  class: text
+  png: synthetic/text/sans-4-gradient-128.png
+  width: 128
+  height: 128
+  tags:
+  - synthetic
+  - size:128
+  truth_svg: synthetic/text/sans-4-gradient.svg
+- id: text/sans-4-gradient-512
+  class: text
+  png: synthetic/text/sans-4-gradient-512.png
+  width: 512
+  height: 512
+  tags:
+  - synthetic
+  - size:512
+  truth_svg: synthetic/text/sans-4-gradient.svg
+- id: text/sans-4-gradient-512-ds
+  class: text
+  png: synthetic/text/sans-4-gradient-512-ds.png
+  width: 512
+  height: 512
+  tags:
+  - synthetic
+  - size:512
+  - degraded:downsample
+  truth_svg: synthetic/text/sans-4-gradient.svg
+- id: text/sans-4-white-128
+  class: text
+  png: synthetic/text/sans-4-white-128.png
+  width: 128
+  height: 128
+  tags:
+  - synthetic
+  - size:128
+  truth_svg: synthetic/text/sans-4-white.svg
+- id: text/sans-4-white-512
+  class: text
+  png: synthetic/text/sans-4-white-512.png
+  width: 512
+  height: 512
+  tags:
+  - synthetic
+  - size:512
+  truth_svg: synthetic/text/sans-4-white.svg
+- id: text/sans-4-white-512-ds
+  class: text
+  png: synthetic/text/sans-4-white-512-ds.png
+  width: 512
+  height: 512
+  tags:
+  - synthetic
+  - size:512
+  - degraded:downsample
+  truth_svg: synthetic/text/sans-4-white.svg

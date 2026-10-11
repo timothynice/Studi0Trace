@@ -9,16 +9,20 @@ Classes mirror Vexel's targets:
   flat      many adjacent flat regions with low-contrast neighbours and small details
   gradient  linear/radial multi-stop gradients, including alpha stops
   shadow    feGaussianBlur drop shadows, glows and inner shadows at several radii
+  text      a tracked all-caps line and a lowercase line at 2, 3 and 4 px stroke widths, white and pale-gradient ground
 """
 from __future__ import annotations
 
 import io
 import math
 import random
+from functools import lru_cache
 from pathlib import Path
 from typing import Callable
 
 import resvg_py
+from fontTools.pens.basePen import BasePen
+from fontTools.pens.transformPen import TransformPen
 from PIL import Image
 
 from bench.corpus import Item, load_corpus, write_manifest
@@ -393,6 +397,106 @@ def shadow_inset_well(rng):
     )
 
 
+# --- text ---------------------------------------------------------------------
+# A tracked all-caps line and a lowercase line, set so the stems are 2, 3 or 4 px
+# wide on the 512 canvas, on white and on a pale gradient: the strokes the
+# thin-stroke seeding exists for (`2026-10-09-thin-stroke-seeding-design.md`).
+# The glyph outlines are the vector truth. Montserrat Regular is OFL (bench/fonts).
+
+FONT_DIR = Path(__file__).resolve().parent / "fonts"
+TEXT_FONT = "Montserrat-Regular.ttf"
+TEXT_INK = "#1F2A44"
+TEXT_CAPS = "OUTSIDE"
+TEXT_LOWER = "brighter days"
+TEXT_TRACKING = 0.15  # em, on the caps line
+TEXT_CAPS_BASELINE = 200.0
+TEXT_LOWER_BASELINE = 330.0
+
+
+class _SvgPen(BasePen):
+    """Absolute M/L/C/Z only, which is what `bench.geometry._segments` reads
+    (fontTools' SVGPathPen writes H and V, and a TrueType glyph's quadratics
+    are decomposed to cubics by BasePen itself)."""
+
+    def __init__(self, glyph_set):
+        super().__init__(glyph_set)
+        self.parts: list[str] = []
+
+    def _moveTo(self, p):
+        self.parts.append("M%.3f %.3f" % p)
+
+    def _lineTo(self, p):
+        self.parts.append("L%.3f %.3f" % p)
+
+    def _curveToOne(self, c1, c2, p):
+        self.parts.append("C%.3f %.3f %.3f %.3f %.3f %.3f" % (*c1, *c2, *p))
+
+    def _closePath(self):
+        self.parts.append("Z")
+
+    def _endPath(self):
+        self.parts.append("Z")
+
+
+@lru_cache(maxsize=None)
+def _font(name: str):
+    from fontTools.ttLib import TTFont
+
+    return TTFont(FONT_DIR / name)
+
+
+def _stem_em(font) -> float:
+    """The stem of I as a share of the em: what a stroke width is set from."""
+    from fontTools.pens.boundsPen import BoundsPen
+
+    glyphs = font.getGlyphSet()
+    pen = BoundsPen(glyphs)
+    glyphs[font.getBestCmap()[ord("I")]].draw(pen)
+    x0, _, x1, _ = pen.bounds
+    return (x1 - x0) / font["head"].unitsPerEm
+
+
+def text_line(font, string: str, size: float, x: float, baseline: float, tracking_em: float = 0.0) -> str:
+    """`string` as one `<path>` per glyph at the font's own advances plus
+    `tracking_em` per glyph, no kerning; `size` is the em in canvas units."""
+    glyphs, cmap = font.getGlyphSet(), font.getBestCmap()
+    s = size / font["head"].unitsPerEm
+    out: list[str] = []
+    for ch in string:
+        name = cmap.get(ord(ch))
+        glyph = glyphs[name] if name is not None else None
+        if glyph is not None and ch != " ":
+            pen = _SvgPen(glyphs)
+            glyph.draw(TransformPen(pen, (s, 0, 0, -s, x, baseline)))
+            if pen.parts:
+                out.append(f'<path d="{"".join(pen.parts)}" fill="{TEXT_INK}"/>')
+        x += (glyph.width if glyph is not None else 0.0) * s + tracking_em * size
+    return "".join(out)
+
+
+def _line_width(font, string: str, size: float, tracking_em: float) -> float:
+    glyphs, cmap = font.getGlyphSet(), font.getBestCmap()
+    s = size / font["head"].unitsPerEm
+    return sum(glyphs[cmap[ord(ch)]].width * s for ch in string) + tracking_em * size * (len(string) - 1)
+
+
+def _text_template(stroke: float, gradient: bool) -> Callable[[random.Random], str]:
+    def fn(rng):
+        font = _font(TEXT_FONT)
+        size = stroke / _stem_em(font)
+        caps_x = (CANVAS - _line_width(font, TEXT_CAPS, size, TEXT_TRACKING)) / 2
+        lower_x = (CANVAS - _line_width(font, TEXT_LOWER, size, 0.0)) / 2
+        body = (text_line(font, TEXT_CAPS, size, caps_x, TEXT_CAPS_BASELINE, TEXT_TRACKING)
+                + text_line(font, TEXT_LOWER, size, lower_x, TEXT_LOWER_BASELINE))
+        if gradient:
+            defs = ('<linearGradient id="g" x1="0" y1="0" x2="1" y2="1">'
+                    '<stop offset="0" stop-color="#FBF6EE"/><stop offset="1" stop-color="#E6EDF5"/></linearGradient>')
+            return _svg(body, defs=defs, background="url(#g)")
+        return _svg(body, background="#FFFFFF")
+
+    return fn
+
+
 TEMPLATES: dict[str, list[tuple[str, Callable[[random.Random], str]]]] = {
     "logo": [
         ("ring", logo_ring), ("cutout", logo_cutout), ("triangle-bar", logo_triangle_bar),
@@ -411,6 +515,11 @@ TEMPLATES: dict[str, list[tuple[str, Callable[[random.Random], str]]]] = {
         ("disc", shadow_disc), ("card", shadow_card), ("over-gradient", shadow_over_gradient),
         ("glow", shadow_glow), ("radii", shadow_radii), ("transparent-bg", shadow_transparent_bg),
         ("inset-card", shadow_inset_card), ("inset-well", shadow_inset_well),
+    ],
+    "text": [
+        ("sans-2-white", _text_template(2.0, False)), ("sans-2-gradient", _text_template(2.0, True)),
+        ("sans-3-white", _text_template(3.0, False)), ("sans-3-gradient", _text_template(3.0, True)),
+        ("sans-4-white", _text_template(4.0, False)), ("sans-4-gradient", _text_template(4.0, True)),
     ],
 }
 
