@@ -401,6 +401,20 @@ fidelity bench. Read `README.md` first — it has the run/test/API reference.
   And a blend is evidence of translucency only when the shift it makes,
   (1 − α)·|backdrop − X|, is `OVERLAP_SHIFT` fit tolerances: a flat tile four
   levels from its neighbours was drawn as the next tile at 96 % over it.
+- A thin stroke is seeded as a stroke (`partition.stroke_seeds`, both engines, `diffcheck stroke_seeds`):
+  the non-ridge pixels between two ridge pixels within `STROKE_SEED_W` (5) along one of the four axes,
+  in components `STROKE_SEED_LEN` (12) long over their mean width, one colour, differing from what lies
+  beyond the ridge on both sides while those sides agree, and not touching a kept seed of their own
+  colour; kept whatever their size and exempt from `_absorb_small`. Five rules keep it from seeding
+  noise: the two-sided agree test, the touching rule, a candidate at least half opaque
+  (`STROKE_SEED_ALPHA`), the stroke 2·detail above both sides (`STROKE_SEED_CONTRAST`), and a seed
+  that stops `STROKE_SEED_W` short of its ends (the radius-2 and radius-3 ring test), so it never
+  reaches into a junction. A crisp or anti-aliased 2 px stroke has no medial pixel and is not seeded,
+  which is why the logos' 1-2 px taglines are unchanged. Lowering the seed floor or pooling
+  fragments admitted noise everywhere (the wave-lockup plan's try9 and D1): do not go back to either.
+  The bench's `text` class (`bench/synth.py`, Montserrat at 2, 3 and 4 px stems) and two degraded
+  sources hold it; the gate's three residual regressions are recorded in the spec's Status
+  (`2026-10-09-thin-stroke-seeding-design.md`).
 - A crisp edge is a real boundary however small its step. The partition's
   ridge threshold and junction test drop to `G_LOW_MIN`/`G_SEED_MIN` where the
   area is clean outright (the median discontinuity round the pixel, ridges

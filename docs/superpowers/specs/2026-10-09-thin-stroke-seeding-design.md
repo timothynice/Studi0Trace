@@ -77,3 +77,93 @@ the same names. They are not parameters: no UI control, no `Params` field.
 
 Regularising the fitted letters (that is `text-as-shapes`); strokes thinner than 1.5 px, which the
 stroke stage already draws as strokes when they survive, and which `upsample` handles below 192 px.
+
+## Status (2026-10-11)
+
+Built as `docs/superpowers/plans/2026-10-11-thin-stroke-seeding.md`: `stroke_seeds` in both engines,
+`diffcheck stroke_seeds` exact on 114/114 corpus items, the bench `text` class
+(`bench/synth.py`) and two degraded sources, the references frozen before the change. The spec's
+literal gate is not met, and the stage does not repair the three logos' taglines; Tim decides
+whether the trade ships.
+
+**Diagnosis before the change (Task 4).** Every marker-less glyph had only sub-floor seed
+fragments (41 item/preset rows, no exception). Real taglines lose markers on 19 % of their glyphs
+at Balanced and 61 % at Logo. The glyphs were not missing from the trace: the watershed handed
+them to the ground and `rescue_features` clawed them back as residual-shaped patches, so the
+stage's benefit is the shape of those glyphs, not their presence.
+
+**Where the realisation differs from the hypothesis.** Each is a ruling recorded in the SDD ledger.
+
+1. "Between two ridge pixels" runs along the four pixel axes (0°, 90°, 45°, 135°) with the
+   narrowest axis deciding, not along the structure-tensor orientation: the orientation flips at
+   junctions, which is what fragmented the valley seeds in the first place.
+2. Length is pixels over mean width (an integer test), not a skeleton.
+3. Two tests the spec did not name: the two sides beyond the ridge must agree within `detail`
+   (without it a sharpened edge's rim, a JPEG ringing line and a drop shadow's band qualify: each
+   is one colour, long, and differs from both of its sides), and a component touching a kept seed
+   of its own colour (its colour read off the seed's pixels outside the stroke candidates) is left
+   to that seed's flood (a wedge tip, the ground between two letters).
+4. Three constants beyond the spec's two, all from the gate. `STROKE_SEED_ALPHA` 50: a candidate
+   is at least half opaque (the inpainted colour under a transparent pixel means nothing and was
+   seeded as strokes in `sharpen/thin-mark-512`'s ground). `STROKE_SEED_CONTRAST` 2: the stroke
+   stands 2·detail above both sides (JPEG ringing streaks of 8-11 ΔE in a soft field qualified at
+   `detail`). And a seed stops `STROKE_SEED_W` short of its ends (an end pixel: its component's
+   hits on the radius-2 ring form at most one run of at most 5 and on the radius-3 ring at most one
+   run; rings and bends have no ends), with four-connected remnants under `STROKE_SEED_W` dropped:
+   a seed reaching into a junction gave the stem of `thin-mark` a stepped foot that
+   `topology._extend_wedges` read as a 63° taper, walking a 1,647 px sliver round the triangle. A
+   stroke therefore needs about 3·`STROKE_SEED_W` px to keep a seed.
+5. The 2 px limit is wider than "crisp": an anti-aliased 2 px stroke's two ink pixels are both
+   ridge (and differ from each other by more than `detail` at most phases), so it has no
+   one-colour medial pixel and is not seeded. All four `sans-2` items are bit-identical to their
+   references.
+
+**Gate** (`tools/qloop.sh full` at 930737d). Heldout is clean; corpus and degraded are not. Three
+residual regressions, each on a legitimate seed and a downstream sensitivity, are left for their
+own loops:
+
+- `logo/thin-mark-512` seam_ppm 11399 → 13961: the seeded 2 px ring's anti-aliased rims stay
+  transparent because the rescue's `boundary_band` excludes region boundaries, so three of its
+  four stroke groups fit width 1.96-1.98 and split into pieces.
+- `text/sans-3-gradient-512` and `-512-ds`: the seeded O claims 11 one-pixel edge nubs, its stroke
+  fidelity moves 0.1301 → 0.1240 across the 0.13 gate and it is drawn as two open centrelines
+  (artifact index +0.5).
+- `degraded/sharpen/thin-mark-512` artifact index 2.53 → 4.42: wobble where the stem meets the
+  triangle's apex, the wedge extension.
+
+Improvements: 31 text lines (sans-4 outline_px 0.42 → 0.13 and 0.50 → 0.19 at 512, 0.75 → 0.33 and
+0.63 → 0.38 at -ds; sans-3-white-512 0.43 → 0.25), `small/sticker-176` artifact index 28.5 → 5.0,
+`noto/u1f469-200d-1f33e-512-q75` 43.1 → 40.1. Text acceptance bar (pinholes = slivers =
+thin_strokes = 0, outline_px ≤ 0.3 at 512): 2 of 12 (`sans-4-gradient-512`, `sans-4-white-512`);
+the sans-3 items keep their pre-existing 1-4 slivers, the sans-4 -ds items miss on outline alone,
+the sans-2 items are unchanged.
+
+**Tim's logos.** The three images traced whole at Balanced and Logo, before (`d7de82d`, the
+Python engine) and after (this branch, Rust), and their taglines compared by eye
+(`trace_examples.py`'s tagline boxes). The taglines are not repaired. Rendered, they differ by
+0.00 % of their pixels at both presets, except the "FIND WHAT MATTERS" line of image 2 at Logo
+(0.15 %, mean error 6.18 → 6.22); the letters that were missing or broken before (the O's of
+TOMORROW, the first I of IDEAS and the O of OUTSIDE, the L, F and E of LIFE, the B and E of
+BETTER) are missing or broken in the same way after. Whole-image artifact index, before → after:
+
+| logo | Balanced | Logo |
+|---|---|---|
+| 1 | 32.51 → 32.51 | 23.75 → 23.75 |
+| 2 | 113.77 → 113.76 | 61.58 → 61.92 |
+| 3 | 67.65 → 68.14 | 54.31 → 54.37 |
+
+The stage fires on the whole images (13, 871 and 129 stroke-seed pixels in 1, 2 and 3) but
+almost none of it lands on the taglines: their stems are one to two pixels at half-darkness (a
+profile of 208, 21, 91 across a stem is typical), the case item 5 leaves unseeded. Tracing a
+tagline crop on its own seeds none of 2's and 3's lines (13 pixels in 1's). The changes elsewhere
+are a few hundred pixels per logo, mostly neutral; the clearest are small specks gone from the
+edge of the dark mass in 3 at Logo, and a lighter smear on the left stem of the serif N in image 2
+at Logo (error 9.35 → 11.28 over its 42×44 px). Nothing new is wrong at the taglines: no seam, no
+sliver, no filled bowl. The artifact index of an SVG cropped to a tagline box counts the shapes
+outside it too, so the whole-image index is the honest figure; the crop-only trace of the box is
+byte-identical before and after for every crop.
+
+**Not pursued, measured and rejected during the loop.** A cap on wedge runs (`WEDGE_MAX_RUN` ≈ 128
+fixes the mechanism but worsens `combo/thin-mark-512` and `combo/u2049-512`), tightening the wedge
+trigger (40-110 items move, more worse than better), pooling or a lower floor (the spec's own
+warning, confirmed).
