@@ -306,7 +306,7 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 
 - [ ] **Step 1: Update the counts in the test**
 
-In `backend/tests/test_bench_degraded.py`, `52` becomes `60` in each of the three places (`len(dg.SOURCES) * len(dg.CLASSES) == 60`, `60 + 60 + 1 + 1 + 2`, `len(loaded) == 60`).
+In `backend/tests/test_bench_degraded.py`, `52` becomes `60` in each of the four places (`len(dg.SOURCES) * len(dg.CLASSES) == 60`, `60 + 60 + 1 + 1 + 2`, `len(loaded) == 60`).
 
 - [ ] **Step 2: Run to verify it fails**
 
