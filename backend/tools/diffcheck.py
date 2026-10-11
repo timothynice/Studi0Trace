@@ -70,6 +70,11 @@ TOLERANCE = {
     "features": ("max", 1e-4, 0.0),
     "grad": ("max", 1e-4, 0.0),
     "labels0": ("max", 0.0, 0.002),
+    # The stroke seeds alone (`partition.stroke_seeds`): decisions at `detail`
+    # on feature colours the two engines agree on to 1e-4, so a component whose
+    # spread or side difference sits at the threshold can go either way; the
+    # same slack as `labels0`.
+    "stroke_seeds": ("max", 0.0, 0.002),
     "merge": ("max", 0.0, 0.002),
     "fills": ("rms", 1.0, 0.0),
     # `rms` for the boundary graph, for the same reason as the fills: the two
@@ -270,6 +275,20 @@ def labels0(path):
     py = initial_labels(discontinuity(prep.features), prep.features, min_region=6)
     rs = np.asarray(vexel_rs._stage_labels0(a.tobytes(), h, w, 6), dtype=np.int32).reshape(h, w)
     return py.astype(np.int32), rs
+
+
+@stage
+def stroke_seeds(path):
+    from studi0trace.engines.vexel.partition import seed_parts, stroke_seeds as _stroke_seeds
+
+    a = load(path)
+    h, w = a.shape[:2]
+    prep = prepare(a)
+    grad = discontinuity(prep.features)
+    smooth, ridge = seed_parts(prep.features, grad, 1.5)
+    py = _stroke_seeds(ridge, smooth, prep.features, 6.0, 6).astype(np.int32)
+    rs = np.asarray(vexel_rs._stage_stroke_seeds(a.tobytes(), h, w, 6, 6.0), dtype=np.int32).reshape(h, w)
+    return py, rs
 
 
 @stage

@@ -368,3 +368,21 @@ def test_seed_markers_keep_a_small_component_that_holds_a_stroke_pixel():
     assert m.max() == 0
     m, _ = seed_markers(smooth, 100, feats, 6.0, np.zeros((20, 40), np.float32), strokes)
     assert m.max() == 1 and np.array_equal(m > 0, smooth)
+
+
+@pytest.mark.skipif(vexel._vexel_rs is None, reason="the vexel_rs extension is not built")
+@pytest.mark.parametrize("stroke", [2.0, 3.0, 4.0])
+def test_the_engines_seed_strokes_alike(stroke):
+    a = np.ascontiguousarray(np.asarray(Image.open(io.BytesIO(_ring_png(stroke))).convert("RGBA")))
+    p = prepare(a)
+    grad = discontinuity(p.features)
+    smooth, ridge = seed_parts(p.features, grad, 1.5)
+    py = stroke_seeds(ridge, smooth, p.features, 6.0, 16)
+    rs = np.asarray(vexel._vexel_rs._stage_stroke_seeds(a.tobytes(), 96, 96, 16, 6.0), np.int32).reshape(96, 96)
+    assert np.array_equal(py.astype(np.int32), rs)
+    if stroke >= 3.0:
+        # at 2 px this pixel-aligned ring has a ridge on one side only, so neither engine seeds it
+        assert py.sum() > 100, "the ring and the bar are seeded"
+    py_l = initial_labels(grad, p.features, min_region=16, detail=6.0)
+    rs_l = np.asarray(vexel._vexel_rs._stage_labels0(a.tobytes(), 96, 96, 16, 6.0), np.int32).reshape(96, 96)
+    assert np.array_equal(py_l, rs_l)
