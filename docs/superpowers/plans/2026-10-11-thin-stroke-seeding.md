@@ -729,13 +729,19 @@ def stroke_seeds(ridge: np.ndarray, smooth: np.ndarray, features: np.ndarray, de
     ok = (np.sum((fp - fa) ** 2, axis=1) > d2) & (np.sum((fp - fb) ** 2, axis=1) > d2) & (np.sum((fa - fb) ** 2, axis=1) < d2)
     passing = np.bincount(comps[ys, xs], weights=ok.astype(np.float64), minlength=n).astype(np.int64)
     two_sided = 2 * passing > size
-    # not touching a kept seed of its own colour
+    # not touching a kept seed of its own colour: the kept components of `smooth`
+    # at their full size, their colour read off their pixels outside the stroke
+    # candidates (a stroke's own valley line runs into a neighbouring seed and
+    # would blend its colour into that seed's); a kept component with no such
+    # pixel is the stroke's own valley and is not another seed
     kept = cc_label(smooth, connectivity=1)
     kflat = kept.ravel()
     nk = int(kept.max()) + 1
     ksize = np.bincount(kflat, minlength=nk)
-    kmean = np.stack([np.bincount(kflat, weights=feats[..., c].ravel(), minlength=nk) for c in range(nc)], axis=1) / np.maximum(ksize, 1)[:, None]
-    big = ksize >= floor
+    outside = kflat * (~cand.ravel())
+    kcount = np.bincount(outside, minlength=nk)
+    kmean = np.stack([np.bincount(outside, weights=feats[..., c].ravel(), minlength=nk) for c in range(nc)], axis=1) / np.maximum(kcount, 1)[:, None]
+    big = (ksize >= floor) & (kcount > 0)
     big[0] = False
     touching = np.zeros(n, bool)
     pairs = []
@@ -1001,9 +1007,28 @@ mod stroke_tests {
     fn a_stroke_touching_a_seed_of_its_colour_is_left_to_it() {
         let (ridge, smooth, f) = with_body(20.0);
         assert_eq!(stroke_seeds(&ridge, &smooth, &f, 6.0, FLOOR).count(), 0);
-        let (ridge, smooth, f) = with_body(60.0);
+        // a body 8 levels from the ink: another colour at detail 6, even though the
+        // stroke's own valley line runs into the body's seed component
+        let (ridge, smooth, f) = with_body(28.0);
         let s = stroke_seeds(&ridge, &smooth, &f, 6.0, FLOOR);
         assert!((18..21).all(|r| (5..36).all(|c| *s.get(r, c))));
+    }
+
+    #[test]
+    fn a_ridge_on_the_image_edge_has_no_sample_beyond_it() {
+        // the Python's `test_a_ridge_on_the_border_has_no_sample_beyond_it`: ridge on row 0,
+        // stroke on rows 1–3 → no sample above → declined; one ground row above → seeded
+        let (ridge, smooth, f) = scene(5, 36, 20.0, 95.0, 95.0);
+        let crop = |m: &Mask, from: usize| -> Mask {
+            Grid { h: 40 - from, w: 40, data: m.data[from * 40..].to_vec() }
+        };
+        let mut fc = Image::new(40 - 17, 40, 4);
+        fc.data.copy_from_slice(&f.data[17 * 40 * 4..]);
+        assert_eq!(stroke_seeds(&crop(&ridge, 17), &crop(&smooth, 17), &fc, 6.0, FLOOR).count(), 0);
+        let mut fp = Image::new(40 - 16, 40, 4);
+        fp.data.copy_from_slice(&f.data[16 * 40 * 4..]);
+        let s = stroke_seeds(&crop(&ridge, 16), &crop(&smooth, 16), &fp, 6.0, FLOOR);
+        assert!((2..5).all(|r| (5..36).all(|c| *s.get(r, c))));
     }
 }
 ```
@@ -1167,19 +1192,28 @@ pub fn stroke_seeds(ridge: &Mask, smooth: &Mask, features: &Image, detail: f64, 
             }
         }
     }
-    // kept seeds: components of `smooth` of `floor` pixels or more, with their mean colour
+    // kept seeds: components of `smooth` of `floor` pixels or more (their full
+    // size), whose colour is the mean of their pixels outside the stroke
+    // candidates — a stroke's own valley line runs into a neighbouring seed and
+    // would blend its colour into that seed's (`partition.py` says why; a kept
+    // component with no such pixel is the stroke's own valley and is skipped)
     let kept = labels::label_mask(smooth, 1);
     let nk = kept.data.iter().copied().max().unwrap_or(0) as usize + 1;
     let ksize = labels::bincount(&kept);
+    let mut kcount = vec![0usize; nk];
     let mut ksums = vec![0.0f64; nk * nc];
     for i in 0..h * w {
         let k = kept.data[i] as usize;
+        if k == 0 || cand.data[i] {
+            continue;
+        }
+        kcount[k] += 1;
         let px = features.px(i);
         for ch in 0..nc {
             ksums[k * nc + ch] += px[ch];
         }
     }
-    let kmean = |k: usize, ch: usize| ksums[k * nc + ch] / (ksize[k].max(1) as f64);
+    let kmean = |k: usize, ch: usize| ksums[k * nc + ch] / (kcount[k].max(1) as f64);
     let mut pairs = std::collections::BTreeSet::new();
     for r in 0..h {
         for c in 0..w {
@@ -1194,7 +1228,7 @@ pub fn stroke_seeds(ridge: &Mask, smooth: &Mask, features: &Image, detail: f64, 
                     continue;
                 }
                 let kk = kept.data[rr as usize * w + cc as usize] as usize;
-                if kk != 0 && ksize[kk] >= floor {
+                if kk != 0 && ksize[kk] >= floor && kcount[kk] > 0 {
                     pairs.insert((k, kk));
                 }
             }
