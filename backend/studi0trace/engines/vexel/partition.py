@@ -206,9 +206,10 @@ def seed_mask(features: np.ndarray, grad: np.ndarray, g_low: float, g_seed: floa
 #   took five rows of its joint with a triangle's base, and the stepped foot
 #   read as a wedge tip that walked a sliver round the triangle. Stopped
 #   short, the joint is left to the flood, which puts it where it was. A
-#   component left with fewer than STROKE_SEED_W pixels is dropped (a speck
-#   of seed protected from absorption is worse than none), so a stroke must
-#   be about 2·STROKE_SEED_W + STROKE_SEED_W long to keep a seed.
+#   piece of seed (four-connected) the trim leaves with fewer than
+#   STROKE_SEED_W pixels is dropped (a speck of seed protected from
+#   absorption is worse than none), so a stroke must be about
+#   2·STROKE_SEED_W + STROKE_SEED_W long to keep a seed.
 # Spec: 2026-10-09-thin-stroke-seeding-design.md.
 STROKE_SEED_W = 5
 STROKE_SEED_LEN = 12
@@ -352,9 +353,9 @@ def stroke_seeds(ridge: np.ndarray, smooth: np.ndarray, features: np.ndarray, de
     for _ in range(STROKE_SEED_W):
         trimmed = ndimage.binary_dilation(trimmed, _CROSS, mask=keep)
     seed = keep & ~trimmed
-    # a component left with fewer than STROKE_SEED_W pixels is dropped
-    left = np.bincount(flat, weights=seed.ravel().astype(np.float64), minlength=n).astype(np.int64)
-    return seed & (left >= STROKE_SEED_W)[comps]
+    # a piece (four-connected) the trim leaves with fewer than STROKE_SEED_W pixels is dropped
+    pieces = cc_label(seed, connectivity=1)
+    return seed & (np.bincount(pieces.ravel()) >= STROKE_SEED_W)[pieces]
 
 
 def _absorb_small(labels: np.ndarray, grad: np.ndarray, min_region: int, rounds: int = 3,

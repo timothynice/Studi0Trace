@@ -255,8 +255,8 @@ fn ridge_reach(ridge: &Mask, r: usize, c: usize, dr: isize, dc: isize) -> (usize
 /// tests are at `STROKE_SEED_CONTRAST`·`detail`, and an accepted seed stops
 /// `STROKE_SEED_W` four-connected steps short of its end pixels (hits of its
 /// own component on the radius-2 ring in at most one run of at most 5, and on
-/// the radius-3 ring in at most one run); a ring has none. A component left
-/// with fewer than `STROKE_SEED_W` pixels is dropped. Sums run in raster order
+/// the radius-3 ring in at most one run); a ring has none. A piece the trim
+/// leaves with fewer than `STROKE_SEED_W` pixels is dropped. Sums run in raster order
 /// in f64, as the Python's do; the trim is a distance map.
 pub fn stroke_seeds(ridge: &Mask, smooth: &Mask, features: &Image, detail: f64, floor: usize) -> Mask {
     let (h, w) = (ridge.h, ridge.w);
@@ -447,15 +447,11 @@ pub fn stroke_seeds(ridge: &Mask, smooth: &Mask, features: &Image, detail: f64, 
             step(i + 1);
         }
     }
-    // a component left with fewer than STROKE_SEED_W pixels is dropped
-    let seed: Vec<bool> = (0..h * w).map(|i| keep[i] && dist[i] == usize::MAX).collect();
-    let mut left = vec![0usize; n];
-    for i in 0..h * w {
-        if seed[i] {
-            left[comps.data[i] as usize] += 1;
-        }
-    }
-    Grid { h, w, data: (0..h * w).map(|i| seed[i] && left[comps.data[i] as usize] >= STROKE_SEED_W).collect() }
+    // a piece (four-connected) the trim leaves with fewer than STROKE_SEED_W pixels is dropped
+    let seed = Grid { h, w, data: (0..h * w).map(|i| keep[i] && dist[i] == usize::MAX).collect::<Vec<bool>>() };
+    let pieces = labels::label_mask(&seed, 1);
+    let psize = labels::bincount(&pieces);
+    Grid { h, w, data: (0..h * w).map(|i| seed.data[i] && psize[pieces.data[i] as usize] >= STROKE_SEED_W).collect() }
 }
 
 /// Flood regions below `min_region` pixels from their neighbours along low gradient.
@@ -911,6 +907,23 @@ mod stroke_tests {
             }
         }
         assert_eq!(stroke_seeds(&ridge, &smooth, &f, 6.0, FLOOR).data, trimmed(40, 18).data);
+    }
+
+    #[test]
+    fn a_piece_the_trim_cuts_off_is_dropped() {
+        // `test_a_piece_the_trim_cuts_off_is_dropped`: one-pixel nubs at (21, 10)
+        // and (21, 30) outlive the trim as 1 px pieces and are dropped
+        let (mut ridge, _, mut f) = scene(5, 36, 20.0, 95.0, 95.0);
+        for c in [10usize, 30] {
+            f.px_mut(21 * 40 + c)[0] = 20.0;
+            ridge.set(21, c, false);
+            for cc in c - 1..=c + 1 {
+                ridge.set(22, cc, true);
+            }
+        }
+        let smooth = dilate_cross(&ridge).not();
+        let s = stroke_seeds(&ridge, &smooth, &f, 6.0, FLOOR);
+        assert_eq!(s.data, trimmed(40, 18).data);
     }
 
     /// `_square_ring`: a 3 px square annulus (outer rows/cols 5..34, counter

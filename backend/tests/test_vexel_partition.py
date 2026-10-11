@@ -276,6 +276,23 @@ def test_a_short_stroke_leaves_no_remnant():
     assert stroke_seeds(ridge, smooth, feats, 6.0, FLOOR).sum() == 2 * 3 + 1
 
 
+def test_a_piece_the_trim_cuts_off_is_dropped():
+    # a one-pixel nub under the stroke at (21, 10) and (21, 30), ridge round it:
+    # the trim takes (20, 10) and (20, 30) (5 steps from the end columns) but
+    # not the nubs (6 steps), so each nub is left as a 1 px piece beside the
+    # 55 px one; a piece under STROKE_SEED_W pixels is dropped, whatever the
+    # rest of its component keeps
+    ridge, smooth, feats = _stroke_scene()
+    for c in (10, 30):
+        feats[21, c, 0] = 20.0
+        ridge[21, c] = False
+        ridge[22, c - 1:c + 2] = True
+    smooth = ~ndimage.binary_dilation(ridge)
+    s = stroke_seeds(ridge, smooth, feats, 6.0, FLOOR)
+    assert np.array_equal(s, _trimmed())
+    assert not s[21].any()
+
+
 def _square_ring():
     """A 3 px square annulus (outer rows/cols 5..34, counter 8..31) of L* 20 on
     a 95 ground, ridge on the ground pixels round it and the counter's outer
