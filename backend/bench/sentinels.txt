@@ -16,3 +16,5 @@ degraded combo/wave-lockup-1208       # the asset's signature: doubled at phase 
 degraded nn2x/thin-mark-512           # exact 2× doubling of thin strokes
 degraded small/venn-176               # strokes and slivers under 2 px
 degraded sharpen/wave-lockup-1208     # unsharp rims and halos, opaque ground (on transparent ground the rim brightens)
+corpus text/sans-3-white-512          # 3 px stems: thin-stroke seeding
+degraded nn2x/sans-3-white-512        # 1.5 px stems doubled to crisp 3 px

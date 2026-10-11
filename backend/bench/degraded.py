@@ -1,8 +1,9 @@
 """Degraded bench set: vector truth, damaged the way real uploads are.
 
-Thirteen sources with vector truth (synthetic corpus templates, Studi0's own
-marks, two held-out emoji and a geometric stand-in for a wave lockup) are
-rendered with resvg and put through four degradations:
+Fifteen sources with vector truth (synthetic corpus templates, Studi0's own
+marks, two held-out emoji, a geometric stand-in for a wave lockup and two text
+lines of the synthetic corpus) are rendered with resvg and put through four
+degradations:
 
   nn2x     rendered at half size and doubled nearest-neighbour; columns pair at
            phase 0, rows at phase 0 (even source index) or 1 (odd index)
@@ -337,6 +338,8 @@ SOURCES: tuple[Source, ...] = (
     Source("nail-polish", "heldout", "heldout/fluent-color/nail-polish.svg", licence=FLUENT,
            licence_file="MIT-fluentui-emoji.txt"),
     Source("wave-lockup", "synthetic", None, long_side=WAVE_W),
+    Source("sans-3-white", "corpus", "corpus/synthetic/text/sans-3-white.svg"),
+    Source("sans-4-gradient", "corpus", "corpus/synthetic/text/sans-4-gradient.svg"),
 )
 
 
