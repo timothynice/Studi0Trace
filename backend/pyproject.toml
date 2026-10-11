@@ -24,6 +24,8 @@ dependencies = [
 [project.optional-dependencies]
 bench = [
     "pyyaml>=6",
+    # glyph outlines are the vector truth of the synthetic text class (bench/synth.py)
+    "fonttools>=4.40",
     # VTracer, a competitor the bench compares Vexel against (bench/engines/vtracer.py)
     "vtracer>=0.6",
 ]
