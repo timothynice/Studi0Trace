@@ -1,9 +1,7 @@
 {
  "image_id_format": "^[0-9a-f]{32}$",
  "python_engines": [
-  "vexel",
-  "potrace",
-  "vtracer"
+  "vexel"
  ],
  "sources": {
   "wordmark": {

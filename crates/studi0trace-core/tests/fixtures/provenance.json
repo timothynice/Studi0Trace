@@ -1,12 +1,12 @@
 {
  "exporters": {
   "api": {
-   "commit": "5befac9267f0df831b6abb39eccf0b04e7156f5b",
+   "commit": "930737dede588ac9550fe0c7181ddc73b0a15d1c",
    "environment": {
     "Pillow": "12.3.0",
     "machine": "arm64",
     "numpy": "2.5.3",
-    "python": "3.13.3",
+    "python": "3.12.9",
     "resvg-py": "0.5.0",
     "scikit-image": "0.26.0",
     "scipy": "1.18.1",
@@ -16,12 +16,12 @@
    "sources_differ_from_commit": false
   },
   "auto": {
-   "commit": "415e0cb50a3fb3bc79179de79b758bf7ae1a7894",
+   "commit": "930737dede588ac9550fe0c7181ddc73b0a15d1c",
    "environment": {
     "Pillow": "12.3.0",
     "machine": "arm64",
     "numpy": "2.5.3",
-    "python": "3.13.3",
+    "python": "3.12.9",
     "resvg-py": "0.5.0",
     "scikit-image": "0.26.0",
     "scipy": "1.18.1",
@@ -181,12 +181,12 @@
    "sources_differ_from_commit": false
   },
   "scorecard": {
-   "commit": "415e0cb50a3fb3bc79179de79b758bf7ae1a7894",
+   "commit": "930737dede588ac9550fe0c7181ddc73b0a15d1c",
    "environment": {
     "Pillow": "12.3.0",
     "machine": "arm64",
     "numpy": "2.5.3",
-    "python": "3.13.3",
+    "python": "3.12.9",
     "resvg-py": "0.5.0",
     "scikit-image": "0.26.0",
     "scipy": "1.18.1",
