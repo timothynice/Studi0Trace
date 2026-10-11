@@ -194,20 +194,46 @@ def seed_mask(features: np.ndarray, grad: np.ndarray, g_low: float, g_seed: floa
 #   12 ΔE from its ground.
 # - an accepted seed stops `STROKE_SEED_W` short of its ends: every pixel
 #   within that many 4-connected steps, inside its component, of an end pixel
-#   (one with nothing of its component one or two steps on, within a pixel
-#   either side, along the perpendicular of its narrowest axis, `_ALONG`) is
-#   removed; a ring has no end pixel and stays whole. A stroke's medial pixels
-#   run on into the joint with whatever it meets; seeded there, a stem took
-#   five rows of its joint with a triangle's base, and the stepped foot read
-#   as a wedge tip that walked a sliver round the triangle. Stopped short, the
-#   joint is left to the flood, which puts it where it was.
+#   is removed. An end pixel's hits (positions in its own component) on the
+#   ring at Chebyshev distance 2 form at most one circular run, of at most 5
+#   positions, and its hits on the ring at distance 3 at most one run
+#   (`_ring_runs`): mid-stroke the rings are hit on both sides, at a bend or a
+#   junction in separate runs, at an end (or where a stroke ran on into a
+#   joint until its width passed STROKE_SEED_W) in one short run. The second
+#   ring keeps a bend's outer corner, which looks like a wide stroke's end at
+#   distance 2; a ring has no end pixel and stays whole. A stroke's medial
+#   pixels run on into the joint with whatever it meets; seeded there, a stem
+#   took five rows of its joint with a triangle's base, and the stepped foot
+#   read as a wedge tip that walked a sliver round the triangle. Stopped
+#   short, the joint is left to the flood, which puts it where it was. A
+#   component left with fewer than STROKE_SEED_W pixels is dropped (a speck
+#   of seed protected from absorption is worse than none), so a stroke must
+#   be about 2·STROKE_SEED_W + STROKE_SEED_W long to keep a seed.
 # Spec: 2026-10-09-thin-stroke-seeding-design.md.
 STROKE_SEED_W = 5
 STROKE_SEED_LEN = 12
 STROKE_SEED_ALPHA = 50.0  # a candidate's least opacity, 100·alpha
 STROKE_SEED_CONTRAST = 2.0  # a stroke's least difference from either side, in `detail`s
 _AXES = ((0, 1), (1, 0), (1, 1), (1, -1))  # (dr, dc): the order ties between equally narrow axes break in
-_ALONG = ((1, 0), (0, 1), (1, -1), (1, 1))  # the perpendicular of each of `_AXES`: the direction a stroke runs in
+
+
+def _ring(radius: int) -> tuple[tuple[int, int], ...]:
+    """The positions (dr, dc) at Chebyshev distance `radius`, clockwise from (−r, −r)."""
+    r = radius
+    return (tuple((-r, c) for c in range(-r, r + 1)) + tuple((y, r) for y in range(-r + 1, r + 1))
+            + tuple((r, c) for c in range(r - 1, -r - 1, -1)) + tuple((y, -r) for y in range(r - 1, -r, -1)))
+
+
+_RING2, _RING3 = _ring(2), _ring(3)
+
+
+def _ring_runs(comps: np.ndarray, ring) -> tuple[np.ndarray, np.ndarray]:
+    """Per pixel: how many positions of `ring` lie in its own component (off the
+    image: a miss) and how many circular runs they form (a full ring is one)."""
+    hits = [(_shift(comps, 1, dr, dc, 0) == comps) for dr, dc in ring]
+    n = np.sum(hits, axis=0)
+    starts = np.sum([hits[k] & ~hits[k - 1] for k in range(len(ring))], axis=0)
+    return n, starts + (n == len(ring))
 
 
 def _shift(a: np.ndarray, k: int, dr: int, dc: int, fill) -> np.ndarray:
@@ -243,19 +269,17 @@ def stroke_seeds(ridge: np.ndarray, smooth: np.ndarray, features: np.ndarray, de
     nc = features.shape[-1]
     feats = features.astype(np.float64)
     width = np.zeros((h, w), np.int32)  # the narrowest axis's width; 0: not between two ridges
-    axis = np.full((h, w), -1, np.int32)  # the narrowest axis's index into `_AXES`
     rows, cols = np.mgrid[0:h, 0:w]
     out_r = [np.zeros((h, w), np.int64), np.zeros((h, w), np.int64)]  # the samples beyond the + and - ridges
     out_c = [np.zeros((h, w), np.int64), np.zeros((h, w), np.int64)]
     has_out = np.zeros((h, w), bool)
-    for i, (dr, dc) in enumerate(_AXES):
+    for dr, dc in _AXES:
         dp, bp = _ridge_reach(ridge, dr, dc)
         dm, bm = _ridge_reach(ridge, -dr, -dc)
         wd = dp + dm - 1
         between = (dp > 0) & (dm > 0) & (wd <= STROKE_SEED_W) & ~ridge
         better = between & ((width == 0) | (wd < width))
         width = np.where(better, wd, width)
-        axis = np.where(better, i, axis)
         has_out = np.where(better, (bp > 0) & (bm > 0), has_out)
         out_r[0] = np.where(better, rows + bp * dr, out_r[0])
         out_c[0] = np.where(better, cols + bp * dc, out_c[0])
@@ -319,26 +343,18 @@ def stroke_seeds(ridge: np.ndarray, smooth: np.ndarray, features: np.ndarray, de
     accept = long_enough & one_colour & two_sided & ~touching
     accept[0] = False
     keep = accept[comps]
-    # stop short of the ends: an end pixel has nothing of its component one or two
-    # steps on (within a pixel either side) one way or the other along its stroke
-    # (the perpendicular of its narrowest axis); the pixels within STROKE_SEED_W
-    # four-connected steps of one, inside the component, go
-    end = np.zeros((h, w), bool)
-    for i, ((dr, dc), (ar, ac)) in enumerate(zip(_AXES, _ALONG)):
-        on = keep & (axis == i)
-        if not on.any():
-            continue
-        for sgn in (1, -1):
-            cont = np.zeros((h, w), bool)
-            for k in (1, 2):
-                for j in (-1, 0, 1):
-                    q = _shift(comps, 1, sgn * k * ar + j * dr, sgn * k * ac + j * dc, 0)
-                    cont |= q == comps
-            end |= on & ~cont
+    # stop short of the ends (the comment above STROKE_SEED_W): the pixels within
+    # STROKE_SEED_W four-connected steps, inside the component, of an end pixel go
+    n2, runs2 = _ring_runs(comps, _RING2)
+    _, runs3 = _ring_runs(comps, _RING3)
+    end = keep & ((runs2 == 0) | ((runs2 == 1) & (n2 <= 5))) & (runs3 <= 1)
     trimmed = end
     for _ in range(STROKE_SEED_W):
         trimmed = ndimage.binary_dilation(trimmed, _CROSS, mask=keep)
-    return keep & ~trimmed
+    seed = keep & ~trimmed
+    # a component left with fewer than STROKE_SEED_W pixels is dropped
+    left = np.bincount(flat, weights=seed.ravel().astype(np.float64), minlength=n).astype(np.int64)
+    return seed & (left >= STROKE_SEED_W)[comps]
 
 
 def _absorb_small(labels: np.ndarray, grad: np.ndarray, min_region: int, rounds: int = 3,

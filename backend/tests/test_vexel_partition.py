@@ -229,18 +229,19 @@ def _trimmed(cols=(5, 36), row0=18) -> np.ndarray:
     """What `stroke_seeds` leaves of `_stroke_scene(cols)`'s stroke (rows
     row0..row0+2) once it stops `STROKE_SEED_W` short of its ends.
 
-    The end pixels: the first and last columns (nothing of the component one or
-    two steps on along the stroke), and at each end the two corner pixels one
-    column in, (row0, c0+1) and (row0+2, c0+1): their narrowest axis is a
-    diagonal (width 2, a ridge corner on one side), so their along axis is the
-    other diagonal, which leaves the stroke at once outward. Within 5
-    four-connected steps of those: the middle row loses c0..c0+5 (six
-    columns), the outer rows c0..c0+6 (seven), and the same at the right end."""
+    The end pixels (radius-2 ring hits in one run of at most 5, radius-3 hits
+    in at most one run): the whole first and last columns (the middle pixel
+    hits only the 3 positions behind it; an outer one hits 5, the three behind
+    it and two of the row beyond), and the middle pixel of the column next to
+    each (3 hits behind it, none ahead). The outer pixels of that column hit 6
+    in one run (the row beyond reaches the last column), so they are not ends.
+    Within 5 four-connected steps of those: the outer rows lose c0..c0+5 (six
+    columns), the middle row c0..c0+6 (seven), and the same at the right end."""
     c0, c1 = cols
     out = np.zeros((40, 40), bool)
-    out[row0 + 1, c0 + STROKE_SEED_W + 1:c1 - STROKE_SEED_W - 1] = True
-    out[row0, c0 + STROKE_SEED_W + 2:c1 - STROKE_SEED_W - 2] = True
-    out[row0 + 2, c0 + STROKE_SEED_W + 2:c1 - STROKE_SEED_W - 2] = True
+    out[row0, c0 + STROKE_SEED_W + 1:c1 - STROKE_SEED_W - 1] = True
+    out[row0 + 2, c0 + STROKE_SEED_W + 1:c1 - STROKE_SEED_W - 1] = True
+    out[row0 + 1, c0 + STROKE_SEED_W + 2:c1 - STROKE_SEED_W - 2] = True
     return out
 
 
@@ -253,15 +254,26 @@ def test_a_three_pixel_stroke_is_a_stroke_seed():
 
 def test_a_stroke_seed_stops_short_of_its_ends():
     # the stroke is columns 5..35 (31 px). Its end pixels are columns 5 and 35
-    # and the corner pixels (18, 6), (20, 6), (18, 34), (20, 34), whose
-    # narrowest axis is a diagonal; trimming 5 steps from them removes columns
-    # 5..10 of row 19 and 5..11 of rows 18 and 20, and mirrored at the right:
-    # row 19 keeps 11..29 (19 px), rows 18 and 20 keep 12..28 (17 px each)
+    # and the middle pixels (19, 6) and (19, 34) (see `_trimmed`); trimming 5
+    # steps from them removes columns 5..10 of rows 18 and 20 and 5..11 of row
+    # 19, mirrored at the right: rows 18 and 20 keep 11..29 (19 px each), row
+    # 19 keeps 12..28 (17 px)
     ridge, smooth, feats = _stroke_scene()
     s = stroke_seeds(ridge, smooth, feats, 6.0, FLOOR)
     assert np.array_equal(s, _trimmed())
-    assert s.sum() == 19 + 2 * 17
+    assert s.sum() == 2 * 19 + 17 == 55
     assert not s[:, :11].any() and not s[:, 30:].any()
+
+
+def test_a_short_stroke_leaves_no_remnant():
+    # 13 px long (columns 5..17): long enough before the trim (39 px over a mean
+    # width under 3), but the trim leaves only (18, 11) and (20, 11), fewer
+    # than STROKE_SEED_W pixels, so the component is dropped entirely
+    ridge, smooth, feats = _stroke_scene(cols=(5, 18))
+    assert not stroke_seeds(ridge, smooth, feats, 6.0, FLOOR).any()
+    # one pixel at a time longer, a seed survives once the trim leaves 5 or more
+    ridge, smooth, feats = _stroke_scene(cols=(5, 20))
+    assert stroke_seeds(ridge, smooth, feats, 6.0, FLOOR).sum() == 2 * 3 + 1
 
 
 def _square_ring():
@@ -285,25 +297,47 @@ def _square_ring():
     return ridge, ~ndimage.binary_dilation(ridge), feats, ink
 
 
-def test_a_square_ring_is_trimmed_only_at_its_corners():
-    # A ring has no end pixel along its sides, but a square one's outer corner
-    # pixel, and the two beside it, (5, 5), (5, 6) and (6, 5), are narrowest
-    # across the corner (the anti-diagonal, width 1 and 2), so their stroke
-    # runs along the diagonal, out of the corner at once: by the definition
-    # they are end pixels, and the 27 annulus pixels within 5 steps of them go
-    # at each corner. The sides between stay whole.
+def test_a_square_ring_is_not_trimmed():
+    # every pixel of a closed ring has hits on both sides along it: at an outer
+    # corner the radius-2 hits are one run of 5, as at a wide stroke's end, but
+    # the radius-3 ring is hit in two runs either side of the counter's corner,
+    # so no pixel is an end and the whole annulus (every candidate) stays seeded
     ridge, smooth, feats, ink = _square_ring()
     s = stroke_seeds(ridge, smooth, feats, 6.0, FLOOR)
-    assert not (s & ~ink).any()
-    assert s[5:8, 12:28].all() and s[32:35, 12:28].all() and s[12:28, 5:8].all() and s[12:28, 32:35].all()
-    yy, xx = np.mgrid[0:40, 0:40]
-    for cy, cx in ((5, 5), (5, 34), (34, 5), (34, 34)):
-        sy, sx = (1 if cy == 5 else -1), (1 if cx == 5 else -1)
-        ends = [(cy, cx), (cy, cx + sx), (cy + sy, cx)]
-        # the band is convex at the corner, so a 4-connected step count inside it is the city-block distance
-        near = np.min([np.abs(yy - y) + np.abs(xx - x) for y, x in ends], axis=0) <= STROKE_SEED_W
-        assert not (s & near).any() and (ink & near).sum() == 27
-    assert s.sum() == ink.sum() - 4 * 27
+    assert np.array_equal(s, ink) and s.sum() == 324
+
+
+def _l_scene():
+    """An L of L* 20 on a 95 ground: two 3 px arms 25 px long (rows 5–7,
+    columns 5..29 and columns 5–7, rows 5..29) meeting at a right angle, ridge
+    on every ground pixel touching it, seed everything more than a pixel from
+    a ridge."""
+    ink = np.zeros((40, 40), bool)
+    ink[5:8, 5:30] = True
+    ink[5:30, 5:8] = True
+    ridge = ndimage.binary_dilation(ink, np.ones((3, 3), bool)) & ~ink
+    feats = np.zeros((40, 40, 4), np.float32)
+    feats[..., 3] = 100.0
+    feats[..., 0] = 95.0
+    feats[ink, 0] = 20.0
+    return ridge, ~ndimage.binary_dilation(ridge), feats, ink
+
+
+def test_an_l_keeps_its_corner():
+    # the bend is no end (its outer corner hits the radius-3 ring in two runs);
+    # the free ends are trimmed as a straight stroke's: at the end of the
+    # horizontal arm the end pixels are (5, 29), (6, 29), (7, 29) and (6, 28),
+    # so rows 5 and 7 lose columns 24..29 and row 6 loses 23..29; mirrored on
+    # the vertical arm
+    ridge, smooth, feats, ink = _l_scene()
+    s = stroke_seeds(ridge, smooth, feats, 6.0, FLOOR)
+    want = ink.copy()
+    want[5:8, 24:] = False
+    want[6, 23:] = False
+    want[24:, 5:8] = False
+    want[23:, 6] = False
+    assert np.array_equal(s, want)
+    assert s[5:8, 5:8].all(), "the corner block is seeded"
 
 
 def test_a_ring_is_not_trimmed():
@@ -386,7 +420,7 @@ def test_a_stroke_touching_a_seed_of_its_own_colour_is_left_to_that_seed():
 def test_a_stroke_touching_a_seed_of_another_colour_keeps_its_own():
     ridge, smooth, feats = _with_body(28.0)  # 8 levels from the ink: another colour at detail 6, though a mean blended with the stroke's own valley would be within 6
     s = stroke_seeds(ridge, smooth, feats, 6.0, FLOOR)
-    assert s[18:21, 12:29].all() and not s[:, :11].any(), "seeded, short of its ends"
+    assert s[18:21, 12:29].all() and not s[:, :11].any(), "seeded, short of its end"
 
 
 def test_a_stroke_on_the_border_is_left_to_the_flood():
