@@ -180,8 +180,20 @@ pub fn seed_mask(features: &Image, grad: &Grid<f64>, g_low: f64, g_seed: f64) ->
 /// why and how): widest feature and shortest component it admits.
 pub const STROKE_SEED_W: usize = 5;
 pub const STROKE_SEED_LEN: usize = 12;
+/// A candidate's least opacity on the feature scale (100·alpha), where
+/// `threshold_at` reads "clean": the colour under a transparent pixel is
+/// inpainted and means nothing, and a stroke whose medial pixel is under half
+/// covered is thinner than a pixel or translucent.
+pub const STROKE_SEED_ALPHA: f64 = 50.0;
+/// A stroke differs from both sides by more than this many `detail`s (the
+/// sides' agreement and the one-colour spread stay at `detail`): JPEG's ringing
+/// leaves one-colour streaks of 8-11 ΔE beside an edge in a soft field, and
+/// legible text stands far above 12 ΔE from its ground.
+pub const STROKE_SEED_CONTRAST: f64 = 2.0;
 /// (dr, dc): the order ties between equally narrow axes break in.
 const AXES: [(isize, isize); 4] = [(0, 1), (1, 0), (1, 1), (1, -1)];
+/// The perpendicular of each of `AXES`: the direction a stroke runs in (`partition._ALONG`).
+const ALONG: [(isize, isize); 4] = [(1, 0), (0, 1), (1, -1), (1, 1)];
 
 /// Along +(dr, dc) from (r, c): the distance 1..W to the nearest ridge pixel
 /// (0: none within W) and the distance to the first non-ridge pixel on the
@@ -213,14 +225,20 @@ fn ridge_reach(ridge: &Mask, r: usize, c: usize, dr: isize, dc: isize) -> (usize
 /// colour from the first non-ridge pixel beyond the ridge on both sides by
 /// more than `detail` while those two agree within `detail`, and not touching
 /// a kept seed (a component of `smooth` of `floor` pixels or more) of their
-/// own colour, read off the seed's pixels outside the stroke candidates. Sums
-/// run in raster order in f64, as the Python's do.
+/// own colour, read off the seed's pixels outside the stroke candidates. A
+/// candidate is at least half opaque (`STROKE_SEED_ALPHA`), the two "differs"
+/// tests are at `STROKE_SEED_CONTRAST`·`detail`, and an accepted seed stops
+/// `STROKE_SEED_W` four-connected steps short of its end pixels (one with
+/// nothing of its component one or two steps on, within a pixel either side,
+/// along the perpendicular of its narrowest axis); a ring has none. Sums run
+/// in raster order in f64, as the Python's do; the trim is a distance map.
 pub fn stroke_seeds(ridge: &Mask, smooth: &Mask, features: &Image, detail: f64, floor: usize) -> Mask {
     let (h, w) = (ridge.h, ridge.w);
     let nc = features.c;
     let d2 = detail * detail;
     let none = (usize::MAX, usize::MAX);
     let mut width = vec![0usize; h * w]; // the narrowest axis's width; 0: not between two ridges
+    let mut axis = vec![0u8; h * w]; // the narrowest axis's index into AXES (where width > 0)
     let mut out = vec![none; h * w]; // the samples beyond the + and - ridges
     for r in 0..h {
         for c in 0..w {
@@ -228,7 +246,7 @@ pub fn stroke_seeds(ridge: &Mask, smooth: &Mask, features: &Image, detail: f64, 
             if ridge.data[i] {
                 continue;
             }
-            for (dr, dc) in AXES {
+            for (ai, (dr, dc)) in AXES.into_iter().enumerate() {
                 let (dp, bp) = ridge_reach(ridge, r, c, dr, dc);
                 let (dm, bm) = ridge_reach(ridge, r, c, -dr, -dc);
                 if dp == 0 || dm == 0 {
@@ -239,6 +257,7 @@ pub fn stroke_seeds(ridge: &Mask, smooth: &Mask, features: &Image, detail: f64, 
                     continue;
                 }
                 width[i] = wd;
+                axis[i] = ai as u8;
                 let idx = |k: usize, sr: isize, sc: isize| -> usize {
                     ((r as isize + k as isize * sr) as usize) * w + (c as isize + k as isize * sc) as usize
                 };
@@ -246,7 +265,8 @@ pub fn stroke_seeds(ridge: &Mask, smooth: &Mask, features: &Image, detail: f64, 
             }
         }
     }
-    let cand = Grid { h, w, data: width.iter().map(|v| *v > 0).collect() };
+    // at least half opaque
+    let cand = Grid { h, w, data: (0..h * w).map(|i| width[i] > 0 && features.px(i)[3] >= STROKE_SEED_ALPHA).collect() };
     if !cand.any() {
         return cand;
     }
@@ -267,6 +287,8 @@ pub fn stroke_seeds(ridge: &Mask, smooth: &Mask, features: &Image, detail: f64, 
         }
     }
     let mean = |k: usize, ch: usize| sums[k * nc + ch] / (size[k].max(1) as f64);
+    let cd = STROKE_SEED_CONTRAST * detail;
+    let c2 = cd * cd;
     let mut sq = vec![0.0f64; n];
     let mut passing = vec![0usize; n];
     for i in 0..h * w {
@@ -290,7 +312,7 @@ pub fn stroke_seeds(ridge: &Mask, smooth: &Mask, features: &Image, detail: f64, 
                 db += (px[ch] - fb[ch]) * (px[ch] - fb[ch]);
                 ds += (fa[ch] - fb[ch]) * (fa[ch] - fb[ch]);
             }
-            if da > d2 && db > d2 && ds < d2 {
+            if da > c2 && db > c2 && ds < d2 {
                 passing[k] += 1;
             }
         }
@@ -357,7 +379,60 @@ pub fn stroke_seeds(ridge: &Mask, smooth: &Mask, features: &Image, detail: f64, 
                 && !touching[k]
         })
         .collect();
-    Grid { h, w, data: comps.data.iter().map(|k| accept[*k as usize]).collect() }
+    let keep: Vec<bool> = comps.data.iter().map(|k| accept[*k as usize]).collect();
+    // stop short of the ends: a multi-source BFS, four-connected inside the kept
+    // pixels, from every end pixel to depth STROKE_SEED_W (a distance map: no
+    // visiting order decides anything)
+    let mut dist = vec![usize::MAX; h * w];
+    let mut queue = std::collections::VecDeque::new();
+    for r in 0..h {
+        for c in 0..w {
+            let i = r * w + c;
+            if !keep[i] {
+                continue;
+            }
+            let ai = axis[i] as usize;
+            let ((dr, dc), (ar, ac)) = (AXES[ai], ALONG[ai]);
+            let continues = |sgn: isize| {
+                [1isize, 2].iter().any(|k| {
+                    [-1isize, 0, 1].iter().any(|j| {
+                        let rr = r as isize + sgn * k * ar + j * dr;
+                        let cc = c as isize + sgn * k * ac + j * dc;
+                        rr >= 0 && cc >= 0 && rr < h as isize && cc < w as isize && comps.data[rr as usize * w + cc as usize] == comps.data[i]
+                    })
+                })
+            };
+            if !continues(1) || !continues(-1) {
+                dist[i] = 0;
+                queue.push_back(i);
+            }
+        }
+    }
+    while let Some(i) = queue.pop_front() {
+        if dist[i] >= STROKE_SEED_W {
+            continue;
+        }
+        let (r, c) = (i / w, i % w);
+        let mut step = |j: usize| {
+            if keep[j] && dist[j] == usize::MAX {
+                dist[j] = dist[i] + 1;
+                queue.push_back(j);
+            }
+        };
+        if r > 0 {
+            step(i - w);
+        }
+        if r + 1 < h {
+            step(i + w);
+        }
+        if c > 0 {
+            step(i - 1);
+        }
+        if c + 1 < w {
+            step(i + 1);
+        }
+    }
+    Grid { h, w, data: (0..h * w).map(|i| keep[i] && dist[i] == usize::MAX).collect() }
 }
 
 /// Flood regions below `min_region` pixels from their neighbours along low gradient.
@@ -744,12 +819,113 @@ mod stroke_tests {
         (ridge, smooth, f)
     }
 
+    /// `_trimmed`: what is left of `scene(5, 36, …)`'s stroke (rows row0..row0+2,
+    /// in an image `h` rows tall) once it stops `STROKE_SEED_W` short of its
+    /// ends. The end pixels are the first and last columns and the corner pixels
+    /// one column in on the outer rows (narrowest across a diagonal, so their
+    /// stroke runs out along the other diagonal); 5 steps from them the middle
+    /// row loses columns 5..10, the outer rows 5..11, and mirrored at the right.
+    fn trimmed(h: usize, row0: usize) -> Mask {
+        let mut m = Grid::filled(h, 40, false);
+        for c in 5 + STROKE_SEED_W + 1..36 - STROKE_SEED_W - 1 {
+            m.set(row0 + 1, c, true);
+        }
+        for c in 5 + STROKE_SEED_W + 2..36 - STROKE_SEED_W - 2 {
+            m.set(row0, c, true);
+            m.set(row0 + 2, c, true);
+        }
+        m
+    }
+
     #[test]
     fn a_three_pixel_stroke_is_a_stroke_seed() {
         let (ridge, smooth, f) = scene(5, 36, 20.0, 95.0, 95.0);
         let s = stroke_seeds(&ridge, &smooth, &f, 6.0, FLOOR);
-        assert_eq!(s.count(), 3 * 31);
-        assert!((18..21).all(|r| (5..36).all(|c| *s.get(r, c))));
+        assert!((18..21).all(|r| (12..29).all(|c| *s.get(r, c))));
+    }
+
+    #[test]
+    fn a_stroke_seed_stops_short_of_its_ends() {
+        // row 19 keeps columns 11..29 (19 px), rows 18 and 20 keep 12..28 (17 each)
+        let (ridge, smooth, f) = scene(5, 36, 20.0, 95.0, 95.0);
+        let s = stroke_seeds(&ridge, &smooth, &f, 6.0, FLOOR);
+        assert_eq!(s.data, trimmed(40, 18).data);
+        assert_eq!(s.count(), 19 + 2 * 17);
+    }
+
+    #[test]
+    fn a_faint_stroke_is_declined() {
+        // 8 levels from its ground: over detail (6), under twice it (12)
+        let (ridge, smooth, f) = scene(5, 36, 87.0, 95.0, 95.0);
+        assert_eq!(stroke_seeds(&ridge, &smooth, &f, 6.0, FLOOR).count(), 0);
+        let (ridge, smooth, f) = scene(5, 36, 80.0, 95.0, 95.0);
+        assert_eq!(stroke_seeds(&ridge, &smooth, &f, 6.0, FLOOR).data, trimmed(40, 18).data);
+    }
+
+    #[test]
+    fn a_transparent_seam_is_not_a_stroke() {
+        let (ridge, smooth, mut f) = scene(5, 36, 20.0, 95.0, 95.0);
+        for i in 0..40 * 40 {
+            f.px_mut(i)[3] = 0.0;
+        }
+        assert_eq!(stroke_seeds(&ridge, &smooth, &f, 6.0, FLOOR).count(), 0);
+        // an opaque stroke on a transparent ground is a stroke
+        for r in 18..21 {
+            for c in 5..36 {
+                f.px_mut(r * 40 + c)[3] = 100.0;
+            }
+        }
+        assert_eq!(stroke_seeds(&ridge, &smooth, &f, 6.0, FLOOR).data, trimmed(40, 18).data);
+    }
+
+    /// `_square_ring`: a 3 px square annulus (outer rows/cols 5..34, counter
+    /// 8..31) of L* 20 on a 95 ground, ridge round it on the ground and on the
+    /// counter's outer layer, seed everything more than a pixel from a ridge.
+    fn square_ring() -> (Mask, Mask, Image, Mask) {
+        let (h, w) = (40, 40);
+        let inside = |r: usize, c: usize, a: usize, b: usize| (a..b).contains(&r) && (a..b).contains(&c);
+        let mut ink = Grid::filled(h, w, false);
+        let mut ridge = Grid::filled(h, w, false);
+        let mut f = Image::new(h, w, 4);
+        for r in 0..h {
+            for c in 0..w {
+                let band = inside(r, c, 5, 35) && !inside(r, c, 8, 32);
+                ink.set(r, c, band);
+                ridge.set(r, c, (inside(r, c, 4, 36) && !inside(r, c, 5, 35)) || (inside(r, c, 8, 32) && !inside(r, c, 9, 31)));
+                let px = f.px_mut(r * w + c);
+                px[0] = if band { 20.0 } else { 95.0 };
+                px[3] = 100.0;
+            }
+        }
+        let smooth = dilate_cross(&ridge).not();
+        (ridge, smooth, f, ink)
+    }
+
+    #[test]
+    fn a_square_ring_is_trimmed_only_at_its_corners() {
+        // `test_a_square_ring_is_trimmed_only_at_its_corners`: the outer corner
+        // pixel and the two beside it are end pixels (narrowest across the
+        // corner), and the 27 annulus pixels within 5 steps of them go
+        let (ridge, smooth, f, ink) = square_ring();
+        let s = stroke_seeds(&ridge, &smooth, &f, 6.0, FLOOR);
+        for (cy, cx) in [(5usize, 5usize), (5, 34), (34, 5), (34, 34)] {
+            let (sy, sx): (isize, isize) = (if cy == 5 { 1 } else { -1 }, if cx == 5 { 1 } else { -1 });
+            let ends = [(cy as isize, cx as isize), (cy as isize, cx as isize + sx), (cy as isize + sy, cx as isize)];
+            let mut n = 0;
+            for r in 0..40 {
+                for c in 0..40 {
+                    let near = ends.iter().any(|(y, x)| (r as isize - y).abs() + (c as isize - x).abs() <= STROKE_SEED_W as isize);
+                    if near && *ink.get(r, c) {
+                        n += 1;
+                        assert!(!*s.get(r, c), "({r}, {c}) is within 5 steps of a corner's end pixel");
+                    }
+                }
+            }
+            assert_eq!(n, 27);
+        }
+        assert!((0..40 * 40).all(|i| !s.data[i] || ink.data[i]));
+        assert_eq!(s.count(), ink.count() - 4 * 27);
+        assert!((12..28).all(|k| (5..8).all(|j| *s.get(j, k) && *s.get(k, j) && *s.get(39 - j, k) && *s.get(k, 39 - j))));
     }
 
     #[test]
@@ -766,7 +942,8 @@ mod stroke_tests {
         assert_eq!(stroke_seeds(&ridge, &smooth, &f, 6.0, FLOOR).count(), 0);
         let (ridge, smooth, f) = with_body(60.0);
         let s = stroke_seeds(&ridge, &smooth, &f, 6.0, FLOOR);
-        assert!((18..21).all(|r| (5..36).all(|c| *s.get(r, c))));
+        assert!((18..21).all(|r| (12..29).all(|c| *s.get(r, c))));
+        assert!((0..40).all(|r| (0..11).all(|c| !*s.get(r, c))), "seeded, short of its ends");
     }
     /// Rows `r0..` of a scene, as `test_the_beyond_sample_off_the_image_counts_as_ridge`
     /// slices them, with `pad` extra rows on top (ground L*, no ridge).
@@ -803,7 +980,7 @@ mod stroke_tests {
         let (r, s, im) = crop_rows(&ridge, &f, 17, 1);
         assert!(r.data[40..80].iter().any(|b| *b) && !r.data[..40].iter().any(|b| *b));
         let out = stroke_seeds(&r, &s, &im, 6.0, FLOOR);
-        assert!((2..5).all(|row| (5..36).all(|c| *out.get(row, c))));
+        assert_eq!(out.data, trimmed(24, 2).data);
     }
 
     #[test]

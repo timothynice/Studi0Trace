@@ -175,12 +175,39 @@ def seed_mask(features: np.ndarray, grad: np.ndarray, g_low: float, g_seed: floa
 # own colour, read off the seed's pixels outside the stroke candidates (an acute wedge's tip, the gap between two letters in the ground's
 # colour: the flood from that seed is the right answer there). Its pixels join
 # the seed mask before the floor, its component is kept whatever its size, and
-# its basin is exempt from `_absorb_small`. A crisp stroke exactly two pixels
-# wide is all ridge (both of its pixels peak) and has no medial pixel: it is
-# left to the rescue, as before. Spec: 2026-10-09-thin-stroke-seeding-design.md.
+# its basin is exempt from `_absorb_small`. A 2 px stroke whose two ink
+# pixels are both ridge has no medial pixel and is not seeded: a crisp one
+# (both pixels peak), and an anti-aliased one at most phases as well (its two
+# ink pixels differ from each other by more than `detail`); it is left to the
+# rescue, as before.
+#
+# Three rules keep the seeds to strokes and off their joints:
+# - a candidate pixel is at least half opaque (`STROKE_SEED_ALPHA`, on the
+#   feature scale, where `threshold_at` reads "clean"). The colour under a
+#   transparent pixel is inpainted and means nothing (the seams between
+#   inpainted bands on a transparent ground were seeded), and a stroke whose
+#   medial pixel is under half covered is thinner than a pixel or translucent.
+# - the stroke differs from both sides by more than `STROKE_SEED_CONTRAST`
+#   times `detail` (the sides' agreement and the one-colour spread stay at
+#   `detail`). JPEG's ringing leaves one-colour streaks of 8–11 ΔE beside an
+#   edge in a soft field, long and two-sided; legible text stands far above
+#   12 ΔE from its ground.
+# - an accepted seed stops `STROKE_SEED_W` short of its ends: every pixel
+#   within that many 4-connected steps, inside its component, of an end pixel
+#   (one with nothing of its component one or two steps on, within a pixel
+#   either side, along the perpendicular of its narrowest axis, `_ALONG`) is
+#   removed; a ring has no end pixel and stays whole. A stroke's medial pixels
+#   run on into the joint with whatever it meets; seeded there, a stem took
+#   five rows of its joint with a triangle's base, and the stepped foot read
+#   as a wedge tip that walked a sliver round the triangle. Stopped short, the
+#   joint is left to the flood, which puts it where it was.
+# Spec: 2026-10-09-thin-stroke-seeding-design.md.
 STROKE_SEED_W = 5
 STROKE_SEED_LEN = 12
+STROKE_SEED_ALPHA = 50.0  # a candidate's least opacity, 100·alpha
+STROKE_SEED_CONTRAST = 2.0  # a stroke's least difference from either side, in `detail`s
 _AXES = ((0, 1), (1, 0), (1, 1), (1, -1))  # (dr, dc): the order ties between equally narrow axes break in
+_ALONG = ((1, 0), (0, 1), (1, -1), (1, 1))  # the perpendicular of each of `_AXES`: the direction a stroke runs in
 
 
 def _shift(a: np.ndarray, k: int, dr: int, dc: int, fill) -> np.ndarray:
@@ -216,23 +243,26 @@ def stroke_seeds(ridge: np.ndarray, smooth: np.ndarray, features: np.ndarray, de
     nc = features.shape[-1]
     feats = features.astype(np.float64)
     width = np.zeros((h, w), np.int32)  # the narrowest axis's width; 0: not between two ridges
+    axis = np.full((h, w), -1, np.int32)  # the narrowest axis's index into `_AXES`
     rows, cols = np.mgrid[0:h, 0:w]
     out_r = [np.zeros((h, w), np.int64), np.zeros((h, w), np.int64)]  # the samples beyond the + and - ridges
     out_c = [np.zeros((h, w), np.int64), np.zeros((h, w), np.int64)]
     has_out = np.zeros((h, w), bool)
-    for dr, dc in _AXES:
+    for i, (dr, dc) in enumerate(_AXES):
         dp, bp = _ridge_reach(ridge, dr, dc)
         dm, bm = _ridge_reach(ridge, -dr, -dc)
         wd = dp + dm - 1
         between = (dp > 0) & (dm > 0) & (wd <= STROKE_SEED_W) & ~ridge
         better = between & ((width == 0) | (wd < width))
         width = np.where(better, wd, width)
+        axis = np.where(better, i, axis)
         has_out = np.where(better, (bp > 0) & (bm > 0), has_out)
         out_r[0] = np.where(better, rows + bp * dr, out_r[0])
         out_c[0] = np.where(better, cols + bp * dc, out_c[0])
         out_r[1] = np.where(better, rows - bm * dr, out_r[1])
         out_c[1] = np.where(better, cols - bm * dc, out_c[1])
     cand = width > 0
+    cand &= features[..., 3] >= STROKE_SEED_ALPHA  # at least half opaque
     if not cand.any():
         return cand
     comps = cc_label(cand, connectivity=1)
@@ -249,13 +279,16 @@ def stroke_seeds(ridge: np.ndarray, smooth: np.ndarray, features: np.ndarray, de
     dev = feats - mean[comps]
     sq = np.bincount(flat, weights=np.sum(dev * dev, axis=2).ravel(), minlength=n)
     one_colour = sq / np.maximum(size, 1) < d2
-    # two-sided: the pixel differs from both samples beyond the ridges, which agree
+    # two-sided: the pixel differs from both samples beyond the ridges by
+    # STROKE_SEED_CONTRAST·detail, and they agree within detail
+    cd = STROKE_SEED_CONTRAST * detail
+    c2 = cd * cd
     sel = cand & has_out
     ys, xs = np.nonzero(sel)
     fp = feats[ys, xs]
     fa = feats[out_r[0][ys, xs], out_c[0][ys, xs]]
     fb = feats[out_r[1][ys, xs], out_c[1][ys, xs]]
-    ok = (np.sum((fp - fa) ** 2, axis=1) > d2) & (np.sum((fp - fb) ** 2, axis=1) > d2) & (np.sum((fa - fb) ** 2, axis=1) < d2)
+    ok = (np.sum((fp - fa) ** 2, axis=1) > c2) & (np.sum((fp - fb) ** 2, axis=1) > c2) & (np.sum((fa - fb) ** 2, axis=1) < d2)
     passing = np.bincount(comps[ys, xs], weights=ok.astype(np.float64), minlength=n).astype(np.int64)
     two_sided = 2 * passing > size
     # not touching a kept seed of its own colour
@@ -285,7 +318,27 @@ def stroke_seeds(ridge: np.ndarray, smooth: np.ndarray, features: np.ndarray, de
             touching[comp] = True
     accept = long_enough & one_colour & two_sided & ~touching
     accept[0] = False
-    return accept[comps]
+    keep = accept[comps]
+    # stop short of the ends: an end pixel has nothing of its component one or two
+    # steps on (within a pixel either side) one way or the other along its stroke
+    # (the perpendicular of its narrowest axis); the pixels within STROKE_SEED_W
+    # four-connected steps of one, inside the component, go
+    end = np.zeros((h, w), bool)
+    for i, ((dr, dc), (ar, ac)) in enumerate(zip(_AXES, _ALONG)):
+        on = keep & (axis == i)
+        if not on.any():
+            continue
+        for sgn in (1, -1):
+            cont = np.zeros((h, w), bool)
+            for k in (1, 2):
+                for j in (-1, 0, 1):
+                    q = _shift(comps, 1, sgn * k * ar + j * dr, sgn * k * ac + j * dc, 0)
+                    cont |= q == comps
+            end |= on & ~cont
+    trimmed = end
+    for _ in range(STROKE_SEED_W):
+        trimmed = ndimage.binary_dilation(trimmed, _CROSS, mask=keep)
+    return keep & ~trimmed
 
 
 def _absorb_small(labels: np.ndarray, grad: np.ndarray, min_region: int, rounds: int = 3,
