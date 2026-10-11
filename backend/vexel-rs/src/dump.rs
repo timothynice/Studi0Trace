@@ -13,6 +13,11 @@ fn dir() -> Option<std::path::PathBuf> {
     std::env::var_os("VEXEL_DUMP").map(std::path::PathBuf::from)
 }
 
+/// Whether `VEXEL_DUMP` is set: callers build their dump copies only then.
+pub fn enabled() -> bool {
+    dir().is_some()
+}
+
 /// A label map as text: `h w` then one row per line.
 pub fn labels(name: &str, g: &Grid<i32>) {
     let Some(d) = dir() else { return };

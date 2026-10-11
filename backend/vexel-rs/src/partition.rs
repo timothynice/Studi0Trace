@@ -151,11 +151,12 @@ pub fn ridges_and_valleys(features: &Image, grad: &Grid<f64>, g_low: f64, floor:
     (ridge, valley)
 }
 
-/// Seeds: pixels clear of the ridge band, or valley pixels, that also have a
-/// low gradient. NMS loses ridge pixels at T-junctions, and those gap pixels
-/// still carry a high gradient, so the gradient test keeps neighbouring regions
-/// from leaking into one seed.
-pub fn seed_mask(features: &Image, grad: &Grid<f64>, g_low: f64, g_seed: f64) -> Mask {
+/// (smooth, ridge): the seed mask and the ridge mask it was cut by
+/// (`partition.seed_parts`). Seeds: pixels clear of the ridge band, or valley
+/// pixels, that also have a low gradient. NMS loses ridge pixels at
+/// T-junctions, and those gap pixels still carry a high gradient, so the
+/// gradient test keeps neighbouring regions from leaking into one seed.
+pub fn seed_parts(features: &Image, grad: &Grid<f64>, g_low: f64, g_seed: f64) -> (Mask, Mask) {
     let floor = noise_floor(grad, features, g_low);
     let (ridge, valley) = ridges_and_valleys(features, grad, g_low, &floor);
     let band = dilate_cross(&ridge);
@@ -167,15 +168,205 @@ pub fn seed_mask(features: &Image, grad: &Grid<f64>, g_low: f64, g_seed: f64) ->
         let leaky = near_band.data[i] && (grad.data[i] as f32) >= g_seed_eff;
         out.data[i] = (!band.data[i] && !leaky) || valley.data[i];
     }
-    out
+    (out, ridge)
+}
+
+/// The seed mask alone (`seed_parts`).
+pub fn seed_mask(features: &Image, grad: &Grid<f64>, g_low: f64, g_seed: f64) -> Mask {
+    seed_parts(features, grad, g_low, g_seed).0
+}
+
+/// A thin stroke is seeded as a stroke (`partition.stroke_seeds`, which says
+/// why and how): widest feature and shortest component it admits.
+pub const STROKE_SEED_W: usize = 5;
+pub const STROKE_SEED_LEN: usize = 12;
+/// (dr, dc): the order ties between equally narrow axes break in.
+const AXES: [(isize, isize); 4] = [(0, 1), (1, 0), (1, 1), (1, -1)];
+
+/// Along +(dr, dc) from (r, c): the distance 1..W to the nearest ridge pixel
+/// (0: none within W) and the distance to the first non-ridge pixel on the
+/// image past that ridge's run, within W more (0: none). Off the image counts
+/// as ridge for the second: no sample there (`partition._ridge_reach`).
+fn ridge_reach(ridge: &Mask, r: usize, c: usize, dr: isize, dc: isize) -> (usize, usize) {
+    let at = |k: usize| -> Option<bool> {
+        let rr = r as isize + k as isize * dr;
+        let cc = c as isize + k as isize * dc;
+        if rr < 0 || cc < 0 || rr >= ridge.h as isize || cc >= ridge.w as isize {
+            None
+        } else {
+            Some(ridge.data[rr as usize * ridge.w + cc as usize])
+        }
+    };
+    let Some(dist) = (1..=STROKE_SEED_W).find(|k| at(*k) == Some(true)) else {
+        return (0, 0);
+    };
+    match (dist + 1..=dist + STROKE_SEED_W).find(|k| at(*k) == Some(false)) {
+        Some(k) => (dist, k),
+        None => (dist, 0),
+    }
+}
+
+/// The pixels of every stroke seed (`partition.stroke_seeds`): the non-ridge
+/// pixels between two ridge pixels within `STROKE_SEED_W` along one of four
+/// axes, in 4-connected components that are `STROKE_SEED_LEN` long (pixels
+/// over mean width), one colour (RMS spread under `detail`), a different
+/// colour from the first non-ridge pixel beyond the ridge on both sides by
+/// more than `detail` while those two agree within `detail`, and not touching
+/// a kept seed (a component of `smooth` of `floor` pixels or more) of their
+/// own colour, read off the seed's pixels outside the stroke candidates. Sums
+/// run in raster order in f64, as the Python's do.
+pub fn stroke_seeds(ridge: &Mask, smooth: &Mask, features: &Image, detail: f64, floor: usize) -> Mask {
+    let (h, w) = (ridge.h, ridge.w);
+    let nc = features.c;
+    let d2 = detail * detail;
+    let none = (usize::MAX, usize::MAX);
+    let mut width = vec![0usize; h * w]; // the narrowest axis's width; 0: not between two ridges
+    let mut out = vec![none; h * w]; // the samples beyond the + and - ridges
+    for r in 0..h {
+        for c in 0..w {
+            let i = r * w + c;
+            if ridge.data[i] {
+                continue;
+            }
+            for (dr, dc) in AXES {
+                let (dp, bp) = ridge_reach(ridge, r, c, dr, dc);
+                let (dm, bm) = ridge_reach(ridge, r, c, -dr, -dc);
+                if dp == 0 || dm == 0 {
+                    continue;
+                }
+                let wd = dp + dm - 1;
+                if wd > STROKE_SEED_W || (width[i] != 0 && wd >= width[i]) {
+                    continue;
+                }
+                width[i] = wd;
+                let idx = |k: usize, sr: isize, sc: isize| -> usize {
+                    ((r as isize + k as isize * sr) as usize) * w + (c as isize + k as isize * sc) as usize
+                };
+                out[i] = if bp > 0 && bm > 0 { (idx(bp, dr, dc), idx(bm, -dr, -dc)) } else { none };
+            }
+        }
+    }
+    let cand = Grid { h, w, data: width.iter().map(|v| *v > 0).collect() };
+    if !cand.any() {
+        return cand;
+    }
+    let comps = labels::label_mask(&cand, 1);
+    let n = comps.data.iter().copied().max().unwrap_or(0) as usize + 1;
+    let size = labels::bincount(&comps);
+    let mut wsum = vec![0usize; n];
+    let mut sums = vec![0.0f64; n * nc];
+    for i in 0..h * w {
+        let k = comps.data[i] as usize;
+        if k == 0 {
+            continue;
+        }
+        wsum[k] += width[i];
+        let px = features.px(i);
+        for ch in 0..nc {
+            sums[k * nc + ch] += px[ch];
+        }
+    }
+    let mean = |k: usize, ch: usize| sums[k * nc + ch] / (size[k].max(1) as f64);
+    let mut sq = vec![0.0f64; n];
+    let mut passing = vec![0usize; n];
+    for i in 0..h * w {
+        let k = comps.data[i] as usize;
+        if k == 0 {
+            continue;
+        }
+        let px = features.px(i);
+        let mut dsq = 0.0f64;
+        for ch in 0..nc {
+            let d = px[ch] - mean(k, ch);
+            dsq += d * d;
+        }
+        sq[k] += dsq;
+        let (a, b) = out[i];
+        if a != usize::MAX {
+            let (fa, fb) = (features.px(a), features.px(b));
+            let (mut da, mut db, mut ds) = (0.0f64, 0.0f64, 0.0f64);
+            for ch in 0..nc {
+                da += (px[ch] - fa[ch]) * (px[ch] - fa[ch]);
+                db += (px[ch] - fb[ch]) * (px[ch] - fb[ch]);
+                ds += (fa[ch] - fb[ch]) * (fa[ch] - fb[ch]);
+            }
+            if da > d2 && db > d2 && ds < d2 {
+                passing[k] += 1;
+            }
+        }
+    }
+    // kept seeds: components of `smooth` of `floor` pixels or more. Colour is read
+    // off the pixels outside the stroke candidates (a stroke's own valley line may
+    // join the neighbouring seed in one component and would pull its colour).
+    let kept = labels::label_mask(smooth, 1);
+    let nk = kept.data.iter().copied().max().unwrap_or(0) as usize + 1;
+    let ksize = labels::bincount(&kept);
+    let mut kcount = vec![0usize; nk];
+    let mut ksums = vec![0.0f64; nk * nc];
+    for i in 0..h * w {
+        if !smooth.data[i] || cand.data[i] {
+            continue;
+        }
+        let k = kept.data[i] as usize;
+        kcount[k] += 1;
+        let px = features.px(i);
+        for ch in 0..nc {
+            ksums[k * nc + ch] += px[ch];
+        }
+    }
+    let kmean = |k: usize, ch: usize| ksums[k * nc + ch] / (kcount[k].max(1) as f64);
+    // a component of the stroke's own pixels alone has no other colour to compare
+    let big: Vec<bool> = (0..nk).map(|k| k != 0 && ksize[k] >= floor && kcount[k] > 0).collect();
+    let mut pairs = std::collections::BTreeSet::new();
+    for r in 0..h {
+        for c in 0..w {
+            let i = r * w + c;
+            let k = comps.data[i] as usize;
+            if k == 0 {
+                continue;
+            }
+            for (dr, dc) in [(0isize, 0isize), (0, 1), (0, -1), (1, 0), (-1, 0)] {
+                let (rr, cc) = (r as isize + dr, c as isize + dc);
+                if rr < 0 || cc < 0 || rr >= h as isize || cc >= w as isize {
+                    continue;
+                }
+                let kk = kept.data[rr as usize * w + cc as usize] as usize;
+                if big[kk] {
+                    pairs.insert((k, kk));
+                }
+            }
+        }
+    }
+    let mut touching = vec![false; n];
+    for (k, kk) in pairs {
+        let mut dsq = 0.0f64;
+        for ch in 0..nc {
+            let d = mean(k, ch) - kmean(kk, ch);
+            dsq += d * d;
+        }
+        if dsq < d2 {
+            touching[k] = true;
+        }
+    }
+    let accept: Vec<bool> = (0..n)
+        .map(|k| {
+            k != 0
+                && size[k] * size[k] >= STROKE_SEED_LEN * wsum[k]
+                && sq[k] / (size[k].max(1) as f64) < d2
+                && 2 * passing[k] > size[k]
+                && !touching[k]
+        })
+        .collect();
+    Grid { h, w, data: comps.data.iter().map(|k| accept[*k as usize]).collect() }
 }
 
 /// Flood regions below `min_region` pixels from their neighbours along low gradient.
-fn absorb_small(labels: &Labels, grad: &Grid<f64>, min_region: usize, rounds: usize) -> Labels {
+/// `protected[label]` exempts a label: a stroke seed's basin is a region however small.
+fn absorb_small(labels: &Labels, grad: &Grid<f64>, min_region: usize, rounds: usize, protected: &[bool]) -> Labels {
     let mut cur = labels.clone();
     for _ in 0..rounds {
         let sizes = labels::bincount(&cur);
-        let small: Vec<bool> = sizes.iter().enumerate().map(|(i, s)| i != 0 && *s < min_region).collect();
+        let small: Vec<bool> = sizes.iter().enumerate().map(|(i, s)| i != 0 && *s < min_region && !protected.get(i).copied().unwrap_or(false)).collect();
         if !small.iter().any(|b| *b) {
             break;
         }
@@ -217,13 +408,25 @@ pub const NECK_PIECE: usize = 64;
 /// apart in mean feature colour (`partition.seed_markers`, which says why).
 /// Numbered in raster order of each marker's first pixel; with, per marker
 /// id, the seed component it was split from (0 for one seeded whole).
-pub fn seed_markers(smooth: &Mask, floor: usize, features: &Image, detail: f64, grad: &Grid<f64>) -> (Labels, Vec<i64>) {
-    let mut comps = labels::label_mask(smooth, 1);
+pub fn seed_markers(smooth: &Mask, floor: usize, features: &Image, detail: f64, grad: &Grid<f64>, strokes: Option<&Mask>) -> (Labels, Vec<i64>) {
+    let joined: Mask = match strokes {
+        Some(s) => smooth.or(s),
+        None => smooth.clone(),
+    };
+    let mut comps = labels::label_mask(&joined, 1);
     if comps.data.iter().copied().max().unwrap_or(0) == 0 {
         return (comps, vec![0]);
     }
     let sizes = labels::bincount(&comps);
-    let keep: Vec<bool> = sizes.iter().enumerate().map(|(i, s)| i != 0 && *s >= floor).collect();
+    let mut keep: Vec<bool> = sizes.iter().enumerate().map(|(i, s)| i != 0 && *s >= floor).collect();
+    if let Some(s) = strokes {
+        // a stroke seed is kept whatever its area
+        for (c, is_stroke) in comps.data.iter().zip(s.data.iter()) {
+            if *is_stroke && *c > 0 {
+                keep[*c as usize] = true;
+            }
+        }
+    }
     for v in comps.data.iter_mut() {
         if *v > 0 && !keep[*v as usize] {
             *v = 0;
@@ -436,11 +639,26 @@ pub fn rejoin_ramps(l: &Labels, markers: &Labels, origin: &[i64], grad: &Grid<f6
 /// Watershed on the discontinuity map, seeded by the connected smooth areas.
 pub fn initial_labels(grad: &Grid<f64>, features: &Image, min_region: usize, g_low: f64, detail: f64) -> Labels {
     let mut t = Timer::new();
-    let smooth = seed_mask(features, grad, g_low, 8.0);
+    let (smooth, ridge) = seed_parts(features, grad, g_low, 8.0);
     t.lap("    labels/seed_mask");
-    crate::dump::labels("seed_mask", &Grid { h: smooth.h, w: smooth.w, data: smooth.data.iter().map(|b| *b as i32).collect() });
-    let (mut markers, mut origin) = seed_markers(&smooth, min_region.max(2), features, detail, grad);
-    crate::dump::labels("seed_markers", &markers);
+    let strokes = stroke_seeds(&ridge, &smooth, features, detail, min_region.max(2));
+    t.lap("    labels/stroke_seeds");
+    if crate::dump::enabled() {
+        let ints = |m: &Mask| Grid { h: m.h, w: m.w, data: m.data.iter().map(|b| *b as i32).collect::<Vec<i32>>() };
+        crate::dump::labels("seed_mask", &ints(&smooth));
+        crate::dump::labels("stroke_seeds", &ints(&strokes));
+    }
+    let (mut markers, mut origin) = seed_markers(&smooth, min_region.max(2), features, detail, grad, Some(&strokes));
+    if crate::dump::enabled() {
+        crate::dump::labels("seed_markers", &markers);
+    }
+    // a stroke seed's basin is a region however small: exempt from the small-region absorb
+    let mut protected = vec![false; markers.data.iter().copied().max().unwrap_or(0) as usize + 1];
+    for (m, s) in markers.data.iter().zip(strokes.data.iter()) {
+        if *s && *m > 0 {
+            protected[*m as usize] = true;
+        }
+    }
     t.lap("    labels/cc");
     if markers.data.iter().copied().max().unwrap_or(0) == 0 {
         // No smooth area at all: seed from the local minima of the gradient so
@@ -456,11 +674,149 @@ pub fn initial_labels(grad: &Grid<f64>, features: &Image, min_region: usize, g_l
             return Grid::filled(grad.h, grad.w, 1);
         }
         origin = vec![0; markers.data.iter().copied().max().unwrap_or(0) as usize + 1];
+        protected = Vec::new();
     }
     let l = watershed(grad, &markers);
     t.lap("    labels/watershed");
     let l = rejoin_ramps(&l, &markers, &origin, grad, features);
-    let l = absorb_small(&l, grad, min_region, 3);
+    let l = absorb_small(&l, grad, min_region, 3, &protected);
     t.lap("    labels/absorb_small");
     labels::relabel_sequential(&l).0
+}
+
+#[cfg(test)]
+mod stroke_tests {
+    use super::*;
+
+    const FLOOR: usize = 40;
+
+    /// `tests/test_vexel_partition.py::_stroke_scene`: a 3 px stroke on rows 18-20
+    /// (columns c0..c1-1) with ridge pixels round it; the seed mask is everything
+    /// more than one pixel from a ridge.
+    fn scene(c0: usize, c1: usize, ink: f64, above: f64, below: f64) -> (Mask, Mask, Image) {
+        let (h, w) = (40, 40);
+        let mut f = Image::new(h, w, 4);
+        for r in 0..h {
+            for c in 0..w {
+                let px = f.px_mut(r * w + c);
+                px[0] = if r < 19 { above } else { below };
+                px[3] = 100.0;
+            }
+        }
+        for r in 18..21 {
+            for c in c0..c1 {
+                f.px_mut(r * w + c)[0] = ink;
+            }
+        }
+        let mut ridge = Grid::filled(h, w, false);
+        for c in c0 - 1..=c1 {
+            ridge.set(17, c, true);
+            ridge.set(21, c, true);
+        }
+        for r in 17..22 {
+            ridge.set(r, c0 - 1, true);
+            ridge.set(r, c1, true);
+        }
+        let smooth = dilate_cross(&ridge).not();
+        (ridge, smooth, f)
+    }
+
+    /// `_with_body`: a body of L* `colour` at rows 10-29, columns 36-39, joined
+    /// to the stroke's right end (its end ridge gone, the body's edges ridge).
+    fn with_body(colour: f64) -> (Mask, Mask, Image) {
+        let (mut ridge, _, mut f) = scene(5, 36, 20.0, 95.0, 95.0);
+        for r in 10..30 {
+            for c in 36..40 {
+                f.px_mut(r * 40 + c)[0] = colour;
+            }
+        }
+        for r in 17..22 {
+            ridge.set(r, 36, false);
+        }
+        for c in 35..40 {
+            ridge.set(9, c, true);
+            ridge.set(30, c, true);
+        }
+        for r in (10..17).chain(22..30) {
+            ridge.set(r, 35, true);
+        }
+        let smooth = dilate_cross(&ridge).not();
+        (ridge, smooth, f)
+    }
+
+    #[test]
+    fn a_three_pixel_stroke_is_a_stroke_seed() {
+        let (ridge, smooth, f) = scene(5, 36, 20.0, 95.0, 95.0);
+        let s = stroke_seeds(&ridge, &smooth, &f, 6.0, FLOOR);
+        assert_eq!(s.count(), 3 * 31);
+        assert!((18..21).all(|r| (5..36).all(|c| *s.get(r, c))));
+    }
+
+    #[test]
+    fn a_short_stroke_and_a_two_ground_band_are_not() {
+        let (ridge, smooth, f) = scene(5, 11, 20.0, 95.0, 95.0);
+        assert_eq!(stroke_seeds(&ridge, &smooth, &f, 6.0, FLOOR).count(), 0);
+        let (ridge, smooth, f) = scene(5, 36, 20.0, 95.0, 50.0);
+        assert_eq!(stroke_seeds(&ridge, &smooth, &f, 6.0, FLOOR).count(), 0);
+    }
+
+    #[test]
+    fn a_stroke_touching_a_seed_of_its_colour_is_left_to_it() {
+        let (ridge, smooth, f) = with_body(20.0);
+        assert_eq!(stroke_seeds(&ridge, &smooth, &f, 6.0, FLOOR).count(), 0);
+        let (ridge, smooth, f) = with_body(60.0);
+        let s = stroke_seeds(&ridge, &smooth, &f, 6.0, FLOOR);
+        assert!((18..21).all(|r| (5..36).all(|c| *s.get(r, c))));
+    }
+    /// Rows `r0..` of a scene, as `test_the_beyond_sample_off_the_image_counts_as_ridge`
+    /// slices them, with `pad` extra rows on top (ground L*, no ridge).
+    fn crop_rows(ridge: &Mask, f: &Image, r0: usize, pad: usize) -> (Mask, Mask, Image) {
+        let w = ridge.w;
+        let h = ridge.h - r0 + pad;
+        let mut r = Grid::filled(h, w, false);
+        let mut im = Image::new(h, w, f.c);
+        for rr in 0..h {
+            let src = if rr < pad { r0 } else { r0 + rr - pad };
+            for c in 0..w {
+                if rr >= pad {
+                    r.set(rr, c, *ridge.get(src, c));
+                }
+                let px = im.px_mut(rr * w + c);
+                px.copy_from_slice(f.px(src * w + c));
+                if rr < pad {
+                    px[0] = 95.0;
+                }
+            }
+        }
+        let s = dilate_cross(&r).not();
+        (r, s, im)
+    }
+
+    #[test]
+    fn a_ridge_on_the_image_edge_has_no_sample_beyond_it() {
+        let (ridge, _, f) = scene(5, 36, 20.0, 95.0, 95.0);
+        // the ridge is the image's top row: the sample beyond it is off the image, so no seed
+        let (r, s, im) = crop_rows(&ridge, &f, 17, 0);
+        assert!(r.data[..40].iter().any(|b| *b));
+        assert_eq!(stroke_seeds(&r, &s, &im, 6.0, FLOOR).count(), 0);
+        // one ground row above the ridge: the same stroke has a sample beyond it and is seeded
+        let (r, s, im) = crop_rows(&ridge, &f, 17, 1);
+        assert!(r.data[40..80].iter().any(|b| *b) && !r.data[..40].iter().any(|b| *b));
+        let out = stroke_seeds(&r, &s, &im, 6.0, FLOOR);
+        assert!((2..5).all(|row| (5..36).all(|c| *out.get(row, c))));
+    }
+
+    #[test]
+    fn a_tiny_image_has_no_stroke_seeds() {
+        let mut f = Image::new(4, 4, 4);
+        for i in 0..16 {
+            f.px_mut(i)[3] = 100.0;
+        }
+        let mut ridge = Grid::filled(4, 4, false);
+        for c in 0..4 {
+            ridge.set(1, c, true);
+        }
+        let smooth = ridge.not();
+        assert_eq!(stroke_seeds(&ridge, &smooth, &f, 6.0, FLOOR).count(), 0);
+    }
 }

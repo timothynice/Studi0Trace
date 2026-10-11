@@ -322,6 +322,15 @@ mod python {
     }
 
     #[pyfunction]
+    #[pyo3(signature = (rgba, h, w, min_region, detail=6.0))]
+    fn _stage_stroke_seeds(rgba: Vec<u8>, h: usize, w: usize, min_region: usize, detail: f64) -> Vec<i32> {
+        let prep = prepare::prepare(&rgba, h, w);
+        let grad = partition::discontinuity(&prep.features, 0.7);
+        let (smooth, ridge) = partition::seed_parts(&prep.features, &grad, 1.5, 8.0);
+        partition::stroke_seeds(&ridge, &smooth, &prep.features, detail, min_region.max(2)).data.iter().map(|b| *b as i32).collect()
+    }
+
+    #[pyfunction]
     fn _stage_ridge(rgba: Vec<u8>, h: usize, w: usize) -> Vec<i32> {
         let prep = prepare::prepare(&rgba, h, w);
         let grad = partition::discontinuity(&prep.features, 0.7);
@@ -828,6 +837,7 @@ mod python {
         m.add_function(wrap_pyfunction!(_stage_edge_mix, m)?)?;
         m.add_function(wrap_pyfunction!(_stage_posterize, m)?)?;
         m.add_function(wrap_pyfunction!(_stage_seed, m)?)?;
+        m.add_function(wrap_pyfunction!(_stage_stroke_seeds, m)?)?;
         m.add_function(wrap_pyfunction!(_rng_choice, m)?)?;
         m.add_function(wrap_pyfunction!(_fit_fill, m)?)?;
         m.add_function(wrap_pyfunction!(_lstsq, m)?)?;
