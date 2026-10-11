@@ -322,3 +322,49 @@ def test_seed_parts_agrees_with_seed_mask():
     smooth, ridge = seed_parts(p.features, grad, 1.5)
     assert np.array_equal(smooth, seed_mask(p.features, grad, 1.5))
     assert ridge.dtype == bool and ridge.shape == smooth.shape and ridge.any()
+
+
+def _ring_png(stroke: float, size: int = 96, ground: str | None = "#FFFFFF") -> bytes:
+    bg = f'<rect width="{size}" height="{size}" fill="{ground}"/>' if ground else ""
+    svg = (f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {size} {size}">{bg}'
+           f'<circle cx="48" cy="48" r="24" fill="none" stroke="#1F2A44" stroke-width="{stroke}"/>'
+           f'<rect x="10" y="84" width="60" height="{stroke}" fill="#1F2A44"/></svg>')
+    return bytes(resvg_py.svg_to_bytes(svg_string=svg, width=size, height=size))
+
+
+def _labels_of(png: bytes, **kw) -> np.ndarray:
+    a = np.ascontiguousarray(np.asarray(Image.open(io.BytesIO(png)).convert("RGBA")))
+    p = prepare(a)
+    return initial_labels(discontinuity(p.features), p.features, **kw)
+
+
+def test_a_three_pixel_ring_keeps_its_seed_and_its_counter():
+    labels = _labels_of(_ring_png(3.0), min_region=16, detail=6.0)
+    ring, inside, outside = labels[48, 24], labels[48, 48], labels[4, 4]
+    assert ring not in (inside, outside) and inside != outside
+    assert labels[48, 72] == ring and labels[24, 48] == ring, "one label round the ring"
+
+
+def test_a_thin_bar_survives_absorb_small():
+    # the bar is 60 × 3 = 180 px, under a min_region of 200: without the protection it is flooded by the ground
+    labels = _labels_of(_ring_png(3.0), min_region=200, detail=6.0)
+    assert labels[85, 40] != labels[4, 4]
+    assert labels[85, 40] == labels[85, 20] == labels[85, 60]
+
+
+def test_a_ring_on_a_transparent_canvas_keeps_its_seed():
+    labels = _labels_of(_ring_png(3.0, ground=None), min_region=16, detail=6.0)
+    ring, inside, outside = labels[48, 24], labels[48, 48], labels[4, 4]
+    assert ring not in (inside, outside)
+
+
+def test_seed_markers_keep_a_small_component_that_holds_a_stroke_pixel():
+    smooth = np.zeros((20, 40), bool)
+    smooth[8:11, 5:35] = True  # 90 px: over a floor of 6, under 100
+    feats = np.zeros((20, 40, 4), np.float32)
+    feats[..., 3] = 100.0
+    strokes = smooth.copy()
+    m, _ = seed_markers(smooth, 100, feats, 6.0, np.zeros((20, 40), np.float32))
+    assert m.max() == 0
+    m, _ = seed_markers(smooth, 100, feats, 6.0, np.zeros((20, 40), np.float32), strokes)
+    assert m.max() == 1 and np.array_equal(m > 0, smooth)

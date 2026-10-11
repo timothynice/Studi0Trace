@@ -288,12 +288,18 @@ def stroke_seeds(ridge: np.ndarray, smooth: np.ndarray, features: np.ndarray, de
     return accept[comps]
 
 
-def _absorb_small(labels: np.ndarray, grad: np.ndarray, min_region: int, rounds: int = 3) -> np.ndarray:
-    """Flood regions below `min_region` pixels from their neighbours along low gradient."""
+def _absorb_small(labels: np.ndarray, grad: np.ndarray, min_region: int, rounds: int = 3,
+                  protected: np.ndarray | None = None) -> np.ndarray:
+    """Flood regions below `min_region` pixels from their neighbours along low gradient.
+
+    `protected[label]` exempts a label: a stroke seed's basin is a region however small.
+    """
     for _ in range(rounds):
         sizes = np.bincount(labels.ravel())
         small = sizes < min_region
         small[0] = False
+        if protected is not None:
+            small[:protected.size] &= ~protected[:small.size]
         if not small.any():
             break
         markers = labels.copy()
@@ -347,9 +353,12 @@ NECK_PIECE = 64
 
 
 def seed_markers(smooth: np.ndarray, floor: int, features: np.ndarray | None = None,
-                 detail: float = 6.0, grad: np.ndarray | None = None) -> tuple[np.ndarray, np.ndarray]:
+                 detail: float = 6.0, grad: np.ndarray | None = None,
+                 strokes: np.ndarray | None = None) -> tuple[np.ndarray, np.ndarray]:
     """The watershed's markers: the seed mask's connected components of at least
     `floor` pixels, each split where a neck joins areas of different colour.
+    `strokes` (`stroke_seeds`) joins the mask, and a component holding a stroke
+    pixel is kept whatever its size.
 
     A component is one basin, so a strip of seed across a gap in a ridge makes
     the two sides one region for good: nothing downstream splits a region. The
@@ -383,11 +392,13 @@ def seed_markers(smooth: np.ndarray, floor: int, features: np.ndarray | None = N
     first pixel, and per marker id the seed component it was split from (0 for
     a component seeded whole).
     """
-    comps = cc_label(smooth, connectivity=1)
+    comps = cc_label(smooth if strokes is None else (smooth | strokes), connectivity=1)
     if comps.max() == 0:
         return comps.astype(np.int32), np.zeros(1, np.int64)
     sizes = np.bincount(comps.ravel())
     keep = sizes >= floor
+    if strokes is not None:
+        keep[np.unique(comps[strokes])] = True  # a stroke seed is kept whatever its area
     keep[0] = False
     comps[~keep[comps]] = 0
     if features is None:
@@ -556,12 +567,27 @@ def initial_labels(grad: np.ndarray, features: np.ndarray | None = None, min_reg
     With `features` the seeds come from ridge/valley analysis (steep smooth ramps
     and thin strokes keep their seeds) and are split at necks between areas more
     than `detail` apart (`seed_markers`); without them the legacy `grad < g_low`
-    threshold is used. Returns int32 labels 1..K covering every pixel.
+    threshold is used. Stroke seeds (`stroke_seeds`) join the seed mask, are kept
+    whatever their size and are exempt from the small-region absorb. Returns
+    int32 labels 1..K covering every pixel.
     """
-    smooth = seed_mask(features, grad, g_low) if features is not None else grad < g_low
-    dump.labels("seed_mask", smooth.astype(np.int32))
-    markers, origin = seed_markers(smooth, max(min_region, 2), features, detail, grad)
-    dump.labels("seed_markers", markers)
+    if features is not None:
+        smooth, ridge = seed_parts(features, grad, g_low)
+        strokes = stroke_seeds(ridge, smooth, features, detail, max(min_region, 2))
+    else:
+        smooth, strokes = grad < g_low, None
+    if dump.enabled():
+        dump.labels("seed_mask", smooth.astype(np.int32))
+        if strokes is not None:
+            dump.labels("stroke_seeds", strokes.astype(np.int32))
+    markers, origin = seed_markers(smooth, max(min_region, 2), features, detail, grad, strokes)
+    if dump.enabled():
+        dump.labels("seed_markers", markers)
+    protected = None
+    if strokes is not None and strokes.any() and markers.max() > 0:
+        protected = np.zeros(int(markers.max()) + 1, bool)
+        protected[np.unique(markers[strokes])] = True
+        protected[0] = False
     if markers.max() == 0:
         # No smooth area at all (tiny or extremely noisy image): seed from the
         # local minima of the gradient instead so watershed still has basins.
@@ -572,6 +598,6 @@ def initial_labels(grad: np.ndarray, features: np.ndarray | None = None, min_reg
         origin = np.zeros(int(markers.max()) + 1, np.int64)
     labels = watershed(grad, markers)
     labels = rejoin_ramps(labels, markers, origin, grad, features)
-    labels = _absorb_small(labels, grad, min_region)
+    labels = _absorb_small(labels, grad, min_region, protected=protected)
     labels, _, _ = relabel_sequential(labels)
     return labels.astype(np.int32)

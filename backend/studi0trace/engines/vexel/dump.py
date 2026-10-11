@@ -20,6 +20,11 @@ def _dir() -> pathlib.Path | None:
     return pathlib.Path(where) if where else None
 
 
+def enabled() -> bool:
+    """Whether `VEXEL_DUMP` names a directory: callers build a dump's copies only then."""
+    return _dir() is not None
+
+
 def labels(name: str, grid: np.ndarray) -> None:
     """A label map as text: `h w` then one row per line."""
     d = _dir()
