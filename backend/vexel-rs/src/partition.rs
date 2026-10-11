@@ -438,7 +438,9 @@ pub fn initial_labels(grad: &Grid<f64>, features: &Image, min_region: usize, g_l
     let mut t = Timer::new();
     let smooth = seed_mask(features, grad, g_low, 8.0);
     t.lap("    labels/seed_mask");
+    crate::dump::labels("seed_mask", &Grid { h: smooth.h, w: smooth.w, data: smooth.data.iter().map(|b| *b as i32).collect() });
     let (mut markers, mut origin) = seed_markers(&smooth, min_region.max(2), features, detail, grad);
+    crate::dump::labels("seed_markers", &markers);
     t.lap("    labels/cc");
     if markers.data.iter().copied().max().unwrap_or(0) == 0 {
         // No smooth area at all: seed from the local minima of the gradient so

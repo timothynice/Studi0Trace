@@ -20,6 +20,8 @@ from skimage.filters import scharr, scharr_h, scharr_v
 from skimage.measure import label as cc_label
 from skimage.segmentation import relabel_sequential, watershed
 
+from studi0trace.engines.vexel import dump
+
 _CROSS = ndimage.generate_binary_structure(2, 1)
 
 
@@ -416,7 +418,9 @@ def initial_labels(grad: np.ndarray, features: np.ndarray | None = None, min_reg
     threshold is used. Returns int32 labels 1..K covering every pixel.
     """
     smooth = seed_mask(features, grad, g_low) if features is not None else grad < g_low
+    dump.labels("seed_mask", smooth.astype(np.int32))
     markers, origin = seed_markers(smooth, max(min_region, 2), features, detail, grad)
+    dump.labels("seed_markers", markers)
     if markers.max() == 0:
         # No smooth area at all (tiny or extremely noisy image): seed from the
         # local minima of the gradient instead so watershed still has basins.
