@@ -159,3 +159,20 @@ test("text-line shapes take the indices after every traced shape, so hiding surv
   expect(out).toContain("#111111");
   expect(out).not.toContain("#222222");
 });
+
+test("a text line set inside an upsampled trace's scaled group keeps the last index and reads in the image's pixels", () => {
+  const markup = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><g transform="scale(0.5)"><rect width="8" height="8" fill="#111111"/><path d="M0 0h2v2z" fill="#000000" data-line="a" data-label="Hi" transform="scale(2)"/><rect x="10" width="8" height="8" fill="#222222"/></g></svg>`;
+  const doc = parseSvg(markup)!;
+  expect(doc.shapes.map((s) => [s.fill, s.line])).toEqual([
+    ["#111111", undefined],
+    ["#222222", undefined],
+    ["#000000", "a"],
+  ]);
+  expect(doc.shapes[2].bounds).toEqual([0, 0, 2, 2]);
+  expect(doc.shapes[1].bounds).toEqual([5, 0, 4, 4]);
+  expect(doc.shapes[2].outline).toContain('<g transform="scale(0.5)">');
+  expect(doc.shapes[2].outline).toContain('transform="scale(2)"');
+  const out = doc.render(new Set([2]));
+  expect(out).not.toContain('data-line="a"');
+  expect(out).toContain("#222222");
+});

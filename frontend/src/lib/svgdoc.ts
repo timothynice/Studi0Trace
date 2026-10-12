@@ -80,10 +80,10 @@ export function pathAnchors(d: string): [number, number][] {
 }
 
 
-type Matrix = [number, number, number, number, number, number]; // a b c d e f
-const IDENTITY: Matrix = [1, 0, 0, 1, 0, 0];
+export type Matrix = [number, number, number, number, number, number]; // a b c d e f
+export const IDENTITY: Matrix = [1, 0, 0, 1, 0, 0];
 
-function multiply(m: Matrix, n: Matrix): Matrix {
+export function multiply(m: Matrix, n: Matrix): Matrix {
   return [
     m[0] * n[0] + m[2] * n[1],
     m[1] * n[0] + m[3] * n[1],

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { TextLine, TextPlan } from "@/platform/types";
+import { parseSvg } from "./svgdoc";
 import { composeSvg } from "./textsvg";
 
 const base = (shapes: string) => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 60">${shapes}</svg>`;
@@ -72,11 +73,41 @@ describe("composeSvg", () => {
     expect(ids.indexOf("A")).toBeLessThan(2); // before the gold rect
   });
 
-  it("appends on an upsampled trace", () => {
-    const up = base(`<g transform="scale(0.5)">${BACKDROP}${GOLD}</g>`);
-    const out = compose(up, plan(line("a", box, [GOLD_RGB])));
+  // Vexel's trace at 2×: the shapes in twice the image's coordinates, inside a group that scales them back
+  const BACKDROP2 = '<rect width="200" height="120" fill="#ffffff"/>';
+  const GOLD2 = '<rect x="10" y="30" width="80" height="40" fill="#d49c17"/>';
+  const FAR2 = '<rect x="120" y="80" width="40" height="20" fill="#d49c17"/>';
+  const at2x = (shapes: string) => base(`<g transform="scale(0.5)">${shapes}</g>`);
+  const inGroup = (svg: string) => Array.from(children(svg)[0].children);
+
+  it("at 2×, a line goes inside the scaled group before the shape over it, drawn back at the image's coordinates", () => {
+    const out = compose(at2x(BACKDROP2 + GOLD2 + FAR2), plan(line("a", box, [GOLD_RGB])), true);
+    expect(children(out).map((k) => k.tagName)).toEqual(["g"]);
+    const kids = inGroup(out);
+    expect(kids.map((k) => k.getAttribute("data-line") ? `${k.tagName}:${k.getAttribute("data-line")}` : k.getAttribute("fill"))).toEqual(["#ffffff", "path:a", "text:a", "#d49c17", "#d49c17"]);
+    // the inverse of the group's scale on the glyphs and on the hidden text
+    expect(kids[1].getAttribute("transform")).toBe("scale(2)");
+    expect(kids[2].getAttribute("transform")).toBe("scale(2)");
+    // the layer list reads it in source pixels, after every traced shape
+    const doc = parseSvg(out)!;
+    expect(doc.shapes.map((s) => s.line ?? null)).toEqual([null, null, null, "a"]);
+    expect(doc.shapes[3].bounds).toEqual([10, 20, 20, 10]);
+    expect(doc.shapes[1].bounds).toEqual([5, 15, 40, 20]);
+  });
+
+  it("at 2×, a line over nothing of its occluders' colours is appended at the image's coordinates", () => {
+    const out = compose(at2x(BACKDROP2 + FAR2), plan(line("a", box, [GOLD_RGB])));
     const kids = children(out);
     expect(kids.map((k) => k.tagName)).toEqual(["g", "path"]);
+    expect(kids[1].hasAttribute("transform")).toBe(false);
+  });
+
+  it("at 2×, a lower line goes beneath an earlier one set over the same shape: B, A, S inside the group", () => {
+    const a = line("A", box, [GOLD_RGB], [10, 20, 30]);
+    const b = line("B", [[10, 25], [30, 25], [30, 35], [10, 35]], [GOLD_RGB, [10, 20, 30]]);
+    const kids = inGroup(compose(at2x(BACKDROP2 + GOLD2), plan(a, b)));
+    expect(kids.map((k) => k.getAttribute("data-line") ?? k.getAttribute("fill"))).toEqual(["#ffffff", "B", "A", "#d49c17"]);
+    expect(kids[1].getAttribute("transform")).toBe("scale(2)");
   });
 
   it("leaves the hidden text out when the setting is off, in when on", () => {
