@@ -71,8 +71,12 @@ fidelity bench. Read `README.md` first — it has the run/test/API reference.
   `fit.rs` (on `glyphs.rs`'s shaping and outlines) fits size, baseline, tracking and per-glyph nudges → the matched
   lines are painted out of what the trace sees (`plan.rs`; spec `2026-10-10-text-toggles-layering-design.md` from here)
   → `vectorize(…, mask)` names the lines to paint out, `Plans::painted_for` builds (and caches) that painted PNG and
-  the worker traces it (an empty mask traces the original bytes). Rust writes no group: every candidate carries its
-  own `fit`, outline `path` and hidden `text` (`compose.rs`), and the frontend composes (`lib/textsvg.ts`
+  the worker traces it (an empty mask traces the original bytes). Small text the re-setter does not compose (declined or
+  switched-off lines under 40 px) makes the app trace at 2× (`upsample: always`, `smallTextPresent` in `lib/text.ts`,
+  the Trace at 2× switch); the decision is each mask's (`upscaledFor`: the lines outside the mask), an Auto run at 2× is
+  keyed `auto2x|mask` and sent `{upsample: "always"}`, and a preset's or the pick's params carry it in their key; with
+  `auto`, explicitly given parameters override every Auto candidate in the core and the Python API alike. Rust writes
+  no group: every candidate carries its own `fit`, outline `path` and hidden `text` (`compose.rs`), and the frontend composes (`lib/textsvg.ts`
   `composeSvg(base, {plan, enabled, hiddenText})`), inserting each enabled line's path before the first traced shape
   that overlaps it and is painted in one of the line's `occluders` (`ink.rs`: the colours of what lay over the letters
   in the source, so the gold script "Awaits" stays over ADVENTURE), else at the end, and a placed line is an occluder

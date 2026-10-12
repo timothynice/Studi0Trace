@@ -771,3 +771,29 @@ fn the_error_body_is_the_two_fields_the_frontend_reads() {
     assert_eq!(serde_json::to_string(&b).unwrap(), r#"{"code":"c","message":"m"}"#);
     assert_eq!(b.to_string(), "c: m");
 }
+
+/// What Trace at 2× costs on real logos, through the call the app's trace worker makes: Auto, and the defaults
+/// (Balanced) alone, at 1× and at 2× (`{"upsample": "always"}`), wall time per image. By hand, with the images (not in git) in a directory:
+/// `STUDI0TRACE_TEXT_EXAMPLES=<dir with 1.png 2.png 3.png> cargo test -p studi0trace-core --release --test api -- --ignored --nocapture trace_at_2x_timing`
+#[test]
+#[ignore]
+fn trace_at_2x_timing() {
+    let dir = std::env::var("STUDI0TRACE_TEXT_EXAMPLES").expect("STUDI0TRACE_TEXT_EXAMPLES names the directory of 1.png 2.png 3.png");
+    let core = Core::new();
+    for name in ["1.png", "2.png", "3.png"] {
+        let bytes = std::fs::read(std::path::Path::new(&dir).join(name)).unwrap_or_else(|e| panic!("{name}: {e}"));
+        let up = core.upload(&bytes).unwrap();
+        let id = up["image_id"].as_str().unwrap();
+        for auto in [true, false] {
+            let mut seconds = Vec::new();
+            for parameters in [json!({}), json!({"upsample": "always"})] {
+                let start = std::time::Instant::now();
+                let v = core.vectorize(id, &parameters, auto).unwrap();
+                seconds.push(start.elapsed().as_secs_f64());
+                assert!(v["results"]["vexel"]["svg"].is_string(), "{name} {parameters}");
+            }
+            let what = if auto { "auto" } else { "balanced" };
+            println!("{name} {}x{}: {what} 1x {:.1} s, 2x {:.1} s ({:.1}x)", up["width"], up["height"], seconds[0], seconds[1], seconds[1] / seconds[0]);
+        }
+    }
+}
