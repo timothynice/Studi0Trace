@@ -123,13 +123,17 @@ async def _run_engine(engine: Engine, image: TraceInput, params, out: dict[str, 
         out[engine.id] = EngineResult(error=_failure(exc))
 
 
-async def _run_auto(engine: Engine, image: TraceInput, out: dict[str, EngineResult],
+async def _run_auto(engine: Engine, image: TraceInput, given, out: dict[str, EngineResult],
                     out_auto: dict[str, AutoResult], out_params: dict[str, dict]) -> None:
     """Trace with every Auto candidate at once, score each against the source,
     pick one (studi0trace.auto), and answer with all of them, so that the app
     can show any candidate without tracing again. A candidate that fails is
-    reported and left out of the choice; it never fails the request."""
+    reported and left out of the choice; it never fails the request.
+
+    The parameters the request named (`given`'s fields set) override every
+    candidate's own, as validated; the others stay the preset's."""
     presets = auto_pick.candidates(engine.id)
+    override = given.model_dump(include=given.model_fields_set)
     cands = [AutoCandidate(preset=p.id, label=p.label) for p in presets]
     scores: dict[str, dict] = {}
     ref: dict[str, object] = {}
@@ -145,7 +149,7 @@ async def _run_auto(engine: Engine, image: TraceInput, out: dict[str, EngineResu
 
     async def run(preset, cand: AutoCandidate) -> None:
         try:
-            params = engine.Params.model_validate(preset.params)
+            params = engine.Params.model_validate({**preset.params, **override})
             cand.parameters = params.model_dump()
             result = await anyio.to_thread.run_sync(engine.trace, image, params)
         except Exception as exc:  # noqa: BLE001 - one candidate failing must not fail the request
@@ -198,7 +202,8 @@ async def vectorize(
     """Trace one image with each selected engine.
 
     With `auto=true`, every selected engine that has Auto candidates (Vexel)
-    is traced once per candidate preset instead of with `parameters`, and the
+    is traced once per candidate preset, with the keys `parameters` names
+    laid over each preset's own, and the
     response's `auto` holds every candidate's trace and scores and the one
     chosen, which is also that engine's entry in `results`."""
     selected = _select_engines(engines)
@@ -224,7 +229,7 @@ async def vectorize(
     async with anyio.create_task_group() as tg:
         for engine in selected:
             if engine.id in auto_engines:
-                tg.start_soon(_run_auto, engine, image, results, auto_results, used)
+                tg.start_soon(_run_auto, engine, image, params[engine.id], results, auto_results, used)
             else:
                 tg.start_soon(_run_engine, engine, image, params[engine.id], results)
 

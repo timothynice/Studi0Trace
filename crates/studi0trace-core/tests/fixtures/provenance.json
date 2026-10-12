@@ -1,7 +1,7 @@
 {
  "exporters": {
   "api": {
-   "commit": "930737dede588ac9550fe0c7181ddc73b0a15d1c",
+   "commit": "2a61c639d76aa8ac4892d4fc2ee61279d7cadb27",
    "environment": {
     "Pillow": "12.3.0",
     "machine": "arm64",
@@ -13,7 +13,7 @@
     "system": "Darwin",
     "vexel_backend": "rust"
    },
-   "sources_differ_from_commit": false
+   "sources_differ_from_commit": true
   },
   "auto": {
    "commit": "930737dede588ac9550fe0c7181ddc73b0a15d1c",

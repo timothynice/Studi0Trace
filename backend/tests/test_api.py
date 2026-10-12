@@ -363,6 +363,26 @@ def test_auto_still_validates_parameters(client):
     assert r.headers["access-control-allow-origin"] == ORIGIN
 
 
+def test_with_auto_the_parameters_given_override_every_candidate(client):
+    # the app's Trace at 2x: Auto still picks among its presets, each traced at twice the size
+    from studi0trace.engines.vexel.engine import VexelParams
+
+    body = upload(client, two_colour_image(), engines="vexel", auto="true",
+                  parameters=json.dumps({"vexel": {"upsample": "always"}})).json()
+    auto = body["auto"]["vexel"]
+    presets = auto_pick.candidates("vexel")
+    assert [c["preset"] for c in auto["candidates"]] == [p.id for p in presets]
+    for c, preset in zip(auto["candidates"], presets):
+        own = VexelParams.model_validate(preset.params).model_dump()
+        assert c["parameters"] == {**own, "upsample": "always"}, preset.id
+        assert "scale(0.5)" in c["svg"], preset.id
+    assert body["parameters_used"]["vexel"]["upsample"] == "always"
+
+    plain = upload(client, two_colour_image(), engines="vexel", auto="true").json()
+    for c, preset in zip(plain["auto"]["vexel"]["candidates"], presets):
+        assert c["parameters"] == VexelParams.model_validate(preset.params).model_dump(), preset.id
+
+
 def test_presets_lead_with_auto_and_say_what_auto_tries(client):
     body = client.get("/presets").json()
     assert body[0]["id"] == "auto" and body[0]["kind"] == "auto"

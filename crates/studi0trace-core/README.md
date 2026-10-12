@@ -26,7 +26,10 @@ let out = core.vectorize(id, &parameters, auto)?;     // POST /vectorize
 Every call returns a `serde_json::Value` shaped and ordered as the FastAPI
 response is (field names, key order, error `code`s). A refusal is an `ApiError`:
 `status` is the HTTP status FastAPI would have sent and `response_body()` the
-body (`{"detail": ...}`). `Core` is `Send + Sync`; hold it in an `Arc`.
+body (`{"detail": ...}`). `Core` is `Send + Sync`; hold it in an `Arc`. With
+`auto`, the parameters given explicitly override every candidate's (the keys the
+`parameters` object names, as validated; the others stay the preset's), as the
+Python's `_run_auto` lays them over each preset: `{"upsample": "always"}` is Auto at 2×.
 
 Try it without writing any:
 

@@ -22,7 +22,8 @@
 //! `parameters` is the value of the `vexel` key of the request's `parameters` JSON (the route
 //! reads `all_params.get(engine.id) or {}`): a falsy value (`null`, `false`, `0`, `""`, `[]`,
 //! `{}`) is the defaults, and anything else that is not an object is refused at `vexel`
-//! (`model_type`). The parameters are checked first, Auto or not, and before the upload is
+//! (`model_type`). With `auto`, the keys it names override every candidate preset's own
+//! (`_run_auto` lays `model_fields_set` over each preset). The parameters are checked first, Auto or not, and before the upload is
 //! looked up, as the route does: a bad value with an unknown image is a 422, not a 404. The
 //! other failures of the route (`bad_parameters`, `unknown_engine`, `auto_unavailable`) are
 //! about a request body to parse, an engine to pick and a preset list that cannot be empty;
@@ -416,8 +417,9 @@ impl Core {
 
     /// `POST /vectorize` for the engine `vexel`, with the upload `image_id` and the engine's
     /// `parameters` (see the module documentation). With `auto`, every candidate preset is
-    /// traced and scored and the pick is also `results.vexel`; `parameters` is then validated
-    /// and otherwise unused, and `parameters_used` is the pick's.
+    /// traced and scored and the pick is also `results.vexel`; the keys `parameters` names
+    /// override every candidate's own (the others stay the preset's), and `parameters_used` is
+    /// the pick's.
     ///
     /// `parameters` are validated in Pydantic's **strict** mode: a number given as a string
     /// (`"6"`), `true` where a number is wanted, and `"yes"` or `1` where a boolean is are a 422
@@ -440,7 +442,7 @@ impl Core {
         let mut used = params::dump(&asked);
         let (result, outcome) = if auto {
             let trace = |_: &Preset, img: &Image, p: &VexelParams| (self.tracer)(img, p);
-            let outcome = auto::run_with(&image, &presets::auto_candidates(), &trace)?;
+            let outcome = auto::run_with(&image, &overridden(presets::auto_candidates(), parameters, &used), &trace)?;
             let result = match outcome.chosen() {
                 Some(c) => {
                     used = c.parameters.clone().unwrap_or_default();
@@ -467,6 +469,21 @@ impl Core {
         };
         Ok(serde_json::to_value(response).expect("a response is JSON"))
     }
+}
+
+/// Auto's candidates with the keys the request named laid over each preset's own, as validated
+/// (`used`, the request's dump), so `{"detail": 10}` is the `10.0` the model holds. A request that
+/// names nothing leaves every candidate as it is.
+fn overridden(mut candidates: Vec<Preset>, parameters: &Value, used: &Map<String, Value>) -> Vec<Preset> {
+    let Some(given) = parameters.as_object() else { return candidates };
+    for preset in &mut candidates {
+        for key in given.keys() {
+            if let Some(value) = used.get(key) {
+                preset.params.insert(key.clone(), value.clone());
+            }
+        }
+    }
+    candidates
 }
 
 /// `UploadResponse`.

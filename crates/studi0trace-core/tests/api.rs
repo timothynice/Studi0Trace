@@ -538,7 +538,7 @@ fn whatever_is_falsy_is_the_defaults_and_nothing_else_is() {
 }
 
 #[test]
-fn auto_validates_the_parameters_it_does_not_use_and_reports_the_picks_own() {
+fn auto_validates_the_parameters_and_reports_the_picks_own() {
     let core = Core::new();
     let id = upload_png(&core, 24, 3);
     let e = core.vectorize(&id, &json!({"detail": 99}), true).unwrap_err();
@@ -546,12 +546,41 @@ fn auto_validates_the_parameters_it_does_not_use_and_reports_the_picks_own() {
     let v = core.vectorize(&id, &json!({"detail": 12.5}), true).unwrap();
     let pick = v["auto"]["vexel"]["pick"].as_str().unwrap();
     let chosen = v["auto"]["vexel"]["candidates"].as_array().unwrap().iter().find(|c| c["preset"] == json!(pick)).unwrap();
-    assert_eq!(v["parameters_used"]["vexel"], chosen["parameters"], "the pick's parameters, not the request's");
-    assert_ne!(v["parameters_used"]["vexel"]["detail"], json!(12.5));
+    assert_eq!(v["parameters_used"]["vexel"], chosen["parameters"], "the pick's parameters, with the request's laid over them");
+    assert_eq!(v["parameters_used"]["vexel"]["detail"], json!(12.5));
     assert_eq!(v["results"]["vexel"]["svg"], chosen["svg"]);
     assert_eq!(v["results"]["vexel"]["stats"], chosen["stats"]);
     assert_eq!(v["results"]["vexel"]["elapsed_ms"], chosen["elapsed_ms"]);
     assert_eq!(v["results"]["vexel"]["error"], Value::Null);
+}
+
+/// What each Auto candidate is traced with when the request names no parameter: its preset's own.
+fn candidate_parameters(preset: &presets::Preset) -> Value {
+    Value::Object(params::dump(&params::parse(&Value::Object(preset.params.clone())).unwrap()))
+}
+
+#[test]
+fn with_auto_the_parameters_given_override_every_candidate_and_the_rest_stay_the_presets() {
+    let core = Core::new();
+    let id = upload_png(&core, 24, 5);
+    let wanted = presets::auto_candidates();
+    let v = core.vectorize(&id, &json!({"upsample": "always"}), true).unwrap();
+    let candidates = v["auto"]["vexel"]["candidates"].as_array().unwrap();
+    assert_eq!(candidates.len(), wanted.len());
+    for (c, preset) in candidates.iter().zip(&wanted) {
+        assert_eq!(c["preset"], json!(preset.id));
+        let mut expected = candidate_parameters(preset);
+        expected["upsample"] = json!("always");
+        assert_eq!(c["parameters"], expected, "{}: the request's key over the preset's", preset.id);
+        assert!(c["svg"].as_str().unwrap().contains("scale(0.5)"), "{}: traced at 2x", preset.id);
+    }
+    assert_eq!(v["parameters_used"]["vexel"]["upsample"], json!("always"));
+
+    // nothing given: every candidate is its preset, as before
+    let plain = core.vectorize(&id, &json!({}), true).unwrap();
+    for (c, preset) in plain["auto"]["vexel"]["candidates"].as_array().unwrap().iter().zip(&wanted) {
+        assert_eq!(c["parameters"], candidate_parameters(preset), "{}", preset.id);
+    }
 }
 
 #[test]
