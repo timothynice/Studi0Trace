@@ -248,22 +248,27 @@ fn ridge_reach(ridge: &Mask, r: usize, c: usize, dr: isize, dc: isize) -> (usize
 /// axes, in 4-connected components that are `STROKE_SEED_LEN` long (pixels
 /// over mean width), one colour (RMS spread under `detail`), a different
 /// colour from the first non-ridge pixel beyond the ridge on both sides by
-/// more than `detail` while those two agree within `detail`, and not touching
-/// a kept seed (a component of `smooth` of `floor` pixels or more) of their
-/// own colour, read off the seed's pixels outside the stroke candidates. A
-/// candidate is at least half opaque (`STROKE_SEED_ALPHA`), the two "differs"
-/// tests are at `STROKE_SEED_CONTRAST`·`detail`, and an accepted seed stops
-/// `STROKE_SEED_W` four-connected steps short of its end pixels (hits of its
-/// own component on the radius-2 ring in at most one run of at most 5, and on
-/// the radius-3 ring in at most one run); a ring has none. A piece the trim
-/// leaves with fewer than `STROKE_SEED_W` pixels is dropped. Sums run in raster order
-/// in f64, as the Python's do; the trim is a distance map.
+/// more than `STROKE_SEED_CONTRAST`·`detail` while those two agree within
+/// `detail`, and not touching a kept seed (a component of `smooth` of `floor`
+/// pixels or more) of their own colour, read off the seed's pixels outside
+/// the stroke candidates. A candidate is at least half opaque
+/// (`STROKE_SEED_ALPHA`), and an accepted seed stops `STROKE_SEED_W`
+/// four-connected steps short of its end pixels (hits of its own component on
+/// the radius-2 ring in at most one run of at most 5, and on the radius-3 ring
+/// in at most one run); a ring has none. The ring test counts the whole
+/// component's pixels, so a free end within 3 px of another arm of the same
+/// component (a tight U) is not an end and is not trimmed. A piece the trim
+/// leaves with fewer than `STROKE_SEED_W` pixels is dropped. The seeds are
+/// exempt from the floor (the caller's `seed_markers`) and their basins from
+/// `absorb_small`. Sums run in raster order in f64, as the Python's do; the
+/// trim is a distance map. Indices fit `u32`: the intake caps a side at 2048 px.
 pub fn stroke_seeds(ridge: &Mask, smooth: &Mask, features: &Image, detail: f64, floor: usize) -> Mask {
     let (h, w) = (ridge.h, ridge.w);
     let nc = features.c;
     let d2 = detail * detail;
-    let none = (usize::MAX, usize::MAX);
-    let mut width = vec![0usize; h * w]; // the narrowest axis's width; 0: not between two ridges
+    debug_assert!(h * w < u32::MAX as usize, "sample indices are u32");
+    let none = (u32::MAX, u32::MAX);
+    let mut width = vec![0u8; h * w]; // the narrowest axis's width (at most STROKE_SEED_W); 0: not between two ridges
     let mut out = vec![none; h * w]; // the samples beyond the + and - ridges
     for r in 0..h {
         for c in 0..w {
@@ -278,14 +283,14 @@ pub fn stroke_seeds(ridge: &Mask, smooth: &Mask, features: &Image, detail: f64, 
                     continue;
                 }
                 let wd = dp + dm - 1;
-                if wd > STROKE_SEED_W || (width[i] != 0 && wd >= width[i]) {
+                if wd > STROKE_SEED_W || (width[i] != 0 && wd >= width[i] as usize) {
                     continue;
                 }
-                width[i] = wd;
+                width[i] = wd as u8;
                 let idx = |k: usize, sr: isize, sc: isize| -> usize {
                     ((r as isize + k as isize * sr) as usize) * w + (c as isize + k as isize * sc) as usize
                 };
-                out[i] = if bp > 0 && bm > 0 { (idx(bp, dr, dc), idx(bm, -dr, -dc)) } else { none };
+                out[i] = if bp > 0 && bm > 0 { (idx(bp, dr, dc) as u32, idx(bm, -dr, -dc) as u32) } else { none };
             }
         }
     }
@@ -304,7 +309,7 @@ pub fn stroke_seeds(ridge: &Mask, smooth: &Mask, features: &Image, detail: f64, 
         if k == 0 {
             continue;
         }
-        wsum[k] += width[i];
+        wsum[k] += width[i] as usize;
         let px = features.px(i);
         for ch in 0..nc {
             sums[k * nc + ch] += px[ch];
@@ -328,8 +333,8 @@ pub fn stroke_seeds(ridge: &Mask, smooth: &Mask, features: &Image, detail: f64, 
         }
         sq[k] += dsq;
         let (a, b) = out[i];
-        if a != usize::MAX {
-            let (fa, fb) = (features.px(a), features.px(b));
+        if a != u32::MAX {
+            let (fa, fb) = (features.px(a as usize), features.px(b as usize));
             let (mut da, mut db, mut ds) = (0.0f64, 0.0f64, 0.0f64);
             for ch in 0..nc {
                 da += (px[ch] - fa[ch]) * (px[ch] - fa[ch]);
@@ -397,18 +402,22 @@ pub fn stroke_seeds(ridge: &Mask, smooth: &Mask, features: &Image, detail: f64, 
     let accept: Vec<bool> = (0..n)
         .map(|k| {
             k != 0
-                && size[k] * size[k] >= STROKE_SEED_LEN * wsum[k]
+                && (size[k] as u64) * (size[k] as u64) >= STROKE_SEED_LEN as u64 * wsum[k] as u64
                 && sq[k] / (size[k].max(1) as f64) < d2
                 && 2 * passing[k] > size[k]
                 && !touching[k]
         })
         .collect();
+    if !accept.iter().any(|b| *b) {
+        return Grid::filled(h, w, false);
+    }
     let keep: Vec<bool> = comps.data.iter().map(|k| accept[*k as usize]).collect();
     // stop short of the ends: a multi-source BFS, four-connected inside the kept
     // pixels, from every end pixel to depth STROKE_SEED_W (a distance map: no
     // visiting order decides anything)
     let (ring2, ring3) = (ring(2), ring(3));
-    let mut dist = vec![usize::MAX; h * w];
+    const FAR: u8 = u8::MAX; // not reached (STROKE_SEED_W is far below it)
+    let mut dist = vec![FAR; h * w];
     let mut queue = std::collections::VecDeque::new();
     for r in 0..h {
         for c in 0..w {
@@ -424,12 +433,12 @@ pub fn stroke_seeds(ridge: &Mask, smooth: &Mask, features: &Image, detail: f64, 
         }
     }
     while let Some(i) = queue.pop_front() {
-        if dist[i] >= STROKE_SEED_W {
+        if dist[i] as usize >= STROKE_SEED_W {
             continue;
         }
         let (r, c) = (i / w, i % w);
         let mut step = |j: usize| {
-            if keep[j] && dist[j] == usize::MAX {
+            if keep[j] && dist[j] == FAR {
                 dist[j] = dist[i] + 1;
                 queue.push_back(j);
             }
@@ -448,7 +457,7 @@ pub fn stroke_seeds(ridge: &Mask, smooth: &Mask, features: &Image, detail: f64, 
         }
     }
     // a piece (four-connected) the trim leaves with fewer than STROKE_SEED_W pixels is dropped
-    let seed = Grid { h, w, data: (0..h * w).map(|i| keep[i] && dist[i] == usize::MAX).collect::<Vec<bool>>() };
+    let seed = Grid { h, w, data: (0..h * w).map(|i| keep[i] && dist[i] == FAR).collect::<Vec<bool>>() };
     let pieces = labels::label_mask(&seed, 1);
     let psize = labels::bincount(&pieces);
     Grid { h, w, data: (0..h * w).map(|i| seed.data[i] && psize[pieces.data[i] as usize] >= STROKE_SEED_W).collect() }

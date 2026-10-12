@@ -168,14 +168,16 @@ def seed_mask(features: np.ndarray, grad: np.ndarray, g_low: float, g_seed: floa
 # into 4-connected components, and a component is a stroke seed when it is
 # `STROKE_SEED_LEN` long (its pixels over its mean width), one colour (RMS
 # spread of its features under `detail`), a different colour from the first
-# non-ridge pixel beyond the ridge on both sides by more than `detail` while
-# those two sides agree within `detail` (the rim a sharpening leaves inside an
-# edge, a JPEG ringing line and a drop shadow's band each lie between a shape
-# and its ground, which do not agree), and does not touch a kept seed of its
-# own colour, read off the seed's pixels outside the stroke candidates (an acute wedge's tip, the gap between two letters in the ground's
-# colour: the flood from that seed is the right answer there). Its pixels join
-# the seed mask before the floor, its component is kept whatever its size, and
-# its basin is exempt from `_absorb_small`. A 2 px stroke whose two ink
+# non-ridge pixel beyond the ridge on both sides by more than
+# `STROKE_SEED_CONTRAST`·`detail` while those two sides agree within `detail`
+# (the rim a sharpening leaves inside an edge, a JPEG ringing line and a drop
+# shadow's band each lie between a shape and its ground, which do not agree),
+# and does not touch a kept seed of its own colour, read off the seed's pixels
+# outside the stroke candidates (an acute wedge's tip, the gap between two
+# letters in the ground's colour: the flood from that seed is the right answer
+# there). Its pixels join the seed mask before the floor, its component is
+# exempt from the floor whatever its size, and its basin is exempt from
+# `_absorb_small`. A 2 px stroke whose two ink
 # pixels are both ridge has no medial pixel and is not seeded: a crisp one
 # (both pixels peak), and an anti-aliased one at most phases as well (its two
 # ink pixels differ from each other by more than `detail`); it is left to the
@@ -201,7 +203,10 @@ def seed_mask(features: np.ndarray, grad: np.ndarray, g_low: float, g_seed: floa
 #   junction in separate runs, at an end (or where a stroke ran on into a
 #   joint until its width passed STROKE_SEED_W) in one short run. The second
 #   ring keeps a bend's outer corner, which looks like a wide stroke's end at
-#   distance 2; a ring has no end pixel and stays whole. A stroke's medial
+#   distance 2; a ring has no end pixel and stays whole. The ring test counts
+#   the whole component's pixels, so a free end within 3 px of another arm of
+#   the same component (a tight U) sees that arm on its ring and is not an end:
+#   it is not trimmed. A stroke's medial
 #   pixels run on into the joint with whatever it meets; seeded there, a stem
 #   took five rows of its joint with a triangle's base, and the stepped foot
 #   read as a wedge tip that walked a sliver round the triangle. Stopped
@@ -303,6 +308,7 @@ def stroke_seeds(ridge: np.ndarray, smooth: np.ndarray, features: np.ndarray, de
     mean = sums / np.maximum(size, 1)[:, None]
     dev = feats - mean[comps]
     sq = np.bincount(flat, weights=np.sum(dev * dev, axis=2).ravel(), minlength=n)
+    del dev
     one_colour = sq / np.maximum(size, 1) < d2
     # two-sided: the pixel differs from both samples beyond the ridges by
     # STROKE_SEED_CONTRAST·detail, and they agree within detail
@@ -343,6 +349,8 @@ def stroke_seeds(ridge: np.ndarray, smooth: np.ndarray, features: np.ndarray, de
             touching[comp] = True
     accept = long_enough & one_colour & two_sided & ~touching
     accept[0] = False
+    if not accept.any():
+        return np.zeros_like(cand)
     keep = accept[comps]
     # stop short of the ends (the comment above STROKE_SEED_W): the pixels within
     # STROKE_SEED_W four-connected steps, inside the component, of an end pixel go

@@ -537,8 +537,12 @@ def test_the_engines_seed_strokes_alike(stroke):
     rs = np.asarray(vexel._vexel_rs._stage_stroke_seeds(a.tobytes(), 96, 96, 16, 6.0), np.int32).reshape(96, 96)
     assert np.array_equal(py.astype(np.int32), rs)
     if stroke >= 3.0:
-        # at 2 px this pixel-aligned ring has a ridge on one side only, so neither engine seeds it
+        # at 2 px both ink pixels of this pixel-aligned ring are ridge, so it has no medial pixel
+        # and neither engine seeds it (both agree on the empty mask)
         assert py.sum() > 100, "the ring and the bar are seeded"
-    py_l = initial_labels(grad, p.features, min_region=16, detail=6.0)
-    rs_l = np.asarray(vexel._vexel_rs._stage_labels0(a.tobytes(), 96, 96, 16, 6.0), np.int32).reshape(96, 96)
-    assert np.array_equal(py_l, rs_l)
+    # 16: the seeded basins are larger than the floor; 200: larger than the 180 px bar, so only
+    # the exemption from `_absorb_small` keeps it, and both engines must grant it alike
+    for min_region in (16, 200):
+        py_l = initial_labels(grad, p.features, min_region=min_region, detail=6.0)
+        rs_l = np.asarray(vexel._vexel_rs._stage_labels0(a.tobytes(), 96, 96, min_region, 6.0), np.int32).reshape(96, 96)
+        assert np.array_equal(py_l, rs_l), f"min_region={min_region}"
