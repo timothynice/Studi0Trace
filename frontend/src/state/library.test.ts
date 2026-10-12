@@ -5,7 +5,7 @@ import { paramsKey } from "@/lib/schema";
 import type { Drift, OpenOutcome, Phase, Platform, RedrawPhase, RedrawResult, TextLine, TextLineChange, TextPlan, TraceRequest } from "@/platform/types";
 import { DEFAULT_SETTINGS } from "@/platform/types";
 import { composeSvg } from "@/lib/textsvg";
-import { createLibrary, currentJob, DEBOUNCE_MS, errorOf, fullMask, maskOf, MASKED_TRACES_MAX, PREFETCH_MAX_LINES, PREFETCH_SETTLE_MS, needsUpdate, NO_REDRAW, shownAnswer, textOf, traceKey, traceKeyFor, unexportedCount, userJob, type Catalog, type LibraryPlatform } from "./library";
+import { createLibrary, currentJob, DEBOUNCE_MS, errorOf, fullMask, maskOf, MASKED_TRACES_MAX, PREFETCH_MAX_LINES, PREFETCH_SETTLE_MS, needsUpdate, NO_REDRAW, shownAnswer, textOf, traceKey, traceKeyFor, unexportedCount, upscaled, userJob, type Catalog, type LibraryPlatform } from "./library";
 
 const ENGINE: EngineDescription = {
   id: "vexel",
@@ -1054,8 +1054,9 @@ const FONT_M = { family: "Montserrat", weight: 400, italic: false, source: "goog
 const FONT_L = { family: "Lato", weight: 400, italic: false, source: "installed" } as const;
 const FONT_O = { family: "Oswald", weight: 500, italic: false, source: "google" } as const;
 const candidate = (font: TextLine["candidates"][number]["font"], path: string, id: string, word: string) => ({ font, iou: 0.9, stroke: 1, fit: LINE.fit!, path, text: `<text x="0" y="10" fill="none" data-line="${id}">${word}</text>` });
-const T0: TextLine = { ...LINE, id: "a-t0", quad: [[0, 0], [30, 0], [30, 10], [0, 10]], string: "EST", candidates: [candidate(FONT_M, "M0 0h10v10z", "a-t0", "EST"), candidate(FONT_L, "M0 0h20v10z", "a-t0", "EST")], chosen: 0 };
-const T1: TextLine = { ...LINE, id: "a-t1", quad: [[0, 20], [30, 20], [30, 30], [0, 30]], string: "2026", candidates: [candidate(FONT_M, "M0 20h10v10z", "a-t1", "2026")], chosen: 0 };
+// 40 px tall: text the trace never has to draw at 2× (`SMALL_TEXT_PX`), so these masks are traced at 1× whichever is painted out
+const T0: TextLine = { ...LINE, id: "a-t0", quad: [[0, 0], [30, 0], [30, 40], [0, 40]], string: "EST", candidates: [candidate(FONT_M, "M0 0h10v10z", "a-t0", "EST"), candidate(FONT_L, "M0 0h20v10z", "a-t0", "EST")], chosen: 0 };
+const T1: TextLine = { ...LINE, id: "a-t1", quad: [[0, 40], [30, 40], [30, 80], [0, 80]], string: "2026", candidates: [candidate(FONT_M, "M0 20h10v10z", "a-t1", "2026")], chosen: 0 };
 const BOTH = ["a-t0", "a-t1"];
 /** The engine's answer for a mask: a red square, tagged with the mask so a test can tell the traces apart. */
 const baseFor = (mask: string[]) => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 32"><path d="M40 0h10v10h-10z" fill="#ff0000" id="m${mask.join("_")}"/></svg>`;
@@ -1327,7 +1328,7 @@ describe("library: traces by the painted set", () => {
 
   it("keeps at most MASKED_TRACES_MAX masked traces per settings key, dropping the least recently shown", async () => {
     const ids = [0, 1, 2, 3, 4, 5].map((n) => `a-t${n}`);
-    const lines = ids.map((id, n): TextLine => ({ ...T1, id, quad: [[0, n * 5], [30, n * 5], [30, n * 5 + 4], [0, n * 5 + 4]], candidates: [candidate(FONT_M, `M0 ${n * 5}h10v4z`, id, "2026")] }));
+    const lines = ids.map((id, n): TextLine => ({ ...T1, id, quad: [[0, n * 50], [30, n * 50], [30, n * 50 + 40], [0, n * 50 + 40]], candidates: [candidate(FONT_M, `M0 ${n * 5}h10v4z`, id, "2026")] }));
     const { calls, answer, item, lib } = await tracedOnBalanced(PLAN(lines));
     const answered = new Set<Call>();
     const drain = async () => {
@@ -1623,5 +1624,110 @@ describe("library: traces by the painted set", () => {
     vi.advanceTimersByTime(1);
     await flush();
     expect(calls[3].req).toMatchObject({ mask: [], parameters: { detail: 6, min_region: 8 } });
+  });
+});
+
+/** A declined line, `height` px tall: traced as shapes whatever the switches say. */
+const declined = (id: string, height: number): TextLine => ({ ...LINE, id, quad: [[0, 0], [30, 0], [30, height], [0, height]], status: { kind: "declined", reason: "script" }, candidates: [], chosen: null, enabled: false, fit: null });
+/** A matched line 60 px tall: never small. */
+const TALL: TextLine = { ...T1, id: "a-t1", quad: [[0, 0], [30, 0], [30, 60], [0, 60]] };
+const P2 = paramsKey({ detail: 6, min_region: 8, upsample: "always" });
+const at2x = (v: Record<string, unknown>) => ({ ...v, upsample: "always" });
+
+describe("library: Trace at 2×", () => {
+  beforeEach(() => vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] }));
+  afterEach(() => vi.useRealTimers());
+
+  it("on Auto, a declined line under 40 px makes the first run ask every candidate for 2×, keyed apart", async () => {
+    const p = maskPlatform(PLAN([TALL, declined("a-d", 20)]));
+    const lib = createLibrary(p.platform, CATALOG, TEXT_ON);
+    lib.add([ok("a")]);
+    lib.generate("a");
+    await flush();
+    expect(p.calls[0].req).toMatchObject({ auto: true, mask: ["a-t1"], parameters: { upsample: "always" } });
+    expect(lib.selectedItem()!.job).toMatchObject({ key: "auto2x|a-t1" });
+    expect(upscaled(lib.selectedItem()!)).toBe(true);
+    p.calls[0].resolve(
+      response(baseFor(["a-t1"]), 900, {
+        auto: {
+          vexel: {
+            engine: "vexel",
+            pick: "logo",
+            reason: "",
+            candidates: [
+              { preset: "balanced", label: "Balanced", svg: baseFor(["balanced"]), elapsed_ms: 800, stats: {} },
+              { preset: "logo", label: "Logo & icon", svg: baseFor(["a-t1"]), elapsed_ms: 900, stats: {} },
+            ],
+          },
+        },
+      }),
+    );
+    await flush();
+    const item = lib.selectedItem()!;
+    expect(item.shown).toBe("auto2x|a-t1");
+    // the candidates were traced at 2×: they are known under their params with upsample "always", the panel's values stay the pick's
+    expect(Object.keys(item.traces).sort()).toEqual(["auto2x|a-t1", `${P2}|a-t1`, `${paramsKey(at2x({ detail: 10, min_region: 16 }))}|a-t1`].sort());
+    expect(item.params).toEqual({ detail: 10, min_region: 16 });
+    // the masks after the pick are traced under the pick's params at 2× as well
+    expect(traceKeyFor(item, [])).toBe(`${paramsKey(at2x({ detail: 10, min_region: 16 }))}|`);
+    expect(p.calls[1].req).toMatchObject({ auto: false, mask: [], parameters: at2x({ detail: 10, min_region: 16 }) });
+  });
+
+  it("a plan whose only line traced as shapes is 60 px tall traces at 1×", async () => {
+    const p = maskPlatform(PLAN([declined("a-d", 60)]));
+    const lib = createLibrary(p.platform, CATALOG, TEXT_ON);
+    lib.add([ok("a")]);
+    lib.generate("a");
+    await flush();
+    expect(p.calls[0].req).toMatchObject({ auto: true, mask: [], parameters: {} });
+    expect(lib.selectedItem()!.job).toMatchObject({ key: "auto|" });
+    expect(upscaled(lib.selectedItem()!)).toBe(false);
+  });
+
+  it("on a preset, 2× is its values with upsample \"always\"; the switch forces it off and on, and Auto returns to the decision", async () => {
+    const { calls, answer, item, lib } = await tracedOnBalanced(PLAN([TALL, declined("a-d", 20)]));
+    expect(calls[0].req).toMatchObject({ auto: false, mask: ["a-t1"] });
+    expect(calls[0].req.parameters).toEqual(at2x({ detail: 6, min_region: 8 }));
+    expect(item().job).toMatchObject({ key: `${P2}|a-t1` });
+    await answer(calls[0]);
+    expect(item().shown).toBe(`${P2}|a-t1`);
+    // off: the same settings at 1×, a user trace
+    lib.setTextUpscale("a", "off");
+    expect(textOf(item()).upscale).toBe("off");
+    expect(upscaled(item())).toBe(false);
+    const off = calls.at(-1)!;
+    expect(off.req).toMatchObject({ auto: false, mask: ["a-t1"] });
+    expect(off.req.parameters).toEqual({ detail: 6, min_region: 8 });
+    expect(currentJob(item())).toMatchObject({ key: `${P}|a-t1` });
+    await answer(off);
+    expect(item().shown).toBe(`${P}|a-t1`);
+    // back to Auto: the decision (2×), whose trace is known: shown, nothing traced for it
+    const before = calls.length;
+    lib.setTextUpscale("a", "auto");
+    expect(item().shown).toBe(`${P2}|a-t1`);
+    expect(currentJob(item())).toBeNull();
+    expect(calls).toHaveLength(before);
+    // on, when the decision is 2× already, is the same trace
+    lib.setTextUpscale("a", "on");
+    expect(item().shown).toBe(`${P2}|a-t1`);
+  });
+
+  it("the decision is each mask's: a small matched line switched off is traced at 2×, and its prefetch is that trace", async () => {
+    const small: TextLine = { ...T0, quad: [[0, 0], [30, 0], [30, 12], [0, 12]] };
+    const { calls, answer, item, lib } = await tracedOnBalanced(PLAN([small]));
+    // set in its font, the small line is not the trace's: 1×
+    expect(calls[0].req.parameters).toEqual({ detail: 6, min_region: 8 });
+    expect(item().job).toMatchObject({ key: `${P}|a-t0` });
+    await answer(calls[0]);
+    // the untouched image traces it as shapes: its prefetch is at 2×
+    expect(calls[1].req).toMatchObject({ mask: [], parameters: at2x({ detail: 6, min_region: 8 }) });
+    expect(item().job).toMatchObject({ key: `${P2}|`, prefetch: true });
+    lib.toggleTextLine("a", "a-t0", false);
+    expect(upscaled(item())).toBe(true);
+    // the prefetch running is what the switch asks for: it becomes the user's job, nothing new is traced
+    expect(calls).toHaveLength(2);
+    expect(currentJob(item())).toMatchObject({ key: `${P2}|` });
+    await answer(calls[1]);
+    expect(item().shown).toBe(`${P2}|`);
   });
 });

@@ -7,10 +7,10 @@ import { TextSection } from "./TextSection";
 
 const FIT = { size: 10, baseline: 5, x: 0, tracking: 0, nudges: [], iou: 0.946, stroke: 1 };
 const line = (over: Partial<TextLine> = {}): TextLine => ({ id: "a-t0", quad: [[0, 0], [10, 0], [10, 5], [0, 5]], string: "EST. 2026", class: "type", colour: [0, 0, 0], status: { kind: "matched" }, candidates: [{ font: { family: "Montserrat", weight: 400, italic: false, source: "google" }, iou: 0.946, stroke: 1, fit: FIT, path: "M0 0h1", text: "<text/>" }, { font: { family: "Lato", weight: 400, italic: false, source: "installed" }, iou: 0.8, stroke: 1, fit: FIT, path: "M0 0h1", text: "<text/>" }], chosen: 0, enabled: true, fit: FIT, occluders: [], ...over });
-const item = (plan: TextPlan | null, phase: "finding" | null = null, error: null | { code: string } = null): ImageItem =>
-  ({ image: { id: "a", name: "a.png", path: null, width: 100, height: 50, format: "PNG", previewUrl: "" }, preset: "auto", params: {}, traces: {}, shown: null, exported: null, job: null, error: null, errorKey: null, auto: null, text: { plan, phase, error: error as never, asked: true, enabled: new Set((plan?.lines ?? []).filter((l) => l.enabled).map((l) => l.id)) } }) as ImageItem;
+const item = (plan: TextPlan | null, phase: "finding" | null = null, error: null | { code: string } = null, upscale: "auto" | "on" | "off" = "auto"): ImageItem =>
+  ({ image: { id: "a", name: "a.png", path: null, width: 100, height: 50, format: "PNG", previewUrl: "" }, preset: "auto", params: {}, traces: {}, shown: null, exported: null, job: null, error: null, errorKey: null, auto: null, text: { plan, phase, error: error as never, asked: true, enabled: new Set((plan?.lines ?? []).filter((l) => l.enabled).map((l) => l.id)), upscale } }) as ImageItem;
 const plan = (lines: TextLine[], reader: "vision" | "ai" = "vision"): TextPlan => ({ image: "a", reader, lines, aiError: null, fontsOffline: false });
-const props = () => ({ settingOn: true, onChange: vi.fn(), onToggle: vi.fn(), onHover: vi.fn(), onCancel: vi.fn(), onRetry: vi.fn(), searchFonts: vi.fn(async () => []) });
+const props = () => ({ settingOn: true, onChange: vi.fn(), onToggle: vi.fn(), onHover: vi.fn(), onCancel: vi.fn(), onRetry: vi.fn(), onUpscale: vi.fn(), searchFonts: vi.fn(async () => []) });
 
 describe("TextSection", () => {
   it("lists a matched line with its string, font, fit and switch", () => {
@@ -141,11 +141,32 @@ describe("TextSection", () => {
   });
 
   it("before anything is asked, the header says to trace", () => {
-    const fresh = { ...item(null), text: { plan: null, phase: null, error: null, asked: false, enabled: new Set() } } as ImageItem;
+    const fresh = { ...item(null), text: { plan: null, phase: null, error: null, asked: false, enabled: new Set(), upscale: "auto" } } as ImageItem;
     render(<TextSection item={fresh} {...props()} />);
     expect(screen.getByText("Trace to read the text")).toBeInTheDocument();
     // and once asked, it does not
-    const { container } = render(<TextSection item={{ ...fresh, text: { plan: null, phase: "finding", error: null, asked: true, enabled: new Set() } } as ImageItem} {...props()} />);
+    const { container } = render(<TextSection item={{ ...fresh, text: { plan: null, phase: "finding", error: null, asked: true, enabled: new Set(), upscale: "auto" } } as ImageItem} {...props()} />);
     expect(container).not.toHaveTextContent("Trace to read the text");
+  });
+
+  it("Trace at 2× follows the decision on Auto, and once flipped offers Auto back", () => {
+    const p = props();
+    // a 5 px line switched off is small text the trace draws: the decision is 2×
+    const { rerender } = render(<TextSection {...p} item={item(plan([line({ enabled: false })]))} />);
+    const toggle = screen.getByRole("switch", { name: "Trace at 2×" });
+    expect(toggle).toBeChecked();
+    expect(screen.getByText("Small text found: tracing at twice the size, about four times slower")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Auto" })).toBeNull();
+    fireEvent.click(toggle);
+    expect(p.onUpscale).toHaveBeenCalledWith("off");
+    rerender(<TextSection {...p} item={item(plan([line({ enabled: false })]), null, null, "off")} />);
+    expect(screen.getByRole("switch", { name: "Trace at 2×" })).not.toBeChecked();
+    expect(screen.getByText("Normal size")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Auto" }));
+    expect(p.onUpscale).toHaveBeenCalledWith("auto");
+    // set in its font, the line is not the trace's: no small text
+    rerender(<TextSection {...p} item={item(plan([line()]))} />);
+    expect(screen.getByRole("switch", { name: "Trace at 2×" })).not.toBeChecked();
+    expect(screen.getByText("No small text: normal size")).toBeInTheDocument();
   });
 });

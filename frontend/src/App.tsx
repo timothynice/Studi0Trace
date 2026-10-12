@@ -477,6 +477,7 @@ function Workspace({ catalog, settings, onSettingsChange }: { catalog: Catalog; 
                       onHover={setTextHover}
                       onCancel={() => lib.cancelText(item.image.id)}
                       onRetry={() => lib.retryText(item.image.id)}
+                      onUpscale={(mode) => lib.setTextUpscale(item.image.id, mode)}
                       searchFonts={searchFonts}
                     />
                   ) : undefined

@@ -31,6 +31,13 @@ const PLAN: TextPlan = {
   ],
 };
 
+/** A plan whose one line is declined (traced as shapes), `height` px tall. */
+const declinedPlan = (image: string, height: number): TextPlan => ({
+  ...PLAN,
+  image,
+  lines: [{ ...PLAN.lines[0], id: `${image}-t0`, quad: [[4, 10], [60, 10], [60, 10 + height], [4, 10 + height]], status: { kind: "declined", reason: "script" }, candidates: [], chosen: null, enabled: false, fit: null }],
+});
+
 vi.mock("@/platform", async () => {
   const types = await vi.importActual<typeof import("@/platform/types")>("@/platform/types");
   const platform = {
@@ -113,5 +120,47 @@ describe("Text in the Mac app", () => {
     expect(viewport.querySelector("polygon")!.getAttribute("points")).toBe("4,10 40,10 40,20 4,20");
     fireEvent.mouseLeave(row);
     await waitFor(() => expect(viewport.querySelector("polygon")).toBeNull());
+  });
+
+  async function openAndTrace(path: string, plan: TextPlan) {
+    vi.mocked(platform.vectorize).mockClear();
+    vi.mocked(platform.textPlan).mockResolvedValueOnce(plan);
+    render(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <App />
+      </QueryClientProvider>,
+    );
+    await screen.findByText("Drop images here");
+    await waitFor(() => expect(hooks.opens).not.toBeNull());
+    act(() => hooks.opens!([path]));
+    await screen.findByRole("option", { name: new RegExp(path.split("/").pop()!.replace(".", "\\.")) });
+    act(() => hooks.menu!("generate"));
+    await waitFor(() => expect(platform.vectorize).toHaveBeenCalled());
+    fireEvent.mouseDown(screen.getByRole("tab", { name: "Inspect" }));
+    return screen.findByRole("switch", { name: "Trace at 2×" });
+  }
+
+  it("Trace at 2× is on for a declined 20 px line: Auto asks every candidate for 2×, and the hint says why", async () => {
+    const toggle = await openAndTrace("/pics/tagline.png", declinedPlan("/pics/tagline.png", 20));
+    expect(vi.mocked(platform.vectorize).mock.calls[0][0]).toMatchObject({ auto: true, parameters: { upsample: "always" } });
+    expect(toggle).toBeChecked();
+    expect(screen.getByText("Small text found: tracing at twice the size, about four times slower")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Auto" })).toBeNull();
+  });
+
+  it("Trace at 2× is off for a 60 px line; switched on, it traces again at 2×, and Auto goes back to the decision", async () => {
+    const toggle = await openAndTrace("/pics/wordmark.png", declinedPlan("/pics/wordmark.png", 60));
+    expect(vi.mocked(platform.vectorize).mock.calls[0][0]).toMatchObject({ auto: true, parameters: {} });
+    expect(toggle).not.toBeChecked();
+    expect(screen.getByText("No small text: normal size")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByTestId("viewport").querySelector("svg")).not.toBeNull());
+    fireEvent.click(toggle);
+    await waitFor(() => expect(platform.vectorize).toHaveBeenCalledTimes(2));
+    expect(vi.mocked(platform.vectorize).mock.calls[1][0]).toMatchObject({ auto: true, parameters: { upsample: "always" } });
+    await waitFor(() => expect(screen.getByRole("switch", { name: "Trace at 2×" })).toBeChecked());
+    fireEvent.click(screen.getByRole("button", { name: "Auto" }));
+    await waitFor(() => expect(screen.getByRole("switch", { name: "Trace at 2×" })).not.toBeChecked());
+    expect(screen.getByText("No small text: normal size")).toBeInTheDocument();
+    expect(platform.vectorize).toHaveBeenCalledTimes(2);
   });
 });

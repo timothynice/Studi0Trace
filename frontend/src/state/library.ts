@@ -3,6 +3,7 @@
  * job running for it. Framework-free: React reads it through `useLibrary`, tests call it directly.
  */
 import { ApiError, type AutoResult, type EngineDescription, type ParamValues, type Preset, type VectorizeResponse } from "@/lib/api";
+import { smallTextPresent } from "@/lib/text";
 import { composeSvg } from "@/lib/textsvg";
 import { normalizeValues, paramsKey, specsFor } from "@/lib/schema";
 import type { Drift, FontRef, OpenedImage, OpenFailure, OpenOutcome, Phase, Platform, RedrawPhase, RedrawResult, Roughness, Settings, TextLine, TextLineChange, TextPhase, TextPlan } from "@/platform/types";
@@ -75,9 +76,13 @@ export interface TextState {
   asked: boolean;
   /** Lines currently set in a font: the plan's `enabled` flags when it lands, the store's own afterwards. */
   enabled: ReadonlySet<string>;
+  /** Trace at 2×: "auto" follows the decision (`upscaledFor`), "on" and "off" are the user's. */
+  upscale: Upscale;
 }
 
-export const NO_TEXT: TextState = { plan: null, phase: null, error: null, asked: false, enabled: new Set() };
+export type Upscale = "auto" | "on" | "off";
+
+export const NO_TEXT: TextState = { plan: null, phase: null, error: null, asked: false, enabled: new Set(), upscale: "auto" };
 
 export const textOf = (item: Pick<ImageItem, "text">): TextState => item.text ?? NO_TEXT;
 
@@ -90,23 +95,41 @@ export const maskOf = (text: TextState): string[] => matchedLines(text.plan).fil
 export const fullMask = (plan: TextPlan): string[] => matchedLines(plan).map((l) => l.id).sort();
 
 /**
+ * Whether a trace with `mask` painted out is traced at 2× (the engine's `upsample: "always"`): always when the switch
+ * is on, never when it is off, and on "auto" when small text is left for that trace to draw as shapes, the lines
+ * outside its mask (`smallTextPresent`). Each mask has its own answer, so a mask traced ahead is keyed as a switch
+ * will ask for it.
+ */
+export function upscaledFor(text: TextState, mask: string[]): boolean {
+  return text.upscale === "auto" ? smallTextPresent(text.plan, mask) : text.upscale === "on";
+}
+
+/** Whether the trace the controls and the switches ask for now is traced at 2×: what the Trace at 2× switch shows. */
+export const upscaled = (item: Pick<ImageItem, "text">): boolean => upscaledFor(textOf(item), maskOf(textOf(item)));
+
+/** `params` as a trace at 2× is traced with: `upsample: "always"` laid over them. */
+export const at2x = (params: ParamValues, on: boolean): ParamValues => (on ? { ...params, upsample: "always" } : params);
+
+/**
  * The key a trace of `item`'s settings with `mask` painted out is kept under. On Auto, the full mask is Auto's own
- * run (`auto|…`); every other mask is traced and kept under the pick's params once the pick is known (an Auto run
- * leaves them in `item.params`), as Auto's candidates are, and is an Auto run of its own only before that.
+ * run (`auto|…`, `auto2x|…` at 2×); every other mask is traced and kept under the pick's params once the pick is known
+ * (an Auto run leaves them in `item.params`), as Auto's candidates are, and is an Auto run of its own only before that.
+ * A trace at 2× (`upscaledFor`) is keyed by the params it is traced with, `upsample: "always"` among them.
  */
 export function traceKeyFor(item: Pick<ImageItem, "preset" | "params"> & Partial<Pick<ImageItem, "auto" | "text">>, mask: string[]): string {
   const m = mask.join(",");
-  if (item.preset !== "auto") return `${paramsKey(item.params)}|${m}`;
+  const up = upscaledFor(textOf(item), mask);
+  if (item.preset !== "auto") return `${paramsKey(at2x(item.params, up))}|${m}`;
   const plan = item.text?.plan ?? null;
   const full = plan ? fullMask(plan).join(",") : "";
-  return `${m === full || !item.auto?.pick ? "auto" : paramsKey(item.params)}|${m}`;
+  return `${m === full || !item.auto?.pick ? (up ? "auto2x" : "auto") : paramsKey(at2x(item.params, up))}|${m}`;
 }
 
 /** The mask a trace key was traced with. */
 export const maskOfKey = (key: string): string[] => key.slice(key.lastIndexOf("|") + 1).split(",").filter(Boolean);
 
-/** An Auto run's key. */
-export const isAutoKey = (key: string): boolean => key.startsWith("auto|");
+/** An Auto run's key, at 1× or 2×. */
+export const isAutoKey = (key: string): boolean => key.startsWith("auto|") || key.startsWith("auto2x|");
 
 const sameFont = (a: FontRef, b: FontRef) => a.family === b.family && a.weight === b.weight && a.italic === b.italic && a.source === b.source;
 
@@ -184,6 +207,8 @@ export interface Library {
   setTextLine(id: string, lineId: string, change: TextLineChange): Promise<void>;
   /** A line's switch: shows the cached trace for the new mask, or traces it (a user trace). Frontend-only. */
   toggleTextLine(id: string, lineId: string, on: boolean): void;
+  /** The Trace at 2× switch ("on", "off") or its return to the decision ("auto"): shows the cached trace, or traces it (a user trace). */
+  setTextUpscale(id: string, mode: Upscale): void;
   /** Abandons the text plan being asked, and the trace waiting for it; the next trace asks again. */
   cancelText(id: string): void;
   /** Asks for the text plan again after it failed; traces made without it are traced again when it re-sets a line. */
@@ -400,7 +425,7 @@ export function createLibrary(platform: LibraryPlatform, catalog: Catalog, initi
       const key = traceKeyFor(item, mask);
       // an Auto image whose pick is not known yet: its masks are Auto runs, which are never traced ahead
       if (isAutoKey(key) || item.traces[key] || item.job?.key === key || queue.some((q) => q.id === id && q.key === key)) continue;
-      queue.push({ id, key, mask, params: item.params });
+      queue.push({ id, key, mask, params: at2x(item.params, upscaledFor(textOf(item), mask)) });
     }
   };
 
@@ -491,14 +516,17 @@ export function createLibrary(platform: LibraryPlatform, catalog: Catalog, initi
     const auto = res.auto?.[ENGINE] ?? null;
     let params = item.params;
     if (auto) {
+      // the candidates were traced as the run was: at 2× when it was `auto2x`, so they are kept under those params
+      const up = job.key.startsWith("auto2x|");
+      const keyOf = (preset: Preset) => traceKeyFor({ preset: null, params: at2x(resolve(preset.params), up) }, job.mask);
       for (const c of auto.candidates) {
         const preset = presetById.get(c.preset);
-        if (preset && c.svg) traces[traceKeyFor({ preset: null, params: resolve(preset.params) }, job.mask)] = { svg: composed(c.svg, job.mask, plan), base: c.svg, elapsedMs: c.elapsed_ms ?? 0, stats: c.stats ?? {} };
+        if (preset && c.svg) traces[keyOf(preset)] = { svg: composed(c.svg, job.mask, plan), base: c.svg, elapsedMs: c.elapsed_ms ?? 0, stats: c.stats ?? {} };
       }
       const pick = auto.pick ? presetById.get(auto.pick) : undefined;
       if (pick) {
         // Auto's answer is its pick's trace: known under the pick's key too, which the other masks are keyed by
-        traces[traceKeyFor({ preset: null, params: resolve(pick.params) }, job.mask)] ??= traces[job.key];
+        traces[keyOf(pick)] ??= traces[job.key];
         // an image still on Auto takes its pick's values, whatever it shows: the masks it traces next are keyed by them
         if (item.preset === "auto") params = resolve(pick.params);
       }
@@ -523,14 +551,14 @@ export function createLibrary(platform: LibraryPlatform, catalog: Catalog, initi
     runPrefetch();
   };
 
-  /** Sends `job` to the platform as the image's job. */
+  /** Sends `job` to the platform as the image's job: `parameters` are the values traced with, or Auto's overrides. */
   const launch = (id: string, job: Job, parameters: ParamValues, auto: boolean) => {
     const controller = new AbortController();
     controllers.set(job.id, controller);
     patch(id, job.prefetch ? { job } : { job, error: null, errorKey: null });
     platform
       .vectorize(
-        { imageId: id, parameters: auto ? {} : parameters, auto, job: job.id, mask: job.mask },
+        { imageId: id, parameters, auto, job: job.id, mask: job.mask },
         {
           signal: controller.signal,
           onPhase: (phase) => {
@@ -643,7 +671,10 @@ export function createLibrary(platform: LibraryPlatform, catalog: Catalog, initi
     }
     abortJob(item);
     const mask = maskOf(textOf(item));
-    launch(id, { id: newJobId(), key, startedAt: Date.now(), phase: "queued", mask, prefetch: false }, item.params, isAutoKey(key));
+    const up = upscaledFor(textOf(item), mask);
+    // an Auto run is sent no values of its own: at 2×, `upsample` alone, which the core lays over every candidate
+    const auto = isAutoKey(key);
+    launch(id, { id: newJobId(), key, startedAt: Date.now(), phase: "queued", mask, prefetch: false }, at2x(auto ? {} : item.params, up), auto);
   };
 
   /** After the enabled set or the plan moved the key: show what is known for it, or trace it (a user trace). */
@@ -1030,6 +1061,19 @@ export function createLibrary(platform: LibraryPlatform, catalog: Catalog, initi
       else enabled.delete(lineId);
       patchText(id, { enabled });
       showOrTrace(id);
+    },
+
+    setTextUpscale(id, mode) {
+      const item = find(id);
+      if (!item || textOf(item).upscale === mode) return;
+      // like a setting: the background work was for the old answer, and starts again for the new one once it rests
+      abortPrefetch(id);
+      patchText(id, { upscale: mode });
+      showOrTrace(id);
+      if (!userJob(find(id)!)) {
+        schedulePrefetch(id);
+        holdPrefetch();
+      }
     },
 
     cancelText(id) {

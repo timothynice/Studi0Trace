@@ -1,7 +1,7 @@
 {
  "exporters": {
   "api": {
-   "commit": "2a61c639d76aa8ac4892d4fc2ee61279d7cadb27",
+   "commit": "a77d6fb6dd24dc7522ce1f6e045ec6e47dbbf24a",
    "environment": {
     "Pillow": "12.3.0",
     "machine": "arm64",
@@ -166,19 +166,19 @@
    "sources_differ_from_commit": false
   },
   "schema": {
-   "commit": "4aa4307ffaef8fc7f2577eb06b85e35805105ecf",
+   "commit": "a77d6fb6dd24dc7522ce1f6e045ec6e47dbbf24a",
    "environment": {
     "Pillow": "12.3.0",
     "machine": "arm64",
     "numpy": "2.5.3",
-    "python": "3.13.3",
+    "python": "3.12.9",
     "resvg-py": "0.5.0",
     "scikit-image": "0.26.0",
     "scipy": "1.18.1",
     "system": "Darwin",
     "vexel_backend": "rust"
    },
-   "sources_differ_from_commit": false
+   "sources_differ_from_commit": true
   },
   "scorecard": {
    "commit": "930737dede588ac9550fe0c7181ddc73b0a15d1c",

@@ -70,8 +70,8 @@ class VexelParams(BaseModel):
 
     upsample: Literal["auto", "never", "always"] = Field(
         "auto",
-        description="Trace a small input (≤ 192 px) at twice its size when its own trace shows a region thinner than 2.2 px",
-        json_schema_extra={"ui": {"control": "select", "group": "Regions", "label": "Small-input upsampling"}},
+        description="Trace at twice the size and scale back: auto applies it to small inputs with thin regions; always applies it to any image (about four times slower)",
+        json_schema_extra={"ui": {"control": "select", "group": "Regions", "label": "Trace at 2×"}},
     )
     detail: float = Field(
         6.0, ge=1.0, le=40.0, description="Colour difference (ΔE) below which neighbouring regions merge; lower keeps more regions",

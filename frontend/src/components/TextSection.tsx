@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 
-import { declineText, fitPercent, fontLabel, TEXT_PHASE_TEXT, textErrorText } from "@/lib/text";
+import { declineText, fitPercent, fontLabel, TEXT_PHASE_TEXT, textErrorText, upscaleHint } from "@/lib/text";
 import type { FontRef, TextLine, TextLineChange } from "@/platform/types";
-import { shownAnswer, textOf, type ImageItem } from "@/state/library";
+import { shownAnswer, textOf, upscaled, type ImageItem, type Upscale } from "@/state/library";
 import { Switch } from "./Switch";
 
 export interface TextSectionProps {
@@ -16,6 +16,8 @@ export interface TextSectionProps {
   onCancel: () => void;
   /** Asks for the plan again after it failed. */
   onRetry: () => void;
+  /** The Trace at 2× switch ("on", "off"), and its return to the decision ("auto"). */
+  onUpscale: (mode: Upscale) => void;
   searchFonts: (query: string) => Promise<FontRef[]>;
 }
 
@@ -138,8 +140,28 @@ function LineRow({ line, n, on, onChange, onToggle, onHover, searchFonts }: { li
   );
 }
 
+/** Trace at 2×: on "auto" the switch shows the decision (small text the fonts do not set), flipped it is the user's, and Auto returns to the decision. */
+function UpscaleRow({ mode, on, onUpscale }: { mode: Upscale; on: boolean; onUpscale: (mode: Upscale) => void }) {
+  return (
+    <div className="space-y-0.5 pt-1">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-[12px] text-foreground">Trace at 2×</span>
+        <div className="flex items-center gap-1.5">
+          {mode !== "auto" && (
+            <button type="button" className="mac-ghost h-6 px-1.5 text-[11px] text-muted-foreground" onClick={() => onUpscale("auto")}>
+              Auto
+            </button>
+          )}
+          <Switch aria-label="Trace at 2×" checked={on} onCheckedChange={(v) => onUpscale(v ? "on" : "off")} />
+        </div>
+      </div>
+      <p className="text-[11px] leading-snug text-muted-foreground">{upscaleHint(mode, on)}</p>
+    </div>
+  );
+}
+
 /** The inspector's Text body (under its section header): the lines found in the image, each with its string, its font, how well it fits and whether it is re-set. */
-export function TextSection({ item, settingOn, onChange, onToggle, onHover, onCancel, onRetry, searchFonts }: TextSectionProps) {
+export function TextSection({ item, settingOn, onChange, onToggle, onHover, onCancel, onRetry, onUpscale, searchFonts }: TextSectionProps) {
   if (!settingOn) return <p className="text-[12px] text-muted-foreground">Off in Settings</p>;
   const t = textOf(item);
   const count = t.plan?.lines.length ?? 0;
@@ -195,6 +217,7 @@ export function TextSection({ item, settingOn, onChange, onToggle, onHover, onCa
           ))}
         </div>
       )}
+      {t.plan && count > 0 && <UpscaleRow mode={t.upscale} on={upscaled(item)} onUpscale={onUpscale} />}
     </div>
   );
 }

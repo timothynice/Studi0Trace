@@ -85,8 +85,8 @@ pub fn fields() -> Vec<Field> {
         Field {
             name: "upsample",
             kind: Choice { default: "auto", options: &["auto", "never", "always"] },
-            description: "Trace a small input (≤ 192 px) at twice its size when its own trace shows a region thinner than 2.2 px",
-            ui: json!({"control": "select", "group": "Regions", "label": "Small-input upsampling"}),
+            description: "Trace at twice the size and scale back: auto applies it to small inputs with thin regions; always applies it to any image (about four times slower)",
+            ui: json!({"control": "select", "group": "Regions", "label": "Trace at 2×"}),
         },
         Field {
             name: "detail",
