@@ -295,6 +295,34 @@ def grad_alpha_fade(rng):
     )
 
 
+def _soft_disc_template(sigma: float) -> Callable[[random.Random], str]:
+    """A pale disc with a soft edge (Gaussian σ `sigma` px at 512) inside a
+    vertical sky gradient. The disc's radial fill runs from its own colour at
+    the centre to the sky's colour at the disc's lower edge, so the contrast
+    across its edge fades to nothing along its lower third and is full along
+    the upper two thirds: the Horizon logo's sun (spec
+    `2026-10-09-soft-disc-merge-design.md`). The vector truth is the circle
+    with its radial fill; the blur is part of the truth render, as the shadow
+    class's filters are."""
+    def fn(rng):
+        sky_top, sky_bottom, sun = "#F2A65A", "#F9DCC4", "#FFF4D6"
+        # the sky's colour at the disc's lower edge (y = 346 of 512): the sun's rim colour
+        t = 346 / 512
+        rim = "#%02X%02X%02X" % tuple(
+            int(round((1 - t) * int(sky_top[i:i + 2], 16) + t * int(sky_bottom[i:i + 2], 16))) for i in (1, 3, 5)
+        )
+        defs = (
+            f'<linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">{_stops([sky_top, sky_bottom])}</linearGradient>'
+            f'<radialGradient id="sun">{_stops([sun, rim])}</radialGradient>'
+            f'<filter id="soft" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="{sigma}"/></filter>'
+        )
+        return _svg(
+            '<circle cx="256" cy="236" r="110" fill="url(#sun)" filter="url(#soft)"/>',
+            defs=defs, background="url(#sky)",
+        )
+    return fn
+
+
 # --- shadow -------------------------------------------------------------------
 
 
@@ -510,6 +538,8 @@ TEMPLATES: dict[str, list[tuple[str, Callable[[random.Random], str]]]] = {
     "gradient": [
         ("linear-frame", grad_linear_frame), ("radial-disc", grad_radial_disc), ("linear-4stop", grad_linear_4stop),
         ("multi-shape", grad_multi_shape), ("radial-focal", grad_radial_focal), ("alpha-fade", grad_alpha_fade),
+        ("soft-disc-1", _soft_disc_template(1.0)), ("soft-disc-2", _soft_disc_template(2.0)),
+        ("soft-disc-3", _soft_disc_template(3.0)),
     ],
     "shadow": [
         ("disc", shadow_disc), ("card", shadow_card), ("over-gradient", shadow_over_gradient),

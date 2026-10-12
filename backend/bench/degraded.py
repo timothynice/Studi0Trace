@@ -1,6 +1,6 @@
 """Degraded bench set: vector truth, damaged the way real uploads are.
 
-Fifteen sources with vector truth (synthetic corpus templates, Studi0's own
+Sixteen sources with vector truth (synthetic corpus templates, Studi0's own
 marks, two held-out emoji, a geometric stand-in for a wave lockup and two text
 lines of the synthetic corpus) are rendered with resvg and put through four
 degradations:
@@ -340,6 +340,7 @@ SOURCES: tuple[Source, ...] = (
     Source("wave-lockup", "synthetic", None, long_side=WAVE_W),
     Source("sans-3-white", "corpus", "corpus/synthetic/text/sans-3-white.svg"),
     Source("sans-4-gradient", "corpus", "corpus/synthetic/text/sans-4-gradient.svg"),
+    Source("soft-disc-2", "corpus", "corpus/synthetic/gradient/soft-disc-2.svg"),
 )
 
 

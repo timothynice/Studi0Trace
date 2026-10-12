@@ -363,6 +363,90 @@ items:
   - size:512
   - degraded:downsample
   truth_svg: synthetic/gradient/radial-focal.svg
+- id: gradient/soft-disc-1-128
+  class: gradient
+  png: synthetic/gradient/soft-disc-1-128.png
+  width: 128
+  height: 128
+  tags:
+  - synthetic
+  - size:128
+  truth_svg: synthetic/gradient/soft-disc-1.svg
+- id: gradient/soft-disc-1-512
+  class: gradient
+  png: synthetic/gradient/soft-disc-1-512.png
+  width: 512
+  height: 512
+  tags:
+  - synthetic
+  - size:512
+  truth_svg: synthetic/gradient/soft-disc-1.svg
+- id: gradient/soft-disc-1-512-ds
+  class: gradient
+  png: synthetic/gradient/soft-disc-1-512-ds.png
+  width: 512
+  height: 512
+  tags:
+  - synthetic
+  - size:512
+  - degraded:downsample
+  truth_svg: synthetic/gradient/soft-disc-1.svg
+- id: gradient/soft-disc-2-128
+  class: gradient
+  png: synthetic/gradient/soft-disc-2-128.png
+  width: 128
+  height: 128
+  tags:
+  - synthetic
+  - size:128
+  truth_svg: synthetic/gradient/soft-disc-2.svg
+- id: gradient/soft-disc-2-512
+  class: gradient
+  png: synthetic/gradient/soft-disc-2-512.png
+  width: 512
+  height: 512
+  tags:
+  - synthetic
+  - size:512
+  truth_svg: synthetic/gradient/soft-disc-2.svg
+- id: gradient/soft-disc-2-512-ds
+  class: gradient
+  png: synthetic/gradient/soft-disc-2-512-ds.png
+  width: 512
+  height: 512
+  tags:
+  - synthetic
+  - size:512
+  - degraded:downsample
+  truth_svg: synthetic/gradient/soft-disc-2.svg
+- id: gradient/soft-disc-3-128
+  class: gradient
+  png: synthetic/gradient/soft-disc-3-128.png
+  width: 128
+  height: 128
+  tags:
+  - synthetic
+  - size:128
+  truth_svg: synthetic/gradient/soft-disc-3.svg
+- id: gradient/soft-disc-3-512
+  class: gradient
+  png: synthetic/gradient/soft-disc-3-512.png
+  width: 512
+  height: 512
+  tags:
+  - synthetic
+  - size:512
+  truth_svg: synthetic/gradient/soft-disc-3.svg
+- id: gradient/soft-disc-3-512-ds
+  class: gradient
+  png: synthetic/gradient/soft-disc-3-512-ds.png
+  width: 512
+  height: 512
+  tags:
+  - synthetic
+  - size:512
+  - degraded:downsample
+  truth_svg: synthetic/gradient/soft-disc-3.svg
 - id: logo/cutout-128
   class: logo
   png: synthetic/logo/cutout-128.png

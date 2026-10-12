@@ -18,3 +18,4 @@ degraded small/venn-176               # strokes and slivers under 2 px
 degraded sharpen/wave-lockup-1208     # unsharp rims and halos, opaque ground (on transparent ground the rim brightens)
 corpus text/sans-3-white-512          # 3 px stems: thin-stroke seeding
 degraded nn2x/sans-3-white-512        # 1.5 px stems doubled to crisp 3 px
+corpus gradient/soft-disc-2-512       # soft-edged disc inside a gradient: closed soft boundary

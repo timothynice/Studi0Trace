@@ -162,20 +162,20 @@ def test_wave_lockup_ribbons_keep_a_channel_and_sharp_tips():
             assert len(runs(x)[pick]) <= 2, x
 
 
-def test_generate_writes_60_items_byte_identically(tmp_path):
+def test_generate_writes_64_items_byte_identically(tmp_path):
     from bench.corpus import load_corpus
 
     items = dg.generate(tmp_path / "a", seed=1234)
-    assert len(items) == len(dg.SOURCES) * len(dg.CLASSES) == 60
+    assert len(items) == len(dg.SOURCES) * len(dg.CLASSES) == 64
     dg.generate(tmp_path / "b", seed=1234)
     files_a = sorted(p.relative_to(tmp_path / "a") for p in (tmp_path / "a").rglob("*") if p.is_file())
     files_b = sorted(p.relative_to(tmp_path / "b") for p in (tmp_path / "b").rglob("*") if p.is_file())
-    assert files_a == files_b and len(files_a) == 60 + 60 + 1 + 1 + 2  # PNGs, truths, manifest, SOURCES.md, licences
+    assert files_a == files_b and len(files_a) == 64 + 64 + 1 + 1 + 2  # PNGs, truths, manifest, SOURCES.md, licences
     for rel in files_a:
         assert (tmp_path / "a" / rel).read_bytes() == (tmp_path / "b" / rel).read_bytes(), rel
 
     loaded = load_corpus(tmp_path / "a")
-    assert len(loaded) == 60
+    assert len(loaded) == 64
     assert all(i.truth_svg is not None and i.truth_svg.exists() and i.png.exists() for i in loaded)
     assert {i.cls for i in loaded} == set(dg.CLASSES)
     by_id = {i.id: i for i in loaded}
@@ -229,7 +229,7 @@ def test_the_committed_set_is_current(tmp_path):
     assert fresh == committed
     assert {"manifest.yaml", "SOURCES.md"} <= {p.as_posix() for p in fresh}
     assert any(p.parts[0] == "LICENSES" for p in fresh)
-    assert sum(p.suffix == ".svg" for p in fresh) == 60
+    assert sum(p.suffix == ".svg" for p in fresh) == 64
     for rel in fresh:
         assert (tmp_path / rel).read_bytes() == (dg.DEFAULT_OUT / rel).read_bytes(), (
             f"{rel} is stale: run `python -m bench.degraded generate` and commit the result")

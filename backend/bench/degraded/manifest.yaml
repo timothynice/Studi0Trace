@@ -87,6 +87,17 @@ items:
   - source:corpus
   - size:512
   truth_svg: combo/sans-4-gradient.svg
+- id: combo/soft-disc-2-512
+  class: combo
+  png: combo/soft-disc-2-512.png
+  width: 512
+  height: 512
+  tags:
+  - degraded
+  - degraded:combo
+  - source:corpus
+  - size:512
+  truth_svg: combo/soft-disc-2.svg
 - id: combo/sticker-512
   class: combo
   png: combo/sticker-512.png
@@ -252,6 +263,17 @@ items:
   - source:corpus
   - size:512
   truth_svg: nn2x/sans-4-gradient.svg
+- id: nn2x/soft-disc-2-512
+  class: nn2x
+  png: nn2x/soft-disc-2-512.png
+  width: 512
+  height: 512
+  tags:
+  - degraded
+  - degraded:nn2x
+  - source:corpus
+  - size:512
+  truth_svg: nn2x/soft-disc-2.svg
 - id: nn2x/sticker-512
   class: nn2x
   png: nn2x/sticker-512.png
@@ -417,6 +439,17 @@ items:
   - source:corpus
   - size:512
   truth_svg: sharpen/sans-4-gradient.svg
+- id: sharpen/soft-disc-2-512
+  class: sharpen
+  png: sharpen/soft-disc-2-512.png
+  width: 512
+  height: 512
+  tags:
+  - degraded
+  - degraded:sharpen
+  - source:corpus
+  - size:512
+  truth_svg: sharpen/soft-disc-2.svg
 - id: sharpen/sticker-512
   class: sharpen
   png: sharpen/sticker-512.png
@@ -582,6 +615,17 @@ items:
   - source:corpus
   - size:176
   truth_svg: small/sans-4-gradient.svg
+- id: small/soft-disc-2-176
+  class: small
+  png: small/soft-disc-2-176.png
+  width: 176
+  height: 176
+  tags:
+  - degraded
+  - degraded:small
+  - source:corpus
+  - size:176
+  truth_svg: small/soft-disc-2.svg
 - id: small/sticker-176
   class: small
   png: small/sticker-176.png
