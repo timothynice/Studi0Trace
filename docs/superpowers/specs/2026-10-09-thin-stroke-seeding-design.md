@@ -139,18 +139,27 @@ the sans-3 items keep their pre-existing 1-4 slivers, the sans-4 -ds items miss 
 the sans-2 items are unchanged.
 
 **Tim's logos.** The three images traced whole at Balanced and Logo, before (`d7de82d`, the
-Python engine) and after (this branch, Rust), and their taglines compared by eye
-(`trace_examples.py`'s tagline boxes). The taglines are not repaired. Rendered, they differ by
-0.00 % of their pixels at both presets, except the "FIND WHAT MATTERS" line of image 2 at Logo
-(0.15 %, mean error 6.18 → 6.22); the letters that were missing or broken before (the O's of
+Python engine) and after (this branch, the Python engine again, `VEXEL_BACKEND=python`; the
+Rust engine's figures are the third column of each preset, for reference), and their taglines
+compared by eye (`trace_examples.py`'s tagline boxes). The engines are compared like with like:
+the two differ end to end wherever an allowed tolerance sits at a decision threshold, so only the
+Python-before to Python-after change is the stage's. The taglines are not repaired. Rendered,
+they differ by 0.00 % of their pixels at both presets, except the "FIND WHAT MATTERS" line of
+image 2 at Logo (0.15 %, mean error 6.18 → 6.22 with the Rust engine, 4.64 → 4.66 by the
+Python-after render's measure); the letters that were missing or broken before (the O's of
 TOMORROW, the first I of IDEAS and the O of OUTSIDE, the L, F and E of LIFE, the B and E of
-BETTER) are missing or broken in the same way after. Whole-image artifact index, before → after:
+BETTER) are missing or broken in the same way after. Whole-image artifact index, Python before →
+Python after (Rust after):
 
 | logo | Balanced | Logo |
 |---|---|---|
-| 1 | 32.51 → 32.51 | 23.75 → 23.75 |
-| 2 | 113.77 → 113.76 | 61.58 → 61.92 |
-| 3 | 67.65 → 68.14 | 54.31 → 54.37 |
+| 1 | 32.51 → 32.51 (32.51) | 23.75 → 23.75 (23.75) |
+| 2 | 113.77 → 113.77 (113.76) | 61.58 → 61.92 (61.92) |
+| 3 | 67.65 → 68.14 (68.14) | 54.31 → 54.37 (54.37) |
+
+The Python engine's after traces equal the Rust engine's to the second decimal in five of six
+cells (the sixth, image 2 at Balanced, is 0.01 apart, the engines' noise), so the moves are the
+stage's: image 1 at both presets and image 2 at Balanced are byte-identical to the before trace.
 
 The stage fires on the whole images (13, 871 and 129 stroke-seed pixels in 1, 2 and 3) but
 almost none of it lands on the taglines: their stems are one to two pixels at half-darkness (a
@@ -158,7 +167,8 @@ profile of 208, 21, 91 across a stem is typical), the case item 5 leaves unseede
 tagline crop on its own seeds none of 2's and 3's lines (13 pixels in 1's). The changes elsewhere
 are a few hundred pixels per logo, mostly neutral; the clearest are small specks gone from the
 edge of the dark mass in 3 at Logo, and a lighter smear on the left stem of the serif N in image 2
-at Logo (error 9.35 → 11.28 over its 42×44 px). Nothing new is wrong at the taglines: no seam, no
+at Logo (error 9.35 → 11.28 over its 42×44 px with the Rust engine; the Python-after trace has
+the same smear, 7.40 → 8.72 by the render measure above). Nothing new is wrong at the taglines: no seam, no
 sliver, no filled bowl. The artifact index of an SVG cropped to a tagline box counts the shapes
 outside it too, so the whole-image index is the honest figure; the crop-only trace of the box is
 byte-identical before and after for every crop.
