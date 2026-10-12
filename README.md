@@ -73,7 +73,7 @@ On the bench against two well-known open-source tracers, Vexel is the most faith
   </tr>
 </table>
 
-**Small text comes out as type.** Lines of text are recognised on your Mac, matched to a Google Font or one installed on it, set in that font and drawn as outlines; the Text section lets you correct the words, pick another font or leave a line to the trace. Read text with AI (Settings ▸ Text) asks OpenAI for the words and the typeface, with your own key. When the app finds small text it cannot re-set (a line under 40 px it declined, or one you switched off), it traces the image at twice its size, which keeps the thin letters a normal trace loses; Trace at 2× in the Inspect tab's Text section shows that decision and lets you turn it on or off. It costs time: an Auto trace of a 1300 px logo takes five to seven times as long.
+**Small text comes out as type.** Lines of text are recognised on your Mac, matched to a Google Font or one installed on it, set in that font and drawn as outlines; the Text section lets you correct the words, pick another font or leave a line to the trace. Read text with AI (Settings ▸ Text) asks OpenAI for the words and the typeface, with your own key. When the app finds small text it cannot re-set (a line under 40 px it declined, or one you switched off), it traces the image at twice its size, which keeps the thin letters a normal trace loses; Trace at 2× in the Inspect tab's Text section shows that decision and lets you turn it on or off. It costs time: on three 1254–1536 px logos a trace took 5.5–6.8× as long under Auto and 3.6–5.9× on a preset (Balanced), a minute or more each.
 
 **Rough source? Redraw it first (optional).** A small, blurry or pixel-doubled image is the hardest thing to trace. Image ▸ Redraw with AI… shows an AI redraw against the original with a drift check, and only replaces the image when you say so. Your images stay on your Mac: nothing is uploaded unless you choose AI redraw or turn on Read text with AI, which send the image you are tracing to OpenAI with your own API key. Those two, the fonts and the update check are the only things in the app that touch the network: a matched Google Font is downloaded from Google and the update check asks GitHub for the newest version, neither with an image attached, and the AI features are off until you turn them on.
 
@@ -265,7 +265,7 @@ The pipeline lives in `backend/vexel-rs/` and is built as an extension module.
 It averages **0.21 s an image** against the Python implementation's 2.1 s —
 **10.4× over the corpus**, and 15.8× on the logo class, where the two 768 px
 real logos are. Trace at 2× (`upsample: always`) costs more than the four times
-the pixels: on an M4 Max, Auto went from 11.5 s to 64 s, 17.9 s to 98 s and 36 s
+the pixels, 5.5–6.8× under Auto and 3.6–5.9× on a preset: on an M4 Max, Auto went from 11.5 s to 64 s, 17.9 s to 98 s and 36 s
 to 248 s on three 1254–1536 px logos, and Balanced alone from 9.2 s to 34 s,
 14.5 s to 65 s and 30 s to 178 s (`trace_at_2x_timing` in
 `crates/studi0trace-core/tests/api.rs`, run by hand). The Python pipeline is still in `engines/vexel/*.py`: it is the

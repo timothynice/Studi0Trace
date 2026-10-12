@@ -1,7 +1,7 @@
 {
  "exporters": {
   "api": {
-   "commit": "a77d6fb6dd24dc7522ce1f6e045ec6e47dbbf24a",
+   "commit": "41888daa1a36e31769612bcf56a79f77c74a3026",
    "environment": {
     "Pillow": "12.3.0",
     "machine": "arm64",
@@ -166,7 +166,7 @@
    "sources_differ_from_commit": false
   },
   "schema": {
-   "commit": "a77d6fb6dd24dc7522ce1f6e045ec6e47dbbf24a",
+   "commit": "41888daa1a36e31769612bcf56a79f77c74a3026",
    "environment": {
     "Pillow": "12.3.0",
     "machine": "arm64",

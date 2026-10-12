@@ -59,6 +59,6 @@ export function smallTextPresent(plan: TextPlan | null, setInFont: Iterable<stri
 
 /** The Trace at 2× switch's hint: why, while it follows the decision ("auto"), else what the user chose. */
 export function upscaleHint(mode: "auto" | "on" | "off", on: boolean): string {
-  if (mode === "auto") return on ? "Small text found: tracing at twice the size, about four times slower" : "No small text: normal size";
-  return on ? "Tracing at twice the size, about four times slower" : "Normal size";
+  if (mode === "auto") return on ? "Small text found: tracing at twice the size (several times slower; a minute or more on a large logo)" : "No small text: normal size";
+  return on ? "Tracing at twice the size (several times slower; a minute or more on a large logo)" : "Normal size";
 }

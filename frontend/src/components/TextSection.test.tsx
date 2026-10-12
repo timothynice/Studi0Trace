@@ -155,7 +155,7 @@ describe("TextSection", () => {
     const { rerender } = render(<TextSection {...p} item={item(plan([line({ enabled: false })]))} />);
     const toggle = screen.getByRole("switch", { name: "Trace at 2×" });
     expect(toggle).toBeChecked();
-    expect(screen.getByText("Small text found: tracing at twice the size, about four times slower")).toBeInTheDocument();
+    expect(screen.getByText("Small text found: tracing at twice the size (several times slower; a minute or more on a large logo)")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Auto" })).toBeNull();
     fireEvent.click(toggle);
     expect(p.onUpscale).toHaveBeenCalledWith("off");

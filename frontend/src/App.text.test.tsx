@@ -144,7 +144,7 @@ describe("Text in the Mac app", () => {
     const toggle = await openAndTrace("/pics/tagline.png", declinedPlan("/pics/tagline.png", 20));
     expect(vi.mocked(platform.vectorize).mock.calls[0][0]).toMatchObject({ auto: true, parameters: { upsample: "always" } });
     expect(toggle).toBeChecked();
-    expect(screen.getByText("Small text found: tracing at twice the size, about four times slower")).toBeInTheDocument();
+    expect(screen.getByText("Small text found: tracing at twice the size (several times slower; a minute or more on a large logo)")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Auto" })).toBeNull();
   });
 

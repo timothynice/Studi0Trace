@@ -70,7 +70,7 @@ class VexelParams(BaseModel):
 
     upsample: Literal["auto", "never", "always"] = Field(
         "auto",
-        description="Trace at twice the size and scale back: auto applies it to small inputs with thin regions; always applies it to any image (about four times slower)",
+        description="Trace at twice the size and scale back: auto applies it to small inputs with thin regions; always applies it to any image (several times slower)",
         json_schema_extra={"ui": {"control": "select", "group": "Regions", "label": "Trace at 2×"}},
     )
     detail: float = Field(
