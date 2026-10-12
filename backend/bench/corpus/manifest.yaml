@@ -1099,6 +1099,34 @@ items:
   - size:512
   - degraded:downsample
   truth_svg: synthetic/text/sans-3-gradient.svg
+- id: text/sans-3-repeat-128
+  class: text
+  png: synthetic/text/sans-3-repeat-128.png
+  width: 128
+  height: 128
+  tags:
+  - synthetic
+  - size:128
+  truth_svg: synthetic/text/sans-3-repeat.svg
+- id: text/sans-3-repeat-512
+  class: text
+  png: synthetic/text/sans-3-repeat-512.png
+  width: 512
+  height: 512
+  tags:
+  - synthetic
+  - size:512
+  truth_svg: synthetic/text/sans-3-repeat.svg
+- id: text/sans-3-repeat-512-ds
+  class: text
+  png: synthetic/text/sans-3-repeat-512-ds.png
+  width: 512
+  height: 512
+  tags:
+  - synthetic
+  - size:512
+  - degraded:downsample
+  truth_svg: synthetic/text/sans-3-repeat.svg
 - id: text/sans-3-white-128
   class: text
   png: synthetic/text/sans-3-white-128.png

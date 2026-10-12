@@ -525,6 +525,19 @@ def _text_template(stroke: float, gradient: bool) -> Callable[[random.Random], s
     return fn
 
 
+def _text_repeat_template(stroke: float) -> Callable[[random.Random], str]:
+    """One lowercase line with repeated letters ("letters settle better": six
+    e's, five t's, three s's, two l's, two r's) at `stroke` px stems on white:
+    the text-as-shapes loop's item (`2026-10-09-text-as-shapes-design.md`)."""
+    def fn(rng):
+        font = _font(TEXT_FONT)
+        size = stroke / _stem_em(font)
+        string = "letters settle better"
+        x = (CANVAS - _line_width(font, string, size, 0.0)) / 2
+        return _svg(text_line(font, string, size, x, 270.0), background="#FFFFFF")
+    return fn
+
+
 TEMPLATES: dict[str, list[tuple[str, Callable[[random.Random], str]]]] = {
     "logo": [
         ("ring", logo_ring), ("cutout", logo_cutout), ("triangle-bar", logo_triangle_bar),
@@ -550,6 +563,7 @@ TEMPLATES: dict[str, list[tuple[str, Callable[[random.Random], str]]]] = {
         ("sans-2-white", _text_template(2.0, False)), ("sans-2-gradient", _text_template(2.0, True)),
         ("sans-3-white", _text_template(3.0, False)), ("sans-3-gradient", _text_template(3.0, True)),
         ("sans-4-white", _text_template(4.0, False)), ("sans-4-gradient", _text_template(4.0, True)),
+        ("sans-3-repeat", _text_repeat_template(3.0)),
     ],
 }
 

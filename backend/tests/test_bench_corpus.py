@@ -11,11 +11,11 @@ def test_generate_is_complete_and_deterministic(tmp_path: Path):
     items = generate(tmp_path, seed=7, sizes=(64, 32))
     n_templates = sum(len(v) for v in TEMPLATES.values())
     # two sizes, plus a downsampled variant of the larger one
-    assert len(items) == n_templates * 3 == 111
+    assert len(items) == n_templates * 3 == 114
     assert all(i.png.exists() and i.truth_svg.exists() for i in items)
 
     loaded = load_corpus(tmp_path)
-    assert len(loaded) == 111
+    assert len(loaded) == 114
     assert {i.cls for i in loaded} == {"logo", "flat", "gradient", "shadow", "text"}
     assert sum(1 for i in loaded if i.cls == "logo") == 3 * len(TEMPLATES["logo"]) == 24
     assert sum(1 for i in loaded if "degraded:downsample" in i.tags) == n_templates

@@ -29,7 +29,7 @@ def test_stem_width_sets_the_size():
 
 def test_every_text_template_fits_the_canvas_and_has_strokes_of_its_width():
     names = [n for n, _ in TEMPLATES["text"]]
-    assert names == ["sans-2-white", "sans-2-gradient", "sans-3-white", "sans-3-gradient", "sans-4-white", "sans-4-gradient"]
+    assert names == ["sans-2-white", "sans-2-gradient", "sans-3-white", "sans-3-gradient", "sans-4-white", "sans-4-gradient", "sans-3-repeat"]
     for name, fn in TEMPLATES["text"]:
         svg = fn(None)
         xs = [float(v) for v in re.findall(r"[MLC](-?\d+\.\d+) ", svg)]
@@ -38,6 +38,8 @@ def test_every_text_template_fits_the_canvas_and_has_strokes_of_its_width():
         ink = png[..., :3].sum(axis=2) < 3 * 128
         stroke = int(name.split("-")[1])
         assert ink.sum() > 500 * stroke, name  # about 1260, 2900 and 5350 px at 2, 3 and 4 px
+        if name == "sans-3-repeat":
+            continue  # one lowercase line at baseline 270 and no caps line: row 192 is blank, so no stroke-run check
         # the capital I of "OUTSIDE" is a vertical bar: the narrowest ink run across the caps line is a stem
         row = ink[192]  # through the caps line (baseline 200; the cap height is >= 19 px at every stroke)
         runs = np.diff(np.flatnonzero(np.diff(np.concatenate([[0], row.astype(int), [0]]))))[::2]
