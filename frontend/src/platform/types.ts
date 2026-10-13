@@ -292,6 +292,11 @@ export interface Platform {
   deleteRedrawKey(): Promise<void>;
   /** The key was stored (true) or removed (false), from any window. */
   onRedrawKey(cb: (stored: boolean) => void): () => void;
+  /**
+   * The Mac's physical memory in bytes, what the automatic Trace at 2× decision weighs a trace's predicted peak
+   * against (`upscaleFits`). Absent in a browser: the decision falls back to its pixel budget.
+   */
+  systemMemory?(): Promise<number>;
   imageRoughness(id: string): Promise<Roughness>;
   /** Redraws the image with AI; the answer waits in the app for accept/discard. Aborting the signal abandons it. */
   redrawImage(id: string, opts: RedrawOptions): Promise<RedrawResult>;

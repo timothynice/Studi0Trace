@@ -170,10 +170,21 @@ describe("TextSection", () => {
     expect(screen.getByText("No small text: normal size")).toBeInTheDocument();
   });
 
-  it("says why small text stays at 1× on an image over the 2× budget", () => {
-    const big = { ...item(plan([line({ enabled: false })])), image: { id: "a", name: "a.png", path: null, width: 2000, height: 1500, format: "PNG", previewUrl: "" } } as ImageItem;
-    render(<TextSection {...props()} item={big} />);
+  const sized = (width: number, height: number, memoryBytes: number | null) =>
+    ({ ...item(plan([line({ enabled: false })])), image: { id: "a", name: "a.png", path: null, width, height, format: "PNG", previewUrl: "" }, memoryBytes }) as ImageItem;
+
+  it("says why small text stays at 1× on an image over the 2× budget, with the Mac's memory unknown (the pixel fallback)", () => {
+    render(<TextSection {...props()} item={sized(2000, 1500, null)} />);
     expect(screen.getByRole("switch", { name: "Trace at 2×" })).not.toBeChecked();
-    expect(screen.getByText("Small text found, but the image is too large to trace at 2× automatically (about 3.0 MP); switch it on to force it")).toBeInTheDocument();
+    expect(screen.getByText("Small text found, but the image is too large to trace at 2× automatically on this Mac (it would need about 36 GB); switch it on to force it")).toBeInTheDocument();
+  });
+
+  it("weighs a 1536 × 1024 logo against the Mac's memory: at 2× by itself on 64 GB, at 1× with the reason on 16 GB", () => {
+    const { rerender } = render(<TextSection {...props()} item={sized(1536, 1024, 64 * 2 ** 30)} />);
+    expect(screen.getByRole("switch", { name: "Trace at 2×" })).toBeChecked();
+    expect(screen.getByText("Small text found: tracing at twice the size (several times slower; a minute or more on a large logo)")).toBeInTheDocument();
+    rerender(<TextSection {...props()} item={sized(1536, 1024, 16 * 2 ** 30)} />);
+    expect(screen.getByRole("switch", { name: "Trace at 2×" })).not.toBeChecked();
+    expect(screen.getByText("Small text found, but the image is too large to trace at 2× automatically on this Mac (it would need about 19 GB); switch it on to force it")).toBeInTheDocument();
   });
 });

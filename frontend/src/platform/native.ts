@@ -192,6 +192,7 @@ export function nativePlatform(): Platform {
     setRedrawKey: (key) => call<void>("set_redraw_key", { key }),
     deleteRedrawKey: () => call<void>("delete_redraw_key"),
     onRedrawKey: (cb) => on<boolean>("redraw-key", cb),
+    systemMemory: () => call<number>("system_memory"),
     imageRoughness: (id) => call<Roughness>("image_roughness", { id }),
     async redrawImage(id, { signal, onPhase }) {
       if (signal.aborted) throw redrawCancelled();

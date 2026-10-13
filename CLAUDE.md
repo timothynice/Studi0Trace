@@ -73,8 +73,9 @@ fidelity bench. Read `README.md` first — it has the run/test/API reference.
   → `vectorize(…, mask)` names the lines to paint out, `Plans::painted_for` builds (and caches) that painted PNG and
   the worker traces it (an empty mask traces the original bytes). Small text the re-setter does not compose (declined or
   switched-off lines under 40 px) makes the app trace at 2× (`upsample: always`, `smallTextPresent` in `lib/text.ts`,
-  the Trace at 2× switch) when the image is at most `UPSCALE_MAX_PX` (0.6 MP: Balanced at 2× peaked at 18.2 GB resident
-  on 1536 × 1024; "on" forces it at any size, and at 2× only the empty mask is prefetched); the decision is each mask's
+  the Trace at 2× switch) when its predicted peak (`upscaleFits`: 3000 B per 2× pixel, from Balanced's 18.2 GB resident on 1536 × 1024) is at
+  most half the Mac's memory (`system_memory`; `UPSCALE_FALLBACK_MAX_PX`, 0.6 MP, when unknown; "on" forces it at any
+  size, and at 2× only the empty mask is prefetched); the decision is each mask's
   (`upscaledFor`: the lines outside the mask). Auto never runs at 2×: it runs at 1× (`auto|mask`, shown first) and
   `finish` follows it with its pick alone at 2× as a user trace, keyed by the pick's params with `upsample: "always"`,
   as a preset's 2× trace is; with

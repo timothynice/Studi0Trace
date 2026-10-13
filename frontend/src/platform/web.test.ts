@@ -78,6 +78,8 @@ describe("web platform", () => {
   });
   it("has no AI redraw: every redraw call says it needs the Mac app", async () => {
     const p = webPlatform();
+    // nor the Mac's memory: the 2× decision falls back to its pixel budget
+    expect(p.systemMemory).toBeUndefined();
     const attempts = [
       () => p.redrawKeyStatus(),
       () => p.setRedrawKey("k"),

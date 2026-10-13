@@ -96,6 +96,7 @@ pub fn run() {
             commands::redraw_key_status,
             commands::set_redraw_key,
             commands::delete_redraw_key,
+            commands::system_memory,
             commands::image_roughness,
             commands::redraw_image,
             commands::cancel_redraw,

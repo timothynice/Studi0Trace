@@ -3,7 +3,7 @@
  * job running for it. Framework-free: React reads it through `useLibrary`, tests call it directly.
  */
 import { ApiError, type AutoResult, type EngineDescription, type ParamValues, type Preset, type VectorizeResponse } from "@/lib/api";
-import { smallTextPresent, UPSCALE_MAX_PX } from "@/lib/text";
+import { smallTextPresent, upscaleFits } from "@/lib/text";
 import { composeSvg } from "@/lib/textsvg";
 import { normalizeValues, paramsKey, specsFor } from "@/lib/schema";
 import type { Drift, FontRef, OpenedImage, OpenFailure, OpenOutcome, Phase, Platform, RedrawPhase, RedrawResult, Roughness, Settings, TextLine, TextLineChange, TextPhase, TextPlan } from "@/platform/types";
@@ -66,6 +66,8 @@ export interface ImageItem {
   rough?: Roughness;
   /** Text re-setting (the Mac app); absent until asked. */
   text?: TextState;
+  /** The Mac's physical memory in bytes, as the store learnt it (`Platform.systemMemory`): what the automatic 2× decision weighs a trace's peak against (`fitsAt2x`); absent or null when not known. */
+  memoryBytes?: number | null;
 }
 
 /** An image's text plan: asked once per image bytes, before the first trace. */
@@ -94,21 +96,21 @@ export const maskOf = (text: TextState): string[] => matchedLines(text.plan).fil
 /** Every matched line, sorted: the mask of the first trace. */
 export const fullMask = (plan: TextPlan): string[] => matchedLines(plan).map((l) => l.id).sort();
 
-/** An image's pixels, what the automatic 2× decision is bounded by (`UPSCALE_MAX_PX`); 0 when it is not known. */
-export const pixelsOf = (item: Partial<Pick<ImageItem, "image">>): number => (item.image ? item.image.width * item.image.height : 0);
+/** Whether the app may decide on 2× for this image by itself (`upscaleFits`: its predicted peak against the Mac's memory, or the pixel fallback); true while its size is not known. */
+export const fitsAt2x = (item: Partial<Pick<ImageItem, "image" | "memoryBytes">>): boolean => !item.image || upscaleFits(item.image.width, item.image.height, item.memoryBytes ?? null);
 
 /**
  * Whether a trace with `mask` painted out is traced at 2× (the engine's `upsample: "always"`): always when the switch
  * is on, never when it is off, and on "auto" when small text is left for that trace to draw as shapes, the lines
- * outside its mask (`smallTextPresent`), and the image (`pixels`) is within `UPSCALE_MAX_PX`. Each mask has its own
- * answer, so a mask traced ahead is keyed as a switch will ask for it.
+ * outside its mask (`smallTextPresent`), and the image fits a trace at 2× on this Mac (`fits`, `fitsAt2x`). Each mask
+ * has its own answer, so a mask traced ahead is keyed as a switch will ask for it.
  */
-export function upscaledFor(text: TextState, mask: string[], pixels: number): boolean {
-  return text.upscale === "auto" ? pixels <= UPSCALE_MAX_PX && smallTextPresent(text.plan, mask) : text.upscale === "on";
+export function upscaledFor(text: TextState, mask: string[], fits: boolean): boolean {
+  return text.upscale === "auto" ? fits && smallTextPresent(text.plan, mask) : text.upscale === "on";
 }
 
 /** Whether the trace the controls and the switches ask for now is traced at 2×: what the Trace at 2× switch shows. */
-export const upscaled = (item: Pick<ImageItem, "text"> & Partial<Pick<ImageItem, "image">>): boolean => upscaledFor(textOf(item), maskOf(textOf(item)), pixelsOf(item));
+export const upscaled = (item: Pick<ImageItem, "text"> & Partial<Pick<ImageItem, "image" | "memoryBytes">>): boolean => upscaledFor(textOf(item), maskOf(textOf(item)), fitsAt2x(item));
 
 /** `params` as a trace at 2× is traced with: `upsample: "always"` laid over them. */
 export const at2x = (params: ParamValues, on: boolean): ParamValues => (on ? { ...params, upsample: "always" } : params);
@@ -120,9 +122,9 @@ export const at2x = (params: ParamValues, on: boolean): ParamValues => (on ? { .
  * 2× (`upscaledFor`) is keyed by the params it is traced with, `upsample: "always"` among them; Auto itself always runs
  * at 1×, so at 2× even the full mask is the pick's params once the pick is known (`finish` traces it next).
  */
-export function traceKeyFor(item: Pick<ImageItem, "preset" | "params"> & Partial<Pick<ImageItem, "auto" | "text" | "image">>, mask: string[]): string {
+export function traceKeyFor(item: Pick<ImageItem, "preset" | "params"> & Partial<Pick<ImageItem, "auto" | "text" | "image" | "memoryBytes">>, mask: string[]): string {
   const m = mask.join(",");
-  const up = upscaledFor(textOf(item), mask, pixelsOf(item));
+  const up = upscaledFor(textOf(item), mask, fitsAt2x(item));
   if (item.preset !== "auto") return `${paramsKey(at2x(item.params, up))}|${m}`;
   const plan = item.text?.plan ?? null;
   const full = plan ? fullMask(plan).join(",") : "";
@@ -173,7 +175,7 @@ export interface Catalog {
 }
 
 /** What the library asks of the platform; the redraw methods are there in the Mac app (tests may leave them out). */
-export type LibraryPlatform = Pick<Platform, "vectorize" | "closeImage" | "openPaths"> & Partial<Pick<Platform, "imageRoughness" | "redrawImage" | "acceptRedraw" | "discardRedraw" | "revertRedraw" | "textPlan" | "textSetLine">>;
+export type LibraryPlatform = Pick<Platform, "vectorize" | "closeImage" | "openPaths"> & Partial<Pick<Platform, "imageRoughness" | "redrawImage" | "acceptRedraw" | "discardRedraw" | "revertRedraw" | "textPlan" | "textSetLine" | "systemMemory">>;
 
 export interface Library {
   getState(): LibraryState;
@@ -331,6 +333,23 @@ export function createLibrary(platform: LibraryPlatform, catalog: Catalog, initi
     texting.delete(id);
   };
 
+  /**
+   * The Mac's physical memory (`Platform.systemMemory`), asked once; every image carries it (`memoryBytes`) for the
+   * automatic 2× decision (`fitsAt2x`), which falls back to a pixel budget while it is null. A text plan waits for the
+   * answer before it lands (`ensureText`): the decision reads the plan, so no decision is made without the memory.
+   */
+  let memoryBytes: number | null = null;
+  const memoryKnown: Promise<void> = platform.systemMemory
+    ? platform.systemMemory().then(
+        (bytes) => {
+          if (!(Number.isFinite(bytes) && bytes > 0)) return;
+          memoryBytes = bytes;
+          if (state.items.length) set({ ...state, items: state.items.map((i) => ({ ...i, memoryBytes: bytes })) });
+        },
+        () => {},
+      )
+    : Promise.resolve();
+
   const clearTimer = (id: string) => {
     clearTimeout(timers.get(id));
     timers.delete(id);
@@ -430,7 +449,7 @@ export function createLibrary(platform: LibraryPlatform, catalog: Catalog, initi
       const key = traceKeyFor(item, mask);
       // an Auto image whose pick is not known yet: its masks are Auto runs, which are never traced ahead
       if (isAutoKey(key) || item.traces[key] || item.job?.key === key || queue.some((q) => q.id === id && q.key === key)) continue;
-      queue.push({ id, key, mask, params: at2x(item.params, upscaledFor(textOf(item), mask, pixelsOf(item))) });
+      queue.push({ id, key, mask, params: at2x(item.params, upscaledFor(textOf(item), mask, fitsAt2x(item))) });
     }
   };
 
@@ -604,6 +623,7 @@ export function createLibrary(platform: LibraryPlatform, catalog: Catalog, initi
             if (current() && phase !== "done" && phase !== "failed") patchText(id, { phase });
           },
         });
+        await memoryKnown;
         if (!current()) return false;
         // the plan's flags say which lines start set in a font; the switches own the set from here
         patchText(id, { plan, phase: null, enabled: new Set(plan.lines.filter((l) => l.enabled).map((l) => l.id)) });
@@ -678,7 +698,7 @@ export function createLibrary(platform: LibraryPlatform, catalog: Catalog, initi
     }
     abortJob(item);
     const mask = maskOf(textOf(item));
-    const up = upscaledFor(textOf(item), mask, pixelsOf(item));
+    const up = upscaledFor(textOf(item), mask, fitsAt2x(item));
     // an Auto run is sent no values of its own and runs at 1×: at 2× its pick follows it (`finish`)
     const auto = isAutoKey(key);
     launch(id, { id: newJobId(), key, startedAt: Date.now(), phase: "queued", mask, prefetch: false }, auto ? {} : at2x(item.params, up), auto);
@@ -782,7 +802,7 @@ export function createLibrary(platform: LibraryPlatform, catalog: Catalog, initi
         }
         selected = o.ok.id;
         if (items.some((i) => i.image.id === o.ok.id)) continue;
-        items.push({ image: o.ok, preset: "auto", params: defaults, traces: {}, shown: null, exported: null, job: null, error: null, errorKey: null, auto: null });
+        items.push({ image: o.ok, preset: "auto", params: defaults, traces: {}, shown: null, exported: null, job: null, error: null, errorKey: null, auto: null, memoryBytes });
         added.push(o.ok.id);
       }
       set({ items, failed, selected });

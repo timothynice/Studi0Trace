@@ -5,8 +5,8 @@ import { paramsKey } from "@/lib/schema";
 import type { Drift, OpenOutcome, Phase, Platform, RedrawPhase, RedrawResult, TextLine, TextLineChange, TextPlan, TraceRequest } from "@/platform/types";
 import { DEFAULT_SETTINGS } from "@/platform/types";
 import { composeSvg } from "@/lib/textsvg";
-import { UPSCALE_MAX_PX } from "@/lib/text";
-import { createLibrary, pixelsOf, currentJob, DEBOUNCE_MS, errorOf, fullMask, maskOf, MASKED_TRACES_MAX, PREFETCH_MAX_LINES, PREFETCH_SETTLE_MS, needsUpdate, NO_REDRAW, shownAnswer, textOf, traceKey, traceKeyFor, unexportedCount, upscaled, userJob, type Catalog, type LibraryPlatform } from "./library";
+import { UPSCALE_FALLBACK_MAX_PX } from "@/lib/text";
+import { createLibrary, fitsAt2x, currentJob, DEBOUNCE_MS, errorOf, fullMask, maskOf, MASKED_TRACES_MAX, PREFETCH_MAX_LINES, PREFETCH_SETTLE_MS, needsUpdate, NO_REDRAW, shownAnswer, textOf, traceKey, traceKeyFor, unexportedCount, upscaled, userJob, type Catalog, type LibraryPlatform } from "./library";
 
 const ENGINE: EngineDescription = {
   id: "vexel",
@@ -1752,11 +1752,13 @@ describe("library: Trace at 2×", () => {
     expect(item().shown).toBe(`${P2}|`);
   });
 
-  it("an image over UPSCALE_MAX_PX stays at 1× on its own whatever small text it has; the switch on still forces 2×", async () => {
+  it("with the Mac's memory unknown, an image over UPSCALE_FALLBACK_MAX_PX stays at 1× on its own whatever small text it has; the switch on still forces 2×", async () => {
     const p = maskPlatform(PLAN([TALL, declined("a-d", 20)]));
     const lib = createLibrary(p.platform, CATALOG, TEXT_ON);
     lib.add([{ ok: { ...image("a"), width: 2000, height: 1500 } }]);
-    expect(pixelsOf(lib.selectedItem()!)).toBeGreaterThan(UPSCALE_MAX_PX);
+    expect(2000 * 1500).toBeGreaterThan(UPSCALE_FALLBACK_MAX_PX);
+    expect(lib.selectedItem()!.memoryBytes).toBeNull();
+    expect(fitsAt2x(lib.selectedItem()!)).toBe(false);
     lib.generate("a");
     await flush();
     expect(p.calls[0].req).toMatchObject({ auto: true, mask: ["a-t1"] });
@@ -1789,5 +1791,73 @@ describe("library: Trace at 2×", () => {
     expect(calls).toHaveLength(3);
     expect(calls[2].req).toMatchObject({ mask: ["a-t0", "a-t2"], parameters: at2x({ detail: 6, min_region: 8 }) });
     expect(currentJob(item())).toMatchObject({ key: `${P2}|a-t0,a-t2` });
+  });
+
+  describe("the automatic decision weighs the trace's predicted peak against the Mac's memory", () => {
+    const GB = 2 ** 30;
+    /** A 1536 × 1024 logo (a trace at 2× predicted at 3000 B × 4 × 1.57 MP ≈ 18.9 GB) with a small declined line, on a Mac with `memory`. */
+    async function onMac(memory: () => Promise<number>, width = 1536, height = 1024) {
+      const p = maskPlatform(PLAN([TALL, declined("a-d", 20)]));
+      const systemMemory = vi.fn(memory);
+      const lib = createLibrary({ ...p.platform, systemMemory }, CATALOG, TEXT_ON);
+      lib.add([{ ok: { ...image("a"), width, height } }]);
+      lib.generate("a");
+      await flush();
+      return { ...p, lib, systemMemory, item: () => lib.selectedItem()! };
+    }
+
+    it("on 64 GB a 1536 × 1024 logo is traced at 2× by itself: Auto at 1×, then its pick alone at 2×", async () => {
+      const { calls, item, systemMemory } = await onMac(async () => 64 * GB);
+      expect(systemMemory).toHaveBeenCalledTimes(1);
+      expect(item().memoryBytes).toBe(64 * GB);
+      expect(fitsAt2x(item())).toBe(true);
+      expect(upscaled(item())).toBe(true);
+      expect(calls[0].req).toMatchObject({ auto: true, mask: ["a-t1"] });
+      await autoAnswer(calls[0], ["a-t1"]);
+      expect(calls[1].req).toMatchObject({ auto: false, mask: ["a-t1"] });
+      expect(calls[1].req.parameters).toEqual(at2x(LOGO));
+      expect(item().job).toMatchObject({ key: `${L2}|a-t1`, prefetch: false });
+    });
+
+    it("on 16 GB the same logo stays at 1× by itself (8 GB is half the Mac's), and the switch on still forces 2×", async () => {
+      const { calls, item, lib } = await onMac(async () => 16 * GB);
+      expect(item().memoryBytes).toBe(16 * GB);
+      expect(fitsAt2x(item())).toBe(false);
+      expect(upscaled(item())).toBe(false);
+      await autoAnswer(calls[0], ["a-t1"]);
+      // no 2× trace of the pick follows Auto on its own (what follows is the untouched image's prefetch, at 1×)
+      expect(calls.filter((c) => c.req.mask.join() === "a-t1")).toHaveLength(1);
+      expect(calls.every((c) => c.req.parameters.upsample === undefined)).toBe(true);
+      expect(item().shown).toBe("auto|a-t1");
+      lib.setTextUpscale("a", "on");
+      expect(calls.at(-1)!.req.parameters).toEqual(at2x(LOGO));
+      expect(item().job).toMatchObject({ key: `${L2}|a-t1`, prefetch: false });
+    });
+
+    it("with the memory unknown (the command failed) the pixel fallback decides: 1536 × 1024 at 1×, 640 × 480 at 2×", async () => {
+      const big = await onMac(async () => Promise.reject(new Error("memory_unknown")));
+      expect(big.item().memoryBytes).toBeNull();
+      expect(upscaled(big.item())).toBe(false);
+      const small = await onMac(async () => Promise.reject(new Error("memory_unknown")), 640, 480);
+      expect(upscaled(small.item())).toBe(true);
+      expect(small.calls[0].req).toMatchObject({ auto: true, mask: ["a-t1"] });
+    });
+
+    it("an image opened before the memory is known takes it when it lands, and its plan waits for it", async () => {
+      let answer: (bytes: number) => void = () => {};
+      const p = maskPlatform(PLAN([TALL, declined("a-d", 20)]));
+      const lib = createLibrary({ ...p.platform, systemMemory: () => new Promise<number>((r) => (answer = r)) }, CATALOG, TEXT_ON);
+      lib.add([{ ok: { ...image("a"), width: 1536, height: 1024 } }]);
+      lib.generate("a");
+      await flush();
+      // the plan has been read, but it is not landed (nor traced) without the memory the decision needs
+      expect(textOf(lib.selectedItem()!).plan).toBeNull();
+      expect(p.calls).toHaveLength(0);
+      answer(64 * GB);
+      await flush();
+      expect(lib.selectedItem()!.memoryBytes).toBe(64 * GB);
+      expect(upscaled(lib.selectedItem()!)).toBe(true);
+      expect(p.calls[0].req).toMatchObject({ auto: true, mask: ["a-t1"] });
+    });
   });
 });

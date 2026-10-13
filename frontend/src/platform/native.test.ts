@@ -328,6 +328,12 @@ describe("native platform", () => {
     expect(calls[0]).toEqual({ cmd: "image_roughness", payload: { id: "i" } });
   });
 
+  it("asks the app for the Mac's physical memory, which the browser cannot say", async () => {
+    ipc((cmd) => (cmd === "system_memory" ? 68719476736 : null));
+    await expect(nativePlatform().systemMemory!()).resolves.toBe(68719476736);
+    expect(calls[0]).toMatchObject({ cmd: "system_memory" });
+  });
+
   it("textPlan listens for text-phase before invoking and cancels on abort", async () => {
     ipc((cmd, args) => {
       if (cmd === "text_plan") {

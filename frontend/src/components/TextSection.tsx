@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 
-import { declineText, fitPercent, fontLabel, smallTextPresent, TEXT_PHASE_TEXT, textErrorText, UPSCALE_MAX_PX, upscaleHint } from "@/lib/text";
+import { declineText, fitPercent, fontLabel, smallTextPresent, TEXT_PHASE_TEXT, textErrorText, upscaleHint, upscalePeakBytes } from "@/lib/text";
 import type { FontRef, TextLine, TextLineChange } from "@/platform/types";
-import { maskOf, pixelsOf, shownAnswer, textOf, upscaled, type ImageItem, type Upscale } from "@/state/library";
+import { fitsAt2x, maskOf, shownAnswer, textOf, upscaled, type ImageItem, type Upscale } from "@/state/library";
 import { Switch } from "./Switch";
 
 export interface TextSectionProps {
@@ -221,8 +221,8 @@ export function TextSection({ item, settingOn, onChange, onToggle, onHover, onCa
         <UpscaleRow
           mode={t.upscale}
           on={upscaled(item)}
-          // small text the decision leaves at 1× only because of the image's size: the hint says so
-          tooLarge={pixelsOf(item) > UPSCALE_MAX_PX && smallTextPresent(t.plan, maskOf(t)) ? pixelsOf(item) : null}
+          // small text the decision leaves at 1× only because the image is too large for this Mac: the hint says so
+          tooLarge={!fitsAt2x(item) && smallTextPresent(t.plan, maskOf(t)) ? upscalePeakBytes(item.image.width, item.image.height) : null}
           onUpscale={onUpscale}
         />
       )}

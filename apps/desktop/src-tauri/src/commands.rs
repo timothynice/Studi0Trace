@@ -457,6 +457,23 @@ pub async fn delete_redraw_key(app: tauri::AppHandle) -> Result<(), CommandError
     Ok(())
 }
 
+/// The Mac's physical memory in bytes (`sysctl hw.memsize`): what the automatic Trace at 2× decision weighs a trace's
+/// predicted peak against (`frontend/src/lib/text.ts`, `upscaleFits`). Fails `memory_unknown` when `sysctl` cannot say,
+/// and the frontend falls back to its pixel budget.
+#[tauri::command]
+pub async fn system_memory() -> Result<u64, CommandError> {
+    redraw::blocking(|| physical_memory().ok_or_else(|| CommandError::new(500, "memory_unknown", "The Mac's memory could not be read."))).await
+}
+
+/// `/usr/sbin/sysctl -n hw.memsize`, parsed; `None` when it does not run or does not answer a number.
+pub fn physical_memory() -> Option<u64> {
+    let out = std::process::Command::new("/usr/sbin/sysctl").args(["-n", "hw.memsize"]).output().ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    std::str::from_utf8(&out.stdout).ok()?.trim().parse().ok().filter(|&b: &u64| b > 0)
+}
+
 /// Whether the image looks rough (the inspector's hint).
 #[tauri::command]
 pub async fn image_roughness(state: State<'_, AppState>, id: String) -> Result<Roughness, CommandError> {
@@ -679,6 +696,17 @@ pub async fn text_set_line(state: State<'_, AppState>, texts: State<'_, TextStat
 pub async fn text_search_fonts(texts: State<'_, TextState>, query: String) -> Result<Vec<text::FontRef>, CommandError> {
     let cell = texts.catalog.clone();
     redraw::blocking(move || Ok(crate::catalog_of(&cell).search(&query, 20))).await
+}
+
+#[cfg(test)]
+mod memory_tests {
+    use super::physical_memory;
+
+    #[test]
+    fn the_macs_memory_is_read() {
+        let bytes = physical_memory().expect("sysctl hw.memsize answers");
+        assert!(bytes > 1 << 30, "{bytes} bytes");
+    }
 }
 
 #[cfg(test)]

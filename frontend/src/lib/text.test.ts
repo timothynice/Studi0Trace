@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { TextLine, TextPlan } from "@/platform/types";
-import { declineText, fitPercent, fontLabel, SMALL_TEXT_PX, smallTextPresent, TEXT_PHASE_TEXT, textErrorText } from "./text";
+import { declineText, fitPercent, fontLabel, SMALL_TEXT_PX, smallTextPresent, TEXT_PHASE_TEXT, textErrorText, UPSCALE_FALLBACK_MAX_PX, upscaleFits, upscalePeakBytes } from "./text";
 
 describe("text copy", () => {
   it("names every phase and every reason", () => {
@@ -57,5 +57,31 @@ describe("smallTextPresent", () => {
     expect(smallTextPresent(plan([line("m", 20)]), ["m"])).toBe(false);
     expect(smallTextPresent(plan([line("m", 20)]), [])).toBe(true);
     expect(smallTextPresent(plan([line("m", 20), line("big", 60, false)]), new Set(["m"]))).toBe(false);
+  });
+});
+
+describe("upscaleFits", () => {
+  const GB = 2 ** 30;
+  it("predicts a trace at 2×'s peak at 3000 bytes a pixel of the 2× image", () => {
+    expect(upscalePeakBytes(1536, 1024)).toBe(3000 * 4 * 1536 * 1024);
+    expect(upscalePeakBytes(1536, 1024) / 1e9).toBeCloseTo(18.87, 2);
+  });
+
+  it("allows 2× when the peak is at most half the Mac's memory", () => {
+    // the three logos measured: 1254 × 1254 and 1536 × 1024 (18.9 GB), 2048 × 1365 (33.5 GB)
+    for (const [w, h] of [[1254, 1254], [1536, 1024], [2048, 1365]]) {
+      expect(upscaleFits(w, h, 16 * GB)).toBe(false);
+      expect(upscaleFits(w, h, 32 * GB)).toBe(false);
+      expect(upscaleFits(w, h, 64 * GB)).toBe(true);
+    }
+    expect(upscaleFits(1024, 1024, 32 * GB)).toBe(true);
+    expect(upscaleFits(800, 600, 16 * GB)).toBe(true);
+  });
+
+  it("falls back to the pixel budget when the memory is unknown", () => {
+    expect(upscaleFits(600, 1000, null)).toBe(true);
+    expect(UPSCALE_FALLBACK_MAX_PX).toBe(600_000);
+    expect(upscaleFits(601, 1000, null)).toBe(false);
+    expect(upscaleFits(1536, 1024, null)).toBe(false);
   });
 });
