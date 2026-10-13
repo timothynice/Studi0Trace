@@ -115,9 +115,10 @@ export const at2x = (params: ParamValues, on: boolean): ParamValues => (on ? { .
 
 /**
  * The key a trace of `item`'s settings with `mask` painted out is kept under. On Auto, the full mask is Auto's own
- * run (`auto|…`, `auto2x|…` at 2×); every other mask is traced and kept under the pick's params once the pick is known
- * (an Auto run leaves them in `item.params`), as Auto's candidates are, and is an Auto run of its own only before that.
- * A trace at 2× (`upscaledFor`) is keyed by the params it is traced with, `upsample: "always"` among them.
+ * run (`auto|…`); every other mask is traced and kept under the pick's params once the pick is known (an Auto run
+ * leaves them in `item.params`), as Auto's candidates are, and is an Auto run of its own only before that. A trace at
+ * 2× (`upscaledFor`) is keyed by the params it is traced with, `upsample: "always"` among them; Auto itself always runs
+ * at 1×, so at 2× even the full mask is the pick's params once the pick is known (`finish` traces it next).
  */
 export function traceKeyFor(item: Pick<ImageItem, "preset" | "params"> & Partial<Pick<ImageItem, "auto" | "text" | "image">>, mask: string[]): string {
   const m = mask.join(",");
@@ -125,14 +126,14 @@ export function traceKeyFor(item: Pick<ImageItem, "preset" | "params"> & Partial
   if (item.preset !== "auto") return `${paramsKey(at2x(item.params, up))}|${m}`;
   const plan = item.text?.plan ?? null;
   const full = plan ? fullMask(plan).join(",") : "";
-  return `${m === full || !item.auto?.pick ? (up ? "auto2x" : "auto") : paramsKey(at2x(item.params, up))}|${m}`;
+  return `${!item.auto?.pick || (m === full && !up) ? "auto" : paramsKey(at2x(item.params, up))}|${m}`;
 }
 
 /** The mask a trace key was traced with. */
 export const maskOfKey = (key: string): string[] => key.slice(key.lastIndexOf("|") + 1).split(",").filter(Boolean);
 
-/** An Auto run's key, at 1× or 2×. */
-export const isAutoKey = (key: string): boolean => key.startsWith("auto|") || key.startsWith("auto2x|");
+/** An Auto run's key. */
+export const isAutoKey = (key: string): boolean => key.startsWith("auto|");
 
 const sameFont = (a: FontRef, b: FontRef) => a.family === b.family && a.weight === b.weight && a.italic === b.italic && a.source === b.source;
 
@@ -520,9 +521,7 @@ export function createLibrary(platform: LibraryPlatform, catalog: Catalog, initi
     const auto = res.auto?.[ENGINE] ?? null;
     let params = item.params;
     if (auto) {
-      // the candidates were traced as the run was: at 2× when it was `auto2x`, so they are kept under those params
-      const up = job.key.startsWith("auto2x|");
-      const keyOf = (preset: Preset) => traceKeyFor({ preset: null, params: at2x(resolve(preset.params), up) }, job.mask);
+      const keyOf = (preset: Preset) => traceKeyFor({ preset: null, params: resolve(preset.params) }, job.mask);
       for (const c of auto.candidates) {
         const preset = presetById.get(c.preset);
         if (preset && c.svg) traces[keyOf(preset)] = { svg: composed(c.svg, job.mask, plan), base: c.svg, elapsedMs: c.elapsed_ms ?? 0, stats: c.stats ?? {} };
@@ -538,10 +537,14 @@ export function createLibrary(platform: LibraryPlatform, catalog: Catalog, initi
     // the answer is always kept; it takes the screen only if the settings still are the ones it traced, and settings
     // that moved on while it ran show their own trace if one is known (a candidate, say), else stay as they are
     const want = traceKey({ ...item, params, auto: auto ?? item.auto });
-    const now = traces[want] ? want : item.shown;
+    // an Auto run whose image is traced at 2× is shown while the pick's trace at 2× follows it
+    const followUp = !!auto && !job.prefetch && !traces[want] && upscaled(item);
+    const now = traces[want] ? want : followUp ? job.key : item.shown;
     // a trace just made counts as just seen: it is not the first to go
     touch(id, job.key);
     patch(id, { job: null, ...(job.prefetch ? {} : { error: null, errorKey: null }), traces: capped(id, item, traces, now), shown: now, auto: auto ?? item.auto, params });
+    // the trace the user is waiting for: Auto's pick alone at 2× (Auto's four candidates at 2× cost four times its memory)
+    if (followUp) startTrace(id);
     if (!job.prefetch) schedulePrefetch(id);
     runPrefetch();
   };
@@ -676,9 +679,9 @@ export function createLibrary(platform: LibraryPlatform, catalog: Catalog, initi
     abortJob(item);
     const mask = maskOf(textOf(item));
     const up = upscaledFor(textOf(item), mask, pixelsOf(item));
-    // an Auto run is sent no values of its own: at 2×, `upsample` alone, which the core lays over every candidate
+    // an Auto run is sent no values of its own and runs at 1×: at 2× its pick follows it (`finish`)
     const auto = isAutoKey(key);
-    launch(id, { id: newJobId(), key, startedAt: Date.now(), phase: "queued", mask, prefetch: false }, at2x(auto ? {} : item.params, up), auto);
+    launch(id, { id: newJobId(), key, startedAt: Date.now(), phase: "queued", mask, prefetch: false }, auto ? {} : at2x(item.params, up), auto);
   };
 
   /** After the enabled set or the plan moved the key: show what is known for it, or trace it (a user trace). */

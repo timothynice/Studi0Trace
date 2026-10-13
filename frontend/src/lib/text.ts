@@ -41,11 +41,12 @@ export function textErrorText(code: string): string {
 export const SMALL_TEXT_PX = 40;
 
 /**
- * The most pixels (width × height of the image) the app traces at 2× on its own: Auto at 2× traces its four candidates
- * at once at four times the pixels, and peaked at 14.9 GB resident on a 1536 × 1024 logo (README, performance), so
- * 1536 · 1024 · 8 / 14.9 ≈ 0.85 MP keeps it under about 8 GB. The switch still forces 2× at any size.
+ * The most pixels (width × height of the image) the app traces at 2× on its own. Auto runs at 1× and its pick follows
+ * alone at 2×; the heaviest pick, Balanced, peaked at 18.2 GB resident at 2× on a 1536 × 1024 logo (README,
+ * performance), so 1536 · 1024 · 8 / 18.2 ≈ 0.69 MP, rounded down, keeps it under about 8 GB. The switch still forces
+ * 2× at any size.
  */
-export const UPSCALE_MAX_PX = 800_000;
+export const UPSCALE_MAX_PX = 600_000;
 
 /** A line's height in source px: max y − min y of its quad. */
 export const lineHeight = (line: Pick<TextLine, "quad">): number => {

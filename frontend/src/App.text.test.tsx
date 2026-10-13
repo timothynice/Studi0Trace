@@ -122,8 +122,21 @@ describe("Text in the Mac app", () => {
     await waitFor(() => expect(viewport.querySelector("polygon")).toBeNull());
   });
 
+  const SVG64 = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" fill="#ffffff"/></svg>';
   async function openAndTrace(path: string, plan: TextPlan) {
     vi.mocked(platform.vectorize).mockClear();
+    // an Auto run picks Logo & icon, so a trace at 2× can follow it
+    vi.mocked(platform.vectorize).mockImplementation(async (req) => ({
+      success: true,
+      image_id: "x",
+      width: 64,
+      height: 64,
+      results: { vexel: { svg: SVG64, elapsed_ms: 500, stats: {} } },
+      parameters_used: { vexel: {} },
+      auto: req.auto
+        ? { vexel: { engine: "vexel", pick: "logo", reason: "", candidates: [{ preset: "balanced", label: "Balanced", svg: SVG64, elapsed_ms: 400, stats: {} }, { preset: "logo", label: "Logo & icon", svg: SVG64, elapsed_ms: 500, stats: {} }] } }
+        : null,
+    }));
     vi.mocked(platform.textPlan).mockResolvedValueOnce(plan);
     render(
       <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
@@ -140,10 +153,12 @@ describe("Text in the Mac app", () => {
     return screen.findByRole("switch", { name: "Trace at 2×" });
   }
 
-  it("Trace at 2× is on for a declined 20 px line: Auto asks every candidate for 2×, and the hint says why", async () => {
+  it("Trace at 2× is on for a declined 20 px line: Auto runs at 1×, its pick follows at 2×, and the hint says why", async () => {
     const toggle = await openAndTrace("/pics/tagline.png", declinedPlan("/pics/tagline.png", 20));
     expect(vi.mocked(platform.vectorize).mock.calls[0][0]).toMatchObject({ auto: true });
-    expect(vi.mocked(platform.vectorize).mock.calls[0][0].parameters).toEqual({ upsample: "always" });
+    expect(vi.mocked(platform.vectorize).mock.calls[0][0].parameters).toEqual({});
+    await waitFor(() => expect(platform.vectorize).toHaveBeenCalledTimes(2));
+    expect(vi.mocked(platform.vectorize).mock.calls[1][0]).toMatchObject({ auto: false, mask: [], parameters: { detail: 10, min_region: 16, upsample: "always" } });
     expect(toggle).toBeChecked();
     expect(screen.getByText("Small text found: tracing at twice the size (several times slower; a minute or more on a large logo)")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Decide 2× automatically" })).toBeNull();
@@ -158,7 +173,8 @@ describe("Text in the Mac app", () => {
     await waitFor(() => expect(screen.getByTestId("viewport").querySelector("svg")).not.toBeNull());
     fireEvent.click(toggle);
     await waitFor(() => expect(platform.vectorize).toHaveBeenCalledTimes(2));
-    expect(vi.mocked(platform.vectorize).mock.calls[1][0]).toMatchObject({ auto: true, parameters: { upsample: "always" } });
+    // Auto's pick, alone, at 2×: never Auto's four candidates
+    expect(vi.mocked(platform.vectorize).mock.calls[1][0]).toMatchObject({ auto: false, parameters: { detail: 10, min_region: 16, upsample: "always" } });
     await waitFor(() => expect(screen.getByRole("switch", { name: "Trace at 2×" })).toBeChecked());
     fireEvent.click(screen.getByRole("button", { name: "Decide 2× automatically" }));
     await waitFor(() => expect(screen.getByRole("switch", { name: "Trace at 2×" })).not.toBeChecked());

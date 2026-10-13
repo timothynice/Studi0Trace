@@ -1634,47 +1634,63 @@ const declined = (id: string, height: number): TextLine => ({ ...LINE, id, quad:
 const TALL: TextLine = { ...T1, id: "a-t1", quad: [[0, 0], [30, 0], [30, 60], [0, 60]] };
 const P2 = paramsKey({ detail: 6, min_region: 8, upsample: "always" });
 const at2x = (v: Record<string, unknown>) => ({ ...v, upsample: "always" });
+const LOGO = { detail: 10, min_region: 16 };
+const L = paramsKey(LOGO);
+const L2 = paramsKey(at2x(LOGO));
+/** Answers an Auto run: Balanced and Logo & icon traced, Logo & icon picked. */
+async function autoAnswer(call: Call, mask: string[]) {
+  call.resolve(
+    response(baseFor(mask), 900, {
+      auto: {
+        vexel: {
+          engine: "vexel",
+          pick: "logo",
+          reason: "",
+          candidates: [
+            { preset: "balanced", label: "Balanced", svg: baseFor(["balanced"]), elapsed_ms: 800, stats: {} },
+            { preset: "logo", label: "Logo & icon", svg: baseFor(mask), elapsed_ms: 900, stats: {} },
+          ],
+        },
+      },
+    }),
+  );
+  await flush();
+}
 
 describe("library: Trace at 2×", () => {
   beforeEach(() => vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] }));
   afterEach(() => vi.useRealTimers());
 
-  it("on Auto, a declined line under 40 px makes the first run ask every candidate for 2×, keyed apart", async () => {
+  it("on Auto with a small declined line, Auto runs at 1× and its pick alone follows at 2×: the trace the user waits for", async () => {
     const p = maskPlatform(PLAN([TALL, declined("a-d", 20)]));
     const lib = createLibrary(p.platform, CATALOG, TEXT_ON);
+    const item = () => lib.selectedItem()!;
     lib.add([ok("a")]);
     lib.generate("a");
     await flush();
-    expect(p.calls[0].req).toMatchObject({ auto: true, mask: ["a-t1"], parameters: { upsample: "always" } });
-    expect(lib.selectedItem()!.job).toMatchObject({ key: "auto2x|a-t1" });
-    expect(upscaled(lib.selectedItem()!)).toBe(true);
-    p.calls[0].resolve(
-      response(baseFor(["a-t1"]), 900, {
-        auto: {
-          vexel: {
-            engine: "vexel",
-            pick: "logo",
-            reason: "",
-            candidates: [
-              { preset: "balanced", label: "Balanced", svg: baseFor(["balanced"]), elapsed_ms: 800, stats: {} },
-              { preset: "logo", label: "Logo & icon", svg: baseFor(["a-t1"]), elapsed_ms: 900, stats: {} },
-            ],
-          },
-        },
-      }),
-    );
-    await flush();
-    const item = lib.selectedItem()!;
-    expect(item.shown).toBe("auto2x|a-t1");
-    // the candidates were traced at 2×: they are known under their params with upsample "always", the panel's values stay the pick's
-    expect(Object.keys(item.traces).sort()).toEqual(["auto2x|a-t1", `${P2}|a-t1`, `${paramsKey(at2x({ detail: 10, min_region: 16 }))}|a-t1`].sort());
-    expect(item.params).toEqual({ detail: 10, min_region: 16 });
-    // the masks after the pick are traced under the pick's params at 2× as well
-    expect(traceKeyFor(item, [])).toBe(`${paramsKey(at2x({ detail: 10, min_region: 16 }))}|`);
-    expect(p.calls[1].req).toMatchObject({ auto: false, mask: [], parameters: at2x({ detail: 10, min_region: 16 }) });
+    expect(p.calls[0].req).toMatchObject({ auto: true, mask: ["a-t1"] });
+    expect(p.calls[0].req.parameters).toEqual({});
+    expect(item().job).toMatchObject({ key: "auto|a-t1" });
+    expect(upscaled(item())).toBe(true);
+    await autoAnswer(p.calls[0], ["a-t1"]);
+    // the 1× answer is on screen, its candidates kept at 1×, while the pick follows at 2× as a user trace
+    expect(item().shown).toBe("auto|a-t1");
+    expect(Object.keys(item().traces).sort()).toEqual(["auto|a-t1", `${P}|a-t1`, `${L}|a-t1`].sort());
+    expect(item().params).toEqual(LOGO);
+    expect(p.calls).toHaveLength(2);
+    expect(p.calls[1].req).toMatchObject({ auto: false, mask: ["a-t1"] });
+    expect(p.calls[1].req.parameters).toEqual(at2x(LOGO));
+    expect(item().job).toMatchObject({ key: `${L2}|a-t1`, prefetch: false });
+    expect(currentJob(item())).toMatchObject({ key: `${L2}|a-t1` });
+    await p.answer(p.calls[1]);
+    expect(item().shown).toBe(`${L2}|a-t1`);
+    expect(traceKey(item())).toBe(`${L2}|a-t1`);
+    // then the untouched image only, at 2×, in the background
+    expect(p.calls[2].req).toMatchObject({ auto: false, mask: [], parameters: at2x(LOGO) });
+    expect(item().job).toMatchObject({ key: `${L2}|`, prefetch: true });
   });
 
-  it("a plan whose only line traced as shapes is 60 px tall traces at 1×", async () => {
+  it("a plan whose only line traced as shapes is 60 px tall traces at 1×, and no 2× trace follows Auto", async () => {
     const p = maskPlatform(PLAN([declined("a-d", 60)]));
     const lib = createLibrary(p.platform, CATALOG, TEXT_ON);
     lib.add([ok("a")]);
@@ -1684,6 +1700,9 @@ describe("library: Trace at 2×", () => {
     expect(p.calls[0].req.parameters).toEqual({});
     expect(lib.selectedItem()!.job).toMatchObject({ key: "auto|" });
     expect(upscaled(lib.selectedItem()!)).toBe(false);
+    await autoAnswer(p.calls[0], []);
+    expect(p.calls).toHaveLength(1);
+    expect(lib.selectedItem()!).toMatchObject({ shown: "auto|", job: null });
   });
 
   it("on a preset, 2× is its values with upsample \"always\"; the switch forces it off and on, and Auto returns to the decision", async () => {
@@ -1744,10 +1763,16 @@ describe("library: Trace at 2×", () => {
     expect(p.calls[0].req.parameters).toEqual({});
     expect(lib.selectedItem()!.job).toMatchObject({ key: "auto|a-t1" });
     expect(upscaled(lib.selectedItem()!)).toBe(false);
+    // no 2× trace follows Auto on its own
+    await autoAnswer(p.calls[0], ["a-t1"]);
+    expect(p.calls.filter((c) => c.req.mask.join() === "a-t1")).toHaveLength(1);
+    expect(lib.selectedItem()!.shown).toBe("auto|a-t1");
+    // switched on, the pick alone at 2×
     lib.setTextUpscale("a", "on");
-    expect(p.calls).toHaveLength(2);
-    expect(p.calls[1].req.parameters).toEqual({ upsample: "always" });
-    expect(lib.selectedItem()!.job).toMatchObject({ key: "auto2x|a-t1" });
+    const on = p.calls.at(-1)!;
+    expect(on.req).toMatchObject({ auto: false, mask: ["a-t1"] });
+    expect(on.req.parameters).toEqual(at2x(LOGO));
+    expect(lib.selectedItem()!.job).toMatchObject({ key: `${L2}|a-t1`, prefetch: false });
   });
 
   it("at 2× the background traces only the untouched image, never each all-but-one mask: a toggle traces on demand", async () => {

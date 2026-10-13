@@ -73,7 +73,7 @@ On the bench against two well-known open-source tracers, Vexel is the most faith
   </tr>
 </table>
 
-**Small text comes out as type.** Lines of text are recognised on your Mac, matched to a Google Font or one installed on it, set in that font and drawn as outlines; the Text section lets you correct the words, pick another font or leave a line to the trace. Read text with AI (Settings ▸ Text) asks OpenAI for the words and the typeface, with your own key. When the app finds small text it cannot re-set (a line under 40 px it declined, or one you switched off) in an image of at most 0.8 megapixels, it traces the image at twice its size, which keeps the thin letters a normal trace loses; Trace at 2× in the Inspect tab's Text section shows that decision and lets you turn it on or off, at any size. It costs time and memory: on three 1254–1536 px logos a trace took 5.5–6.8× as long under Auto and 3.6–5.9× on a preset (Balanced), a minute or more each, and Auto at 2× of a 1536 × 1024 logo peaked at 15 GB.
+**Small text comes out as type.** Lines of text are recognised on your Mac, matched to a Google Font or one installed on it, set in that font and drawn as outlines; the Text section lets you correct the words, pick another font or leave a line to the trace. Read text with AI (Settings ▸ Text) asks OpenAI for the words and the typeface, with your own key. When the app finds small text it cannot re-set (a line under 40 px it declined, or one you switched off) in an image of at most 0.6 megapixels, it traces the image at twice its size, which keeps the thin letters a normal trace loses; Trace at 2× in the Inspect tab's Text section shows that decision and lets you turn it on or off, at any size. Under Auto, Auto itself still runs at 1× and is shown first; its pick alone is then traced at 2×. It costs time and memory: on three 1254–1536 px logos a preset (Balanced) took 3.6–5.9× as long at 2×, a minute or more each, and peaked at 18 GB on a 1536 × 1024 logo.
 
 **Rough source? Redraw it first (optional).** A small, blurry or pixel-doubled image is the hardest thing to trace. Image ▸ Redraw with AI… shows an AI redraw against the original with a drift check, and only replaces the image when you say so. Your images stay on your Mac: nothing is uploaded unless you choose AI redraw or turn on Read text with AI, which send the image you are tracing to OpenAI with your own API key. Those two, the fonts and the update check are the only things in the app that touch the network: a matched Google Font is downloaded from Google and the update check asks GitHub for the newest version, neither with an image attached, and the AI features are off until you turn them on.
 
@@ -268,12 +268,16 @@ real logos are. Trace at 2× (`upsample: always`) costs more than the four times
 the pixels, 5.5–6.8× under Auto and 3.6–5.9× on a preset: on an M4 Max, Auto went from 11.5 s to 64 s, 17.9 s to 98 s and 36 s
 to 248 s on three 1254–1536 px logos, and Balanced alone from 9.2 s to 34 s,
 14.5 s to 65 s and 30 s to 178 s (`trace_at_2x_timing` in
-`crates/studi0trace-core/tests/api.rs`, run by hand). Its memory grows with it
-(`/usr/bin/time -l` on `examples/trace … auto [--2x]`): Auto at 1536 × 1024 peaked
-at 4.0 GB resident at 1× and 14.9 GB at 2× (21.3 GB peak footprint), and at
-2048 × 1365 at 9.7 GB and 24.8 GB (53.5 GB footprint, 12 minutes). So the app
-decides on 2× by itself only up to `UPSCALE_MAX_PX` (0.8 MP, `lib/text.ts`), where
-Auto at 2× stays under about 8 GB, and at 2× it prefetches only the untouched
+`crates/studi0trace-core/tests/api.rs`, run by hand). Its memory grows faster
+than the pixels (`/usr/bin/time -l` on `examples/trace IMAGE PRESET [--2x]`, maximum
+resident): on the 1536 × 1024 logo Balanced took 2.6 GB at 1× and 18.2 GB at 2×,
+Detailed 17.9 GB, Logo & icon 11.4 GB and Simplified 7.3 GB at 2×, and Auto's
+four candidates together 4.0 GB at 1× and 14.9 GB at 2× (21.3 GB peak footprint);
+at 2048 × 1365 Balanced took 6.6 GB and 26.2 GB (36.2 GB footprint, 7 minutes),
+Auto 9.7 GB and 24.8 GB (53.5 GB footprint, 12 minutes). So the app never runs
+Auto itself at 2× (Auto stays at 1×, and its pick alone follows at 2×), decides on
+2× by itself only up to `UPSCALE_MAX_PX` (0.6 MP, `lib/text.ts`), where the
+heaviest pick stays under about 8 GB, and at 2× prefetches only the untouched
 image, not each line's toggle. The Python pipeline is still in `engines/vexel/*.py`: it is the
 reference the Rust one was ported from, the fallback when the extension is not
 built, and the oracle `tools/diffcheck.py` compares every stage against.

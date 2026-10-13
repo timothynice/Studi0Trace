@@ -73,9 +73,11 @@ fidelity bench. Read `README.md` first — it has the run/test/API reference.
   → `vectorize(…, mask)` names the lines to paint out, `Plans::painted_for` builds (and caches) that painted PNG and
   the worker traces it (an empty mask traces the original bytes). Small text the re-setter does not compose (declined or
   switched-off lines under 40 px) makes the app trace at 2× (`upsample: always`, `smallTextPresent` in `lib/text.ts`,
-  the Trace at 2× switch) when the image is at most `UPSCALE_MAX_PX` (0.8 MP: Auto at 2× peaked at 14.9 GB on 1536 × 1024;
-  "on" forces it at any size, and at 2× only the empty mask is prefetched); the decision is each mask's (`upscaledFor`: the lines outside the mask), an Auto run at 2× is
-  keyed `auto2x|mask` and sent `{upsample: "always"}`, and a preset's or the pick's params carry it in their key; with
+  the Trace at 2× switch) when the image is at most `UPSCALE_MAX_PX` (0.6 MP: Balanced at 2× peaked at 18.2 GB resident
+  on 1536 × 1024; "on" forces it at any size, and at 2× only the empty mask is prefetched); the decision is each mask's
+  (`upscaledFor`: the lines outside the mask). Auto never runs at 2×: it runs at 1× (`auto|mask`, shown first) and
+  `finish` follows it with its pick alone at 2× as a user trace, keyed by the pick's params with `upsample: "always"`,
+  as a preset's 2× trace is; with
   `auto`, explicitly given parameters override every Auto candidate in the core and the Python API alike. Rust writes
   no group: every candidate carries its own `fit`, outline `path` and hidden `text` (`compose.rs`), and the frontend composes (`lib/textsvg.ts`
   `composeSvg(base, {plan, enabled, hiddenText})`), inserting each enabled line's path before the first traced shape
