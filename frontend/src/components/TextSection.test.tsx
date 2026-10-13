@@ -176,7 +176,7 @@ describe("TextSection", () => {
   it("says why small text stays at 1× on an image over the 2× budget, with the Mac's memory unknown (the pixel fallback)", () => {
     render(<TextSection {...props()} item={sized(2000, 1500, null)} />);
     expect(screen.getByRole("switch", { name: "Trace at 2×" })).not.toBeChecked();
-    expect(screen.getByText("Small text found, but the image is too large to trace at 2× automatically on this Mac (it would need about 36 GB); switch it on to force it")).toBeInTheDocument();
+    expect(screen.getByText("Small text found, but the image is too large to trace at 2× automatically (over 0.6 MP); switch it on to force it")).toBeInTheDocument();
   });
 
   it("weighs a 1536 × 1024 logo against the Mac's memory: at 2× by itself on 64 GB, at 1× with the reason on 16 GB", () => {

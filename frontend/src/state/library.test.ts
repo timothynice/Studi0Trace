@@ -1589,7 +1589,8 @@ describe("library: traces by the painted set", () => {
   });
 
   it("prefetches only the untouched image when the plan has more than PREFETCH_MAX_LINES matched lines", async () => {
-    const many = Array.from({ length: PREFETCH_MAX_LINES + 1 }, (_, n): TextLine => ({ ...T1, id: `a-t${n}`, quad: [[0, n * 3], [30, n * 3], [30, n * 3 + 2], [0, n * 3 + 2]], candidates: [candidate(FONT_M, `M0 ${n * 3}h10v2z`, `a-t${n}`, "2026")] }));
+    // lines of 45 px: none is small text, so every mask is traced at 1× (a small line would put its "off" mask at 2×)
+    const many = Array.from({ length: PREFETCH_MAX_LINES + 1 }, (_, n): TextLine => ({ ...T1, id: `a-t${n}`, quad: [[0, n * 50], [30, n * 50], [30, n * 50 + 45], [0, n * 50 + 45]], candidates: [candidate(FONT_M, `M0 ${n * 50}h10v45z`, `a-t${n}`, "2026")] }));
     const { calls, answer } = await tracedOnBalanced(PLAN(many));
     await answer(calls[0]);
     expect(calls[1].req.mask).toEqual([]);
@@ -1791,6 +1792,39 @@ describe("library: Trace at 2×", () => {
     expect(calls).toHaveLength(3);
     expect(calls[2].req).toMatchObject({ mask: ["a-t0", "a-t2"], parameters: at2x({ detail: 6, min_region: 8 }) });
     expect(currentJob(item())).toMatchObject({ key: `${P2}|a-t0,a-t2` });
+  });
+
+  it("an image taken off Auto while Auto ran gets no 2× follow-up: its own settings trace as usual", async () => {
+    const p = maskPlatform(PLAN([TALL, declined("a-d", 20)]));
+    const lib = createLibrary(p.platform, CATALOG, TEXT_ON);
+    lib.add([ok("a")]);
+    lib.generate("a");
+    await flush();
+    expect(p.calls[0].req).toMatchObject({ auto: true, mask: ["a-t1"] });
+    lib.pickPreset("a", PRESETS[1]);
+    await autoAnswer(p.calls[0], ["a-t1"]);
+    // Balanced's candidate is shown; nothing follows the Auto answer at 2×, and the image is not on Auto
+    expect(lib.selectedItem()!.preset).toBe(PRESETS[1].id);
+    expect(p.calls.filter((c) => c.req.mask.join() === "a-t1")).toHaveLength(1);
+    expect(userJob(lib.selectedItem()!)).toBeNull();
+  });
+
+  it("the prefetch leaves out every all-but-one mask that would trace at 2×: a small line set in its font is switched off on demand", async () => {
+    const small: TextLine = { ...T0, quad: [[0, 0], [30, 0], [30, 20], [0, 20]] };
+    const { calls, answer, item } = await tracedOnBalanced(PLAN([small, T1]));
+    // both lines set in their fonts: no small text for the trace, 1×
+    expect(calls[0].req).toMatchObject({ mask: BOTH, parameters: { detail: 6, min_region: 8 } });
+    expect(upscaled(item())).toBe(false);
+    await answer(calls[0]);
+    // the untouched image, at 2× (the small line is the trace's there)
+    expect(calls[1].req).toMatchObject({ mask: [], parameters: at2x({ detail: 6, min_region: 8 }) });
+    await answer(calls[1]);
+    // the mask that keeps the small line set (the tall one off) is 1× and prefetched; the one switching it off is not
+    expect(calls[2].req).toMatchObject({ mask: ["a-t0"], parameters: { detail: 6, min_region: 8 } });
+    await answer(calls[2]);
+    expect(calls).toHaveLength(3);
+    expect(calls.some((c) => c.req.mask.join() === "a-t1")).toBe(false);
+    expect(item().job).toBeNull();
   });
 
   describe("the automatic decision weighs the trace's predicted peak against the Mac's memory", () => {

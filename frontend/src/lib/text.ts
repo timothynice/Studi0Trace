@@ -87,13 +87,15 @@ export function smallTextPresent(plan: TextPlan | null, setInFont: Iterable<stri
 }
 
 /**
- * The Trace at 2× switch's hint: why, while it follows the decision ("auto"), else what the user chose. `tooLarge`, a
- * trace at 2×'s predicted peak in bytes (`upscalePeakBytes`) when small text was found but the image does not fit
- * (`upscaleFits`), says why the decision is 1×.
+ * The Trace at 2× switch's hint: why, while it follows the decision ("auto"), else what the user chose. `tooLarge`, set
+ * when small text was found but the image does not fit (`upscaleFits`), says why the decision is 1×: with the Mac's
+ * memory known, the trace's predicted peak (`upscalePeakBytes`); without it, the pixel fallback decided, and says so.
  */
-export function upscaleHint(mode: "auto" | "on" | "off", on: boolean, tooLarge: number | null = null): string {
+export function upscaleHint(mode: "auto" | "on" | "off", on: boolean, tooLarge: { bytes: number; memoryKnown: boolean } | null = null): string {
   if (mode === "auto" && !on && tooLarge !== null)
-    return `Small text found, but the image is too large to trace at 2× automatically on this Mac (it would need about ${Math.max(1, Math.round(tooLarge / 1e9))} GB); switch it on to force it`;
+    return tooLarge.memoryKnown
+      ? `Small text found, but the image is too large to trace at 2× automatically on this Mac (it would need about ${Math.max(1, Math.round(tooLarge.bytes / 1e9))} GB); switch it on to force it`
+      : `Small text found, but the image is too large to trace at 2× automatically (over ${UPSCALE_FALLBACK_MAX_PX / 1e6} MP); switch it on to force it`;
   if (mode === "auto") return on ? "Small text found: tracing at twice the size (several times slower; a minute or more on a large logo)" : "No small text: normal size";
   return on ? "Tracing at twice the size (several times slower; a minute or more on a large logo)" : "Normal size";
 }

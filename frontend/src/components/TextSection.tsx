@@ -141,7 +141,7 @@ function LineRow({ line, n, on, onChange, onToggle, onHover, searchFonts }: { li
 }
 
 /** Trace at 2×: on "auto" the switch shows the decision (small text the fonts do not set), flipped it is the user's, and Auto returns to the decision. */
-function UpscaleRow({ mode, on, tooLarge, onUpscale }: { mode: Upscale; on: boolean; tooLarge: number | null; onUpscale: (mode: Upscale) => void }) {
+function UpscaleRow({ mode, on, tooLarge, onUpscale }: { mode: Upscale; on: boolean; tooLarge: { bytes: number; memoryKnown: boolean } | null; onUpscale: (mode: Upscale) => void }) {
   return (
     <div className="space-y-0.5 pt-1">
       <div className="flex items-center justify-between gap-2">
@@ -222,7 +222,7 @@ export function TextSection({ item, settingOn, onChange, onToggle, onHover, onCa
           mode={t.upscale}
           on={upscaled(item)}
           // small text the decision leaves at 1× only because the image is too large for this Mac: the hint says so
-          tooLarge={!fitsAt2x(item) && smallTextPresent(t.plan, maskOf(t)) ? upscalePeakBytes(item.image.width, item.image.height) : null}
+          tooLarge={!fitsAt2x(item) && smallTextPresent(t.plan, maskOf(t)) ? { bytes: upscalePeakBytes(item.image.width, item.image.height), memoryKnown: !!item.memoryBytes } : null}
           onUpscale={onUpscale}
         />
       )}

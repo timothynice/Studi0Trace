@@ -265,9 +265,9 @@ The pipeline lives in `backend/vexel-rs/` and is built as an extension module.
 It averages **0.21 s an image** against the Python implementation's 2.1 s —
 **10.4× over the corpus**, and 15.8× on the logo class, where the two 768 px
 real logos are. Trace at 2× (`upsample: always`) costs more than the four times
-the pixels, 5.5–6.8× under Auto and 3.6–5.9× on a preset: on an M4 Max, Auto went from 11.5 s to 64 s, 17.9 s to 98 s and 36 s
-to 248 s on three 1254–1536 px logos, and Balanced alone from 9.2 s to 34 s,
-14.5 s to 65 s and 30 s to 178 s (`trace_at_2x_timing` in
+the pixels: on an M4 Max the pick at 2× (Balanced) took 3.6–5.9× a 1× trace on three
+1254–1536 px logos, 9.2 s to 34 s, 14.5 s to 65 s and 30 s to 178 s, and under Auto it
+comes after the 1× Auto run, which is shown first (`trace_at_2x_timing` in
 `crates/studi0trace-core/tests/api.rs`, run by hand). Its memory grows faster
 than the pixels (`/usr/bin/time -l` on `examples/trace IMAGE PRESET [--2x]`, maximum
 resident): on the 1536 × 1024 logo Balanced took 2.6 GB at 1× and 18.2 GB at 2×,
@@ -282,8 +282,8 @@ most half the Mac's physical memory (`upscaleFits` in `lib/text.ts`; the
 `system_memory` command reads `hw.memsize`): a 1.57 MP logo needs about 19 GB, so
 it is automatic on a 64 GB Mac and not on 16 or 32 GB. When the memory is not known
 (the browser harness, or the read failed) the limit is `UPSCALE_FALLBACK_MAX_PX`
-(0.6 MP, the heaviest pick under about 8 GB). At 2× the app prefetches only the
-untouched image, not each line's toggle. The Python pipeline is still in `engines/vexel/*.py`: it is the
+(0.6 MP, the heaviest pick under about 8 GB). Only the untouched image is
+prefetched at 2×; a line's toggle whose trace would be at 2× is traced when asked. The Python pipeline is still in `engines/vexel/*.py`: it is the
 reference the Rust one was ported from, the fallback when the extension is not
 built, and the oracle `tools/diffcheck.py` compares every stage against.
 

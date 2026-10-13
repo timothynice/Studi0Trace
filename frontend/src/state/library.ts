@@ -110,7 +110,7 @@ export function upscaledFor(text: TextState, mask: string[], fits: boolean): boo
 }
 
 /** Whether the trace the controls and the switches ask for now is traced at 2×: what the Trace at 2× switch shows. */
-export const upscaled = (item: Pick<ImageItem, "text"> & Partial<Pick<ImageItem, "image" | "memoryBytes">>): boolean => upscaledFor(textOf(item), maskOf(textOf(item)), fitsAt2x(item));
+export const upscaled = (item: Pick<ImageItem, "text" | "image" | "memoryBytes">): boolean => upscaledFor(textOf(item), maskOf(textOf(item)), fitsAt2x(item));
 
 /** `params` as a trace at 2× is traced with: `upsample: "always"` laid over them. */
 export const at2x = (params: ParamValues, on: boolean): ParamValues => (on ? { ...params, upsample: "always" } : params);
@@ -227,12 +227,13 @@ export interface ExportMark {
 }
 
 /** The key of the trace the controls and the switches ask for now. */
-export function traceKey(item: Pick<ImageItem, "preset" | "params" | "text"> & Partial<Pick<ImageItem, "auto">>): string {
+/** `item` carries what the 2× decision reads (`image`, `memoryBytes`), so a caller cannot leave it out and get a 1×-or-2× key by default. */
+export function traceKey(item: Pick<ImageItem, "preset" | "params" | "text" | "image" | "memoryBytes"> & Partial<Pick<ImageItem, "auto">>): string {
   return traceKeyFor(item, maskOf(textOf(item)));
 }
 
 /** The error to show: a failure belongs to the settings that failed, and says nothing about any others. */
-export function errorOf(item: Pick<ImageItem, "preset" | "params" | "text" | "error" | "errorKey"> & Partial<Pick<ImageItem, "auto">>): ApiError | null {
+export function errorOf(item: Pick<ImageItem, "preset" | "params" | "text" | "image" | "memoryBytes" | "error" | "errorKey"> & Partial<Pick<ImageItem, "auto">>): ApiError | null {
   return item.error && item.errorKey === traceKey(item) ? item.error : null;
 }
 
@@ -435,8 +436,9 @@ export function createLibrary(platform: LibraryPlatform, catalog: Catalog, initi
 
   /**
    * After a user trace: the untouched image, then each matched line's "all but this one", in plan order, that are not
-   * cached; the untouched image only when the plan has more than `PREFETCH_MAX_LINES` matched lines, or when the image
-   * is traced at 2× (several times the cost each: a toggle traces its mask on demand instead).
+   * cached; the untouched image only when the plan has more than `PREFETCH_MAX_LINES` matched lines. Of the "all but
+   * one" masks, those that would trace at 2× (`upscaledFor`, each mask's own decision) are left out: several times the
+   * cost each, a toggle traces its mask on demand instead. The untouched image is prefetched at either size.
    */
   const schedulePrefetch = (id: string) => {
     const item = find(id);
@@ -444,12 +446,14 @@ export function createLibrary(platform: LibraryPlatform, catalog: Catalog, initi
     if (!item || !plan) return;
     const full = fullMask(plan);
     if (!full.length) return;
-    const masks = [[], ...(full.length <= PREFETCH_MAX_LINES && !upscaled(item) ? matchedLines(plan).map((l) => full.filter((m) => m !== l.id)) : [])];
+    const fits = fitsAt2x(item);
+    const allButOne = full.length <= PREFETCH_MAX_LINES ? matchedLines(plan).map((l) => full.filter((m) => m !== l.id)) : [];
+    const masks = [[], ...allButOne.filter((mask) => !upscaledFor(textOf(item), mask, fits))];
     for (const mask of masks) {
       const key = traceKeyFor(item, mask);
       // an Auto image whose pick is not known yet: its masks are Auto runs, which are never traced ahead
       if (isAutoKey(key) || item.traces[key] || item.job?.key === key || queue.some((q) => q.id === id && q.key === key)) continue;
-      queue.push({ id, key, mask, params: at2x(item.params, upscaledFor(textOf(item), mask, fitsAt2x(item))) });
+      queue.push({ id, key, mask, params: at2x(item.params, upscaledFor(textOf(item), mask, fits)) });
     }
   };
 
@@ -556,8 +560,9 @@ export function createLibrary(platform: LibraryPlatform, catalog: Catalog, initi
     // the answer is always kept; it takes the screen only if the settings still are the ones it traced, and settings
     // that moved on while it ran show their own trace if one is known (a candidate, say), else stay as they are
     const want = traceKey({ ...item, params, auto: auto ?? item.auto });
-    // an Auto run whose image is traced at 2× is shown while the pick's trace at 2× follows it
-    const followUp = !!auto && !job.prefetch && !traces[want] && upscaled(item);
+    // an Auto run whose image is traced at 2× is shown while the pick's trace at 2× follows it; an image taken off
+    // Auto while the run went (a preset picked, a control moved) has its own settings, traced as usual, not here
+    const followUp = !!auto && item.preset === "auto" && !job.prefetch && !traces[want] && upscaled(item);
     const now = traces[want] ? want : followUp ? job.key : item.shown;
     // a trace just made counts as just seen: it is not the first to go
     touch(id, job.key);

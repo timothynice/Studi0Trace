@@ -75,9 +75,9 @@ fidelity bench. Read `README.md` first — it has the run/test/API reference.
   switched-off lines under 40 px) makes the app trace at 2× (`upsample: always`, `smallTextPresent` in `lib/text.ts`,
   the Trace at 2× switch) when its predicted peak (`upscaleFits`: 3000 B per 2× pixel, from Balanced's 18.2 GB resident on 1536 × 1024) is at
   most half the Mac's memory (`system_memory`; `UPSCALE_FALLBACK_MAX_PX`, 0.6 MP, when unknown; "on" forces it at any
-  size, and at 2× only the empty mask is prefetched); the decision is each mask's
+  size; only the empty mask is prefetched at 2×, masks that would trace at 2× are traced when asked); the decision is each mask's
   (`upscaledFor`: the lines outside the mask). Auto never runs at 2×: it runs at 1× (`auto|mask`, shown first) and
-  `finish` follows it with its pick alone at 2× as a user trace, keyed by the pick's params with `upsample: "always"`,
+  `finish` follows it (while the image is still on Auto) with its pick alone at 2× as a user trace, keyed by the pick's params with `upsample: "always"`,
   as a preset's 2× trace is; with
   `auto`, explicitly given parameters override every Auto candidate in the core and the Python API alike. Rust writes
   no group: every candidate carries its own `fit`, outline `path` and hidden `text` (`compose.rs`), and the frontend composes (`lib/textsvg.ts`
