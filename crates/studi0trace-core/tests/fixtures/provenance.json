@@ -1,7 +1,7 @@
 {
  "exporters": {
   "api": {
-   "commit": "41888daa1a36e31769612bcf56a79f77c74a3026",
+   "commit": "1526fd444835584e1f294a32be1038a6f70c99bf",
    "environment": {
     "Pillow": "12.3.0",
     "machine": "arm64",
@@ -13,7 +13,7 @@
     "system": "Darwin",
     "vexel_backend": "rust"
    },
-   "sources_differ_from_commit": true
+   "sources_differ_from_commit": false
   },
   "auto": {
    "commit": "930737dede588ac9550fe0c7181ddc73b0a15d1c",
@@ -166,7 +166,7 @@
    "sources_differ_from_commit": false
   },
   "schema": {
-   "commit": "41888daa1a36e31769612bcf56a79f77c74a3026",
+   "commit": "1526fd444835584e1f294a32be1038a6f70c99bf",
    "environment": {
     "Pillow": "12.3.0",
     "machine": "arm64",
@@ -178,7 +178,7 @@
     "system": "Darwin",
     "vexel_backend": "rust"
    },
-   "sources_differ_from_commit": true
+   "sources_differ_from_commit": false
   },
   "scorecard": {
    "commit": "930737dede588ac9550fe0c7181ddc73b0a15d1c",
