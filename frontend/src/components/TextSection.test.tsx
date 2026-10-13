@@ -156,17 +156,24 @@ describe("TextSection", () => {
     const toggle = screen.getByRole("switch", { name: "Trace at 2×" });
     expect(toggle).toBeChecked();
     expect(screen.getByText("Small text found: tracing at twice the size (several times slower; a minute or more on a large logo)")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Auto" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Decide 2× automatically" })).toBeNull();
     fireEvent.click(toggle);
     expect(p.onUpscale).toHaveBeenCalledWith("off");
     rerender(<TextSection {...p} item={item(plan([line({ enabled: false })]), null, null, "off")} />);
     expect(screen.getByRole("switch", { name: "Trace at 2×" })).not.toBeChecked();
     expect(screen.getByText("Normal size")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Auto" }));
+    fireEvent.click(screen.getByRole("button", { name: "Decide 2× automatically" }));
     expect(p.onUpscale).toHaveBeenCalledWith("auto");
     // set in its font, the line is not the trace's: no small text
     rerender(<TextSection {...p} item={item(plan([line()]))} />);
     expect(screen.getByRole("switch", { name: "Trace at 2×" })).not.toBeChecked();
     expect(screen.getByText("No small text: normal size")).toBeInTheDocument();
+  });
+
+  it("says why small text stays at 1× on an image over the 2× budget", () => {
+    const big = { ...item(plan([line({ enabled: false })])), image: { id: "a", name: "a.png", path: null, width: 2000, height: 1500, format: "PNG", previewUrl: "" } } as ImageItem;
+    render(<TextSection {...props()} item={big} />);
+    expect(screen.getByRole("switch", { name: "Trace at 2×" })).not.toBeChecked();
+    expect(screen.getByText("Small text found, but the image is too large to trace at 2× automatically (about 3.0 MP); switch it on to force it")).toBeInTheDocument();
   });
 });

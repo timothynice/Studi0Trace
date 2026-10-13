@@ -3,7 +3,7 @@
  * job running for it. Framework-free: React reads it through `useLibrary`, tests call it directly.
  */
 import { ApiError, type AutoResult, type EngineDescription, type ParamValues, type Preset, type VectorizeResponse } from "@/lib/api";
-import { smallTextPresent } from "@/lib/text";
+import { smallTextPresent, UPSCALE_MAX_PX } from "@/lib/text";
 import { composeSvg } from "@/lib/textsvg";
 import { normalizeValues, paramsKey, specsFor } from "@/lib/schema";
 import type { Drift, FontRef, OpenedImage, OpenFailure, OpenOutcome, Phase, Platform, RedrawPhase, RedrawResult, Roughness, Settings, TextLine, TextLineChange, TextPhase, TextPlan } from "@/platform/types";
@@ -94,18 +94,21 @@ export const maskOf = (text: TextState): string[] => matchedLines(text.plan).fil
 /** Every matched line, sorted: the mask of the first trace. */
 export const fullMask = (plan: TextPlan): string[] => matchedLines(plan).map((l) => l.id).sort();
 
+/** An image's pixels, what the automatic 2× decision is bounded by (`UPSCALE_MAX_PX`); 0 when it is not known. */
+export const pixelsOf = (item: Partial<Pick<ImageItem, "image">>): number => (item.image ? item.image.width * item.image.height : 0);
+
 /**
  * Whether a trace with `mask` painted out is traced at 2× (the engine's `upsample: "always"`): always when the switch
  * is on, never when it is off, and on "auto" when small text is left for that trace to draw as shapes, the lines
- * outside its mask (`smallTextPresent`). Each mask has its own answer, so a mask traced ahead is keyed as a switch
- * will ask for it.
+ * outside its mask (`smallTextPresent`), and the image (`pixels`) is within `UPSCALE_MAX_PX`. Each mask has its own
+ * answer, so a mask traced ahead is keyed as a switch will ask for it.
  */
-export function upscaledFor(text: TextState, mask: string[]): boolean {
-  return text.upscale === "auto" ? smallTextPresent(text.plan, mask) : text.upscale === "on";
+export function upscaledFor(text: TextState, mask: string[], pixels: number): boolean {
+  return text.upscale === "auto" ? pixels <= UPSCALE_MAX_PX && smallTextPresent(text.plan, mask) : text.upscale === "on";
 }
 
 /** Whether the trace the controls and the switches ask for now is traced at 2×: what the Trace at 2× switch shows. */
-export const upscaled = (item: Pick<ImageItem, "text">): boolean => upscaledFor(textOf(item), maskOf(textOf(item)));
+export const upscaled = (item: Pick<ImageItem, "text"> & Partial<Pick<ImageItem, "image">>): boolean => upscaledFor(textOf(item), maskOf(textOf(item)), pixelsOf(item));
 
 /** `params` as a trace at 2× is traced with: `upsample: "always"` laid over them. */
 export const at2x = (params: ParamValues, on: boolean): ParamValues => (on ? { ...params, upsample: "always" } : params);
@@ -116,9 +119,9 @@ export const at2x = (params: ParamValues, on: boolean): ParamValues => (on ? { .
  * (an Auto run leaves them in `item.params`), as Auto's candidates are, and is an Auto run of its own only before that.
  * A trace at 2× (`upscaledFor`) is keyed by the params it is traced with, `upsample: "always"` among them.
  */
-export function traceKeyFor(item: Pick<ImageItem, "preset" | "params"> & Partial<Pick<ImageItem, "auto" | "text">>, mask: string[]): string {
+export function traceKeyFor(item: Pick<ImageItem, "preset" | "params"> & Partial<Pick<ImageItem, "auto" | "text" | "image">>, mask: string[]): string {
   const m = mask.join(",");
-  const up = upscaledFor(textOf(item), mask);
+  const up = upscaledFor(textOf(item), mask, pixelsOf(item));
   if (item.preset !== "auto") return `${paramsKey(at2x(item.params, up))}|${m}`;
   const plan = item.text?.plan ?? null;
   const full = plan ? fullMask(plan).join(",") : "";
@@ -412,7 +415,8 @@ export function createLibrary(platform: LibraryPlatform, catalog: Catalog, initi
 
   /**
    * After a user trace: the untouched image, then each matched line's "all but this one", in plan order, that are not
-   * cached; the untouched image only when the plan has more than `PREFETCH_MAX_LINES` matched lines.
+   * cached; the untouched image only when the plan has more than `PREFETCH_MAX_LINES` matched lines, or when the image
+   * is traced at 2× (several times the cost each: a toggle traces its mask on demand instead).
    */
   const schedulePrefetch = (id: string) => {
     const item = find(id);
@@ -420,12 +424,12 @@ export function createLibrary(platform: LibraryPlatform, catalog: Catalog, initi
     if (!item || !plan) return;
     const full = fullMask(plan);
     if (!full.length) return;
-    const masks = [[], ...(full.length <= PREFETCH_MAX_LINES ? matchedLines(plan).map((l) => full.filter((m) => m !== l.id)) : [])];
+    const masks = [[], ...(full.length <= PREFETCH_MAX_LINES && !upscaled(item) ? matchedLines(plan).map((l) => full.filter((m) => m !== l.id)) : [])];
     for (const mask of masks) {
       const key = traceKeyFor(item, mask);
       // an Auto image whose pick is not known yet: its masks are Auto runs, which are never traced ahead
       if (isAutoKey(key) || item.traces[key] || item.job?.key === key || queue.some((q) => q.id === id && q.key === key)) continue;
-      queue.push({ id, key, mask, params: at2x(item.params, upscaledFor(textOf(item), mask)) });
+      queue.push({ id, key, mask, params: at2x(item.params, upscaledFor(textOf(item), mask, pixelsOf(item))) });
     }
   };
 
@@ -671,7 +675,7 @@ export function createLibrary(platform: LibraryPlatform, catalog: Catalog, initi
     }
     abortJob(item);
     const mask = maskOf(textOf(item));
-    const up = upscaledFor(textOf(item), mask);
+    const up = upscaledFor(textOf(item), mask, pixelsOf(item));
     // an Auto run is sent no values of its own: at 2×, `upsample` alone, which the core lays over every candidate
     const auto = isAutoKey(key);
     launch(id, { id: newJobId(), key, startedAt: Date.now(), phase: "queued", mask, prefetch: false }, at2x(auto ? {} : item.params, up), auto);

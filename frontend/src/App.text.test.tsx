@@ -142,15 +142,17 @@ describe("Text in the Mac app", () => {
 
   it("Trace at 2× is on for a declined 20 px line: Auto asks every candidate for 2×, and the hint says why", async () => {
     const toggle = await openAndTrace("/pics/tagline.png", declinedPlan("/pics/tagline.png", 20));
-    expect(vi.mocked(platform.vectorize).mock.calls[0][0]).toMatchObject({ auto: true, parameters: { upsample: "always" } });
+    expect(vi.mocked(platform.vectorize).mock.calls[0][0]).toMatchObject({ auto: true });
+    expect(vi.mocked(platform.vectorize).mock.calls[0][0].parameters).toEqual({ upsample: "always" });
     expect(toggle).toBeChecked();
     expect(screen.getByText("Small text found: tracing at twice the size (several times slower; a minute or more on a large logo)")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Auto" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Decide 2× automatically" })).toBeNull();
   });
 
   it("Trace at 2× is off for a 60 px line; switched on, it traces again at 2×, and Auto goes back to the decision", async () => {
     const toggle = await openAndTrace("/pics/wordmark.png", declinedPlan("/pics/wordmark.png", 60));
-    expect(vi.mocked(platform.vectorize).mock.calls[0][0]).toMatchObject({ auto: true, parameters: {} });
+    expect(vi.mocked(platform.vectorize).mock.calls[0][0]).toMatchObject({ auto: true });
+    expect(vi.mocked(platform.vectorize).mock.calls[0][0].parameters).toEqual({});
     expect(toggle).not.toBeChecked();
     expect(screen.getByText("No small text: normal size")).toBeInTheDocument();
     await waitFor(() => expect(screen.getByTestId("viewport").querySelector("svg")).not.toBeNull());
@@ -158,7 +160,7 @@ describe("Text in the Mac app", () => {
     await waitFor(() => expect(platform.vectorize).toHaveBeenCalledTimes(2));
     expect(vi.mocked(platform.vectorize).mock.calls[1][0]).toMatchObject({ auto: true, parameters: { upsample: "always" } });
     await waitFor(() => expect(screen.getByRole("switch", { name: "Trace at 2×" })).toBeChecked());
-    fireEvent.click(screen.getByRole("button", { name: "Auto" }));
+    fireEvent.click(screen.getByRole("button", { name: "Decide 2× automatically" }));
     await waitFor(() => expect(screen.getByRole("switch", { name: "Trace at 2×" })).not.toBeChecked());
     expect(screen.getByText("No small text: normal size")).toBeInTheDocument();
     expect(platform.vectorize).toHaveBeenCalledTimes(2);

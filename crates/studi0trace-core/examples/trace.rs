@@ -1,11 +1,12 @@
 //! Trace an image with the core, as the app would, and write the SVG to stdout.
 //!
-//!     cargo run -p studi0trace-core --release --example trace -- IMAGE [PRESET|auto] > out.svg
+//!     cargo run -p studi0trace-core --release --example trace -- IMAGE [PRESET|auto] [--2x] > out.svg
 //!
 //! `PRESET` is the id of a preset (`balanced`, `logo`, `detailed`, `dense`, `flat`, `cutfile`, as
 //! `GET /presets` lists them); its parameters go through [`Core::vectorize`] like the UI's do.
 //! `auto` (the default) traces with every candidate, scores them, and keeps the cleanest of the
-//! most faithful; what it chose and why goes to stderr. Exits 2 for a call it cannot read, 1 for
+//! most faithful; what it chose and why goes to stderr. `--2x` traces at twice the size (`upsample:
+//! "always"`, laid over the preset, or over every Auto candidate, as the app's Trace at 2× does). Exits 2 for a call it cannot read, 1 for
 //! a request the core refused or a trace that failed.
 use std::io::Write;
 use std::process::exit;
@@ -16,12 +17,14 @@ use studi0trace_core::presets;
 
 fn usage() -> ! {
     let ids: Vec<String> = presets::all().into_iter().map(|p| p.id).collect();
-    eprintln!("usage: trace IMAGE [PRESET|auto] > out.svg\n  PRESET: {} (default: auto)", ids.join(", "));
+    eprintln!("usage: trace IMAGE [PRESET|auto] [--2x] > out.svg\n  PRESET: {} (default: auto)", ids.join(", "));
     exit(2);
 }
 
 fn main() {
-    let args: Vec<String> = std::env::args().skip(1).collect();
+    let mut args: Vec<String> = std::env::args().skip(1).collect();
+    let twice = args.iter().any(|a| a == "--2x");
+    args.retain(|a| a != "--2x");
     let (path, mode) = match args.as_slice() {
         [path] => (path.as_str(), "auto"),
         [path, mode] => (path.as_str(), mode.as_str()),
@@ -29,7 +32,10 @@ fn main() {
     };
     let Some(preset) = presets::by_id(mode) else { usage() };
     let auto = preset.kind == "auto";
-    let parameters = if auto { json!({}) } else { Value::Object(preset.params) };
+    let mut parameters = if auto { json!({}) } else { Value::Object(preset.params) };
+    if twice {
+        parameters["upsample"] = json!("always");
+    }
 
     let bytes = std::fs::read(path).unwrap_or_else(|e| {
         eprintln!("trace: cannot read {path}: {e}");

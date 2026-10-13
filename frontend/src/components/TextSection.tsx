@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 
-import { declineText, fitPercent, fontLabel, TEXT_PHASE_TEXT, textErrorText, upscaleHint } from "@/lib/text";
+import { declineText, fitPercent, fontLabel, smallTextPresent, TEXT_PHASE_TEXT, textErrorText, UPSCALE_MAX_PX, upscaleHint } from "@/lib/text";
 import type { FontRef, TextLine, TextLineChange } from "@/platform/types";
-import { shownAnswer, textOf, upscaled, type ImageItem, type Upscale } from "@/state/library";
+import { maskOf, pixelsOf, shownAnswer, textOf, upscaled, type ImageItem, type Upscale } from "@/state/library";
 import { Switch } from "./Switch";
 
 export interface TextSectionProps {
@@ -141,21 +141,21 @@ function LineRow({ line, n, on, onChange, onToggle, onHover, searchFonts }: { li
 }
 
 /** Trace at 2×: on "auto" the switch shows the decision (small text the fonts do not set), flipped it is the user's, and Auto returns to the decision. */
-function UpscaleRow({ mode, on, onUpscale }: { mode: Upscale; on: boolean; onUpscale: (mode: Upscale) => void }) {
+function UpscaleRow({ mode, on, tooLarge, onUpscale }: { mode: Upscale; on: boolean; tooLarge: number | null; onUpscale: (mode: Upscale) => void }) {
   return (
     <div className="space-y-0.5 pt-1">
       <div className="flex items-center justify-between gap-2">
         <span className="text-[12px] text-foreground">Trace at 2×</span>
         <div className="flex items-center gap-1.5">
           {mode !== "auto" && (
-            <button type="button" className="mac-ghost h-6 px-1.5 text-[11px] text-muted-foreground" onClick={() => onUpscale("auto")}>
+            <button type="button" aria-label="Decide 2× automatically" title="Trace at 2×: back to automatic" className="mac-ghost h-6 px-1.5 text-[11px] text-muted-foreground" onClick={() => onUpscale("auto")}>
               Auto
             </button>
           )}
           <Switch aria-label="Trace at 2×" checked={on} onCheckedChange={(v) => onUpscale(v ? "on" : "off")} />
         </div>
       </div>
-      <p className="text-[11px] leading-snug text-muted-foreground">{upscaleHint(mode, on)}</p>
+      <p className="text-[11px] leading-snug text-muted-foreground">{upscaleHint(mode, on, tooLarge)}</p>
     </div>
   );
 }
@@ -217,7 +217,15 @@ export function TextSection({ item, settingOn, onChange, onToggle, onHover, onCa
           ))}
         </div>
       )}
-      {t.plan && count > 0 && <UpscaleRow mode={t.upscale} on={upscaled(item)} onUpscale={onUpscale} />}
+      {t.plan && count > 0 && (
+        <UpscaleRow
+          mode={t.upscale}
+          on={upscaled(item)}
+          // small text the decision leaves at 1× only because of the image's size: the hint says so
+          tooLarge={pixelsOf(item) > UPSCALE_MAX_PX && smallTextPresent(t.plan, maskOf(t)) ? pixelsOf(item) : null}
+          onUpscale={onUpscale}
+        />
+      )}
     </div>
   );
 }

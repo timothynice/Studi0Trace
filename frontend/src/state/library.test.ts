@@ -5,7 +5,8 @@ import { paramsKey } from "@/lib/schema";
 import type { Drift, OpenOutcome, Phase, Platform, RedrawPhase, RedrawResult, TextLine, TextLineChange, TextPlan, TraceRequest } from "@/platform/types";
 import { DEFAULT_SETTINGS } from "@/platform/types";
 import { composeSvg } from "@/lib/textsvg";
-import { createLibrary, currentJob, DEBOUNCE_MS, errorOf, fullMask, maskOf, MASKED_TRACES_MAX, PREFETCH_MAX_LINES, PREFETCH_SETTLE_MS, needsUpdate, NO_REDRAW, shownAnswer, textOf, traceKey, traceKeyFor, unexportedCount, upscaled, userJob, type Catalog, type LibraryPlatform } from "./library";
+import { UPSCALE_MAX_PX } from "@/lib/text";
+import { createLibrary, pixelsOf, currentJob, DEBOUNCE_MS, errorOf, fullMask, maskOf, MASKED_TRACES_MAX, PREFETCH_MAX_LINES, PREFETCH_SETTLE_MS, needsUpdate, NO_REDRAW, shownAnswer, textOf, traceKey, traceKeyFor, unexportedCount, upscaled, userJob, type Catalog, type LibraryPlatform } from "./library";
 
 const ENGINE: EngineDescription = {
   id: "vexel",
@@ -1679,7 +1680,8 @@ describe("library: Trace at 2×", () => {
     lib.add([ok("a")]);
     lib.generate("a");
     await flush();
-    expect(p.calls[0].req).toMatchObject({ auto: true, mask: [], parameters: {} });
+    expect(p.calls[0].req).toMatchObject({ auto: true, mask: [] });
+    expect(p.calls[0].req.parameters).toEqual({});
     expect(lib.selectedItem()!.job).toMatchObject({ key: "auto|" });
     expect(upscaled(lib.selectedItem()!)).toBe(false);
   });
@@ -1729,5 +1731,38 @@ describe("library: Trace at 2×", () => {
     expect(currentJob(item())).toMatchObject({ key: `${P2}|` });
     await answer(calls[1]);
     expect(item().shown).toBe(`${P2}|`);
+  });
+
+  it("an image over UPSCALE_MAX_PX stays at 1× on its own whatever small text it has; the switch on still forces 2×", async () => {
+    const p = maskPlatform(PLAN([TALL, declined("a-d", 20)]));
+    const lib = createLibrary(p.platform, CATALOG, TEXT_ON);
+    lib.add([{ ok: { ...image("a"), width: 2000, height: 1500 } }]);
+    expect(pixelsOf(lib.selectedItem()!)).toBeGreaterThan(UPSCALE_MAX_PX);
+    lib.generate("a");
+    await flush();
+    expect(p.calls[0].req).toMatchObject({ auto: true, mask: ["a-t1"] });
+    expect(p.calls[0].req.parameters).toEqual({});
+    expect(lib.selectedItem()!.job).toMatchObject({ key: "auto|a-t1" });
+    expect(upscaled(lib.selectedItem()!)).toBe(false);
+    lib.setTextUpscale("a", "on");
+    expect(p.calls).toHaveLength(2);
+    expect(p.calls[1].req.parameters).toEqual({ upsample: "always" });
+    expect(lib.selectedItem()!.job).toMatchObject({ key: "auto2x|a-t1" });
+  });
+
+  it("at 2× the background traces only the untouched image, never each all-but-one mask: a toggle traces on demand", async () => {
+    const tall = (n: number): TextLine => ({ ...T1, id: `a-t${n}`, quad: [[0, n * 50], [30, n * 50], [30, n * 50 + 45], [0, n * 50 + 45]], candidates: [candidate(FONT_M, `M0 ${n * 50}h10v45z`, `a-t${n}`, "2026")] });
+    const { calls, answer, item, lib } = await tracedOnBalanced(PLAN([tall(0), tall(1), tall(2), declined("a-d", 20)]));
+    expect(calls[0].req.parameters).toEqual(at2x({ detail: 6, min_region: 8 }));
+    await answer(calls[0]);
+    expect(calls).toHaveLength(2);
+    expect(calls[1].req).toMatchObject({ mask: [], parameters: at2x({ detail: 6, min_region: 8 }) });
+    await answer(calls[1]);
+    expect(calls).toHaveLength(2);
+    expect(item().job).toBeNull();
+    lib.toggleTextLine("a", "a-t1", false);
+    expect(calls).toHaveLength(3);
+    expect(calls[2].req).toMatchObject({ mask: ["a-t0", "a-t2"], parameters: at2x({ detail: 6, min_region: 8 }) });
+    expect(currentJob(item())).toMatchObject({ key: `${P2}|a-t0,a-t2` });
   });
 });
