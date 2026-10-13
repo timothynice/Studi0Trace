@@ -145,7 +145,7 @@ Build it:
 ```bash
 cd apps/desktop && npm run build
 # target/release/bundle/macos/Studi0Trace.app
-# target/release/bundle/dmg/Studi0Trace_0.3.1_aarch64.dmg
+# target/release/bundle/dmg/Studi0Trace_0.4.0_aarch64.dmg
 npm run smoke                                          # opens a sample with the built app, as Finder does, and checks it traced
 ```
 
